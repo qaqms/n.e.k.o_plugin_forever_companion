@@ -1,0 +1,185 @@
+// 面板共享类型：宿主 context 快照、设置表单、以及各模块间传递的回调签名
+
+export type TFunc = (key: string, opts?: { defaultValue?: string }) => string
+
+export type Status = {
+  enabled?: boolean
+  phase?: string
+  phase_label?: string
+  tone?: string
+  cycle_day?: number
+  day_ratio?: number
+  days_until_next_period?: number
+  error?: string
+}
+
+export type Mood = {
+  active?: boolean
+  system_enabled?: boolean
+  action?: string
+  action_label?: string
+  reason?: string
+  expires_at?: number | null
+  affect?: { valence: number; arousal: number; arousal_baseline?: number }
+}
+
+export type Settings = {
+  enabled?: boolean
+  auto_derive?: boolean
+  cycle_length?: number
+  period_length?: number
+  ovulation_day?: number
+  ovulation_window?: number
+  inject_mode?: string
+  inject_interval_n?: number
+  phase_openers?: boolean
+  timezone?: string
+  mood_enabled?: boolean
+  default_action_minutes?: number
+  emotion_sense_enabled?: boolean
+  tone_check_rate?: number
+  tone_phase_sensitivity_enabled?: boolean
+  tone_phase_sensitivity?: number
+  tone_slot?: string
+  fragments_enabled?: boolean
+  fragments_slot?: string
+  review_enabled?: boolean
+  review_slot?: string
+  review_turns_threshold?: number
+  review_days_threshold?: number
+  debug_mode?: boolean
+}
+
+// 时光日记时间线条目：source=self 为她手写的（mood/entry），source=auto 为自动碎片
+//（kind/quote/note）；旧数据（0.6.x）缺 source 按 self 处理
+export type DiaryItem = {
+  ts?: string
+  source?: string
+  kind?: string
+  mood?: string
+  entry?: string
+  quote?: string
+  note?: string
+}
+
+// 个人日记页眉统计（journal_index 用）；entries 仅 journal_current / get_journal 返回
+export type JournalPageHeader = {
+  page_no?: number
+  started_at?: string
+  last_ts?: string
+  entry_count?: number
+  mood_avg?: number | null
+  legacy?: boolean
+}
+
+// 个人日记页内的单段续写记录
+export type JournalEntry = { ts?: string; text?: string; affect?: number }
+
+export type JournalPage = JournalPageHeader & { entries?: JournalEntry[] }
+
+export type CalCell = {
+  day?: number
+  in_month?: boolean
+  phase?: string
+  phase_label?: string
+  is_tide?: boolean
+  cycle_day?: number
+  is_today?: boolean
+  is_future?: boolean
+}
+
+export type CalMonth = { year?: number; month?: number; label?: string; cells?: CalCell[] }
+
+export type Calendar = { months?: CalMonth[]; error?: string }
+
+export type LanlanItem = {
+  name?: string
+  enabled?: boolean
+  phase?: string
+  mood_active?: boolean
+  mood_action?: string
+  orphan?: boolean
+}
+
+// 语气分析模型槽位下拉项：value 为槽位 id（"" = 宿主默认情感模型槽），model 为该槽当前模型名（空串 = 未知）
+export type ToneSlotOption = { value?: string; model?: string }
+
+// 面板外观轻量标记（进 5s 轮询）：图片本体走 get_panel_background 按需拉取
+export type PanelBgMeta = { set?: boolean; dim?: number }
+
+// 我的日记：已成文的一篇评价（get_review 返回，时间倒序）
+export type ReviewEntry = {
+  ts?: string
+  turns?: number
+  span?: string
+  self_action_count?: number
+  text?: string
+}
+
+// 我的日记素材进度（get_review 返回 / dashboard review_brief 轻量版）
+export type ReviewProgress = {
+  turns?: number
+  turns_threshold?: number
+  days_threshold?: number
+  span?: string
+  due?: boolean
+  due_reason?: string
+}
+
+export type ReviewBrief = {
+  enabled?: boolean
+  entries?: number
+  progress_turns?: number
+  turns_threshold?: number
+}
+
+// 模型通道状态灯（dashboard channel_status）：dormant_reason ∈
+// ""(ok) / free_route / no_model / disabled
+export type ChannelStatusItem = { enabled?: boolean; dormant_reason?: string }
+export type ChannelStatus = { tone?: ChannelStatusItem; fragments?: ChannelStatusItem; review?: ChannelStatusItem }
+
+export type State = {
+  status?: Status
+  anchor_date?: string
+  advance_days?: number
+  mood?: Mood
+  settings?: Settings
+  calendar?: Calendar
+  diary_recent?: DiaryItem[]
+  diary_total?: number
+  fragment_total?: number
+  journal_index?: JournalPageHeader[]
+  lanlan?: string
+  lanlan_list?: LanlanItem[]
+  tone_slot_options?: ToneSlotOption[]
+  panel_bg?: PanelBgMeta
+  review_brief?: ReviewBrief
+  channel_status?: ChannelStatus
+  week_activity?: number
+}
+
+export type FormValues = {
+  auto_derive: boolean
+  cycle_length: number
+  period_length: number
+  ovulation_day: number
+  ovulation_window: number
+  inject_mode: string
+  inject_interval_n: number
+  phase_openers: boolean
+  timezone: string
+  mood_enabled: boolean
+  default_action_minutes: number
+  emotion_sense_enabled: boolean
+  tone_check_rate: number
+  tone_phase_sensitivity_enabled: boolean
+  tone_phase_sensitivity: number
+  tone_slot: string
+  fragments_enabled: boolean
+  fragments_slot: string
+  review_enabled: boolean
+  review_slot: string
+  review_turns_threshold: number
+  review_days_threshold: number
+  debug_mode: boolean
+}

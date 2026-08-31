@@ -1,0 +1,41 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "N.E.K.O: check forever_companion",
+      "type": "shell",
+      "command": "uv run neko-plugin check forever_companion",
+      "options": {
+        "cwd": "${config:nekoPlugin.repoRoot}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "N.E.K.O: sync forever_companion",
+      "type": "shell",
+      "command": "uv run --with pip neko-plugin sync forever_companion --clean",
+      "options": {
+        "cwd": "${config:nekoPlugin.repoRoot}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "N.E.K.O: check -r forever_companion",
+      "type": "shell",
+      "command": "uv run neko-plugin check -r forever_companion",
+      "options": {
+        "cwd": "${config:nekoPlugin.repoRoot}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "N.E.K.O: build forever_companion",
+      "type": "shell",
+      "command": "uv run neko-plugin build forever_companion",
+      "options": {
+        "cwd": "${config:nekoPlugin.repoRoot}"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

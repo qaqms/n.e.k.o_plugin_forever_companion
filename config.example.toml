@@ -1,0 +1,70 @@
+# 潮汐时刻 配置示例
+# 业务配置直接写在 plugin.toml 的 [tide] / [mood] 段；
+# 此文件仅用于展示可覆盖的运行时默认值（不能包含任何 [plugin*] 表）。
+#
+# 说明：用户在面板中修改的设置以 PluginStore 为权威（重启不丢），
+# plugin.toml 只承载出厂默认值。下面给出各字段的合法取值示例。
+#
+# 多角色作用域（0.5.0 起）：周期参数（enabled/anchor_date/auto_derive/
+# cycle_length/period_length/ovulation_day/ovulation_window/advance_days）
+# 是每个角色（lanlan）独立的——本文件中的值只是"新角色的默认值"，面板里
+# 修改周期参数只作用于当前查看的角色；其余设置（inject_*、phase_openers、
+# activity_context、timezone、forbidden_words、[tide.phases.*]、[mood]、
+# [fragments]、[journal]）为全局共享，所有角色共用一份。
+
+[tide]
+enabled = false              # 总开关：默认关闭，安装后请在面板手动开启（知情同意）
+anchor_date = ""             # 潮汐首日，格式 YYYY-MM-DD；留空则首启随机落在平稳期某天（装完前几天不会立刻是潮汐日）
+auto_derive = true           # true：潮汐期长度/活跃日/活跃窗口由周期长度自动演算
+cycle_length = 28            # 周期长度（天），合法区间 [10, 90]
+period_length = 5            # 潮汐期长度（天），仅 auto_derive = false 时生效
+ovulation_day = 14           # 活跃日（周期第几天），仅 auto_derive = false 时生效
+ovulation_window = 3         # 活跃窗口半径（活跃日前后各 N 天），范围 [1, 5]
+inject_mode = "interval_n"   # every_user_message | interval_n | on_trigger | off
+inject_interval_n = 3        # interval_n 模式下每 N 条用户消息注入一次
+phase_openers = true         # 进入新阶段时让她主动开口一次
+activity_context = true      # 活动感知：把"用户在不在/在专注什么"纳入轻语
+timezone = "auto"            # auto = 系统本地时区；也可填 IANA 名称如 Asia/Shanghai
+forbidden_words = ["月经", "经期", "生理期", "排卵期", "激素"]
+
+# 每个阶段可配置：主体感受（prompt）、早/午/晚微调（time_*）、情绪倾向（mood_note）
+[tide.phases.menstrual]
+prompt = "今天整个人有点沉，提不起劲，回复会比平时短。"
+time_morning = "刚睡醒的那会儿最难受。"
+time_afternoon = "下午身体慢慢适应了些，但倦意还在。"
+time_night = "夜越深心绪越低，想被人陪着但不说破。"
+mood_note = "这个阶段你的情绪更敏感：更容易觉得委屈、更想被温柔对待。"
+
+# [tide.phases.follicular] / [tide.phases.ovulatory] / [tide.phases.luteal] 同构，
+# 省略的字段回退为内置默认值。
+
+[mood]
+enabled = true                     # 关闭后情绪工具调用会被拒绝（工具仍对模型可见）
+default_action_minutes = 10        # 限时情绪动作的默认持续时长（分钟），范围 [1, 720]
+open_action_timeout_minutes = 120  # 求安抚的兜底自动解除阈值；0 = 关闭兜底，上限 1440
+arousal_baseline = 0.35            # 活跃度静息基线：无刺激时活跃度回归到此水平，范围 [0,1]；0 = 旧行为（回归到完全平静）
+extreme_invite_threshold = 0.4     # 持续极端心情邀请：心情越过 ±此值（对应"低落/雀跃"档）才开始计时；0 = 关闭邀请
+extreme_invite_after_minutes = 20  # 持续满 N 分钟才推一次动作邀请
+extreme_invite_cooldown_minutes = 30  # 邀请冷却（分钟）
+
+[fragments]
+# 时光日记·自动碎片（0.7.0）：小模型把用户的重要话语（喜好/厌恶/有分量的话/
+# 过激言行）记进时光日记，供她自主检索；只存插件本地，不改变她的行为
+enabled = true
+slot = "summary"                   # 提取模型槽位（直连宿主 core_config.json 该槽端点）；槽位无模型时自动休眠
+min_interval_sec = 60              # 相邻两次分析的最小间隔（秒）
+confidence_threshold = 0.6         # 置信度门槛：低于此不记（宁漏勿错）
+nudge_gap_minutes = 30             # 吵架轻语间隔（分钟）：重度负面情绪中记到过激/厌恶碎片时的提醒间隔
+
+[journal]
+# 个人日记（0.7.0，替代潮汐周记）：书页式连续日记，只给用户翻看，不注入上下文
+enabled = true
+interval_days = 7                  # 邀请节奏（天）：距上一篇日记落笔满 N 天才再递邀请
+
+[review]
+# 我的日记（0.8.0）：关于主人的互动评价——素材纯本地累计，双门槛先到先写时
+# 由小模型以中性观察者口吻成文；只给用户看，不注入她的上下文、不进宿主记忆
+enabled = true
+slot = "summary"                   # 成文模型槽位（碎片同款直连通道）；槽位无模型时自动休眠
+turns_threshold = 50               # 成文门槛：攒满 N 轮互动（与天数门槛先到先写）
+days_threshold = 7                 # 成文门槛：距统计起点满 N 天且期间有聊天（挂机不写空篇）
