@@ -225,6 +225,45 @@ zh-CN / en i18n
   评价…"换为"对我的记录…"（8 语言同步；语义更贴"这是关于我的记录"的
   用户视角）
 
+### 1.1.0：相处统计（时光页 = 里程碑 + 热力图 + 月报）
+
+第四块陪伴能力：把"看得见的相处"从 7 天信号升级为长期统计。
+纯逻辑在 `stats.py`（按天聚合/徽章/连续天数/热力图窗口/月报封卷/纪念日判定，
+与 review.py 同款"数据进数据出"纪律），落盘与埋点由主类完成：
+
+- **数据安全（更新不丢）**：宿主 PluginStore 落在独立数据目录
+  （`resolve_plugin_data_dir` → 数据根/plugins/forever_companion/data/store.db，
+  与插件源码目录物理分离）——三条更新路径（Market 更新 / 导入 .neko-plugin
+  覆盖 / 删除插件）都只动源码目录，`replace_plugin` 原子事务失败自动回滚，
+  stats@<角色> 与全部陪伴记录在升级中原样存活。旧用户升级无 stats key 时
+  `_ensure_shard` 走回填分支（三本日记时间戳点亮历史天）；卸载后重装数据
+  同样留存——用户彻底清除走插件清零入口（README「平台机制」节已说明）
+- **存储**：`stats@<角色>`（Store，与我的日记素材同款 per-lanlan 分片），
+  `{first_seen, days: {YYYY-MM-DD: {turns, v_sum/v_n, tone, cold, made_up, warm}},
+  milestones: {first_diary/first_journal/first_review}, anniversary: {last_pushed},
+  months: {YYYY-MM: 封卷月报}}`；days 保留 730 天、月报保留 24 个月，
+  首载时从三本日记时间戳回填活跃天（`backfilled` 标记幂等）
+- **埋点**（与我的日记共用驱动点但口径独立——不受 [review].enabled 闸、
+  成文永不清零）：`_handle_new_user_message`（每轮 + valence 采样）、
+  `_feed_tone_affect` weight=1.0 主路径（当日语气分布）、
+  `_apply_mood_action`（情绪事件，origin=user 不计）、
+  `tool_feeling_better`（previous∈冷战类 → made_up 一次）、
+  三本日记的写入点（第一篇里程碑）
+- **纪念日**：满 30/60/…/365/… 天当天 `_maybe_anniversary_push` 递一条
+  read 轻语（与阶段开场白同构，`[stats].anniversary_inject=false` 可关，
+  当天去重水位）；她知不知道由她决定说不说
+- **月报封卷**：tick 里 `seal_due_months` 跨月时快照上个月进 months
+  （空月不封卷、幂等、超限淘汰最旧）；当月即时聚合实时变
+- **口径**（README 有用户版说明）：相伴天数从首条互动起算；冷战只数
+  origin=self 的冷战类动作；和好 = 她在负面情绪中主动调转晴（到期自然
+  消散不算）；连续天数容忍"今天还没聊"从昨天延续
+- **UI**：新「时光」页签 `moment.tsx`（徽章墙 + 数字摘要 + 热力图 div 格 +
+  月报翻月）；dashboard 5s 轮询带 `stats_summary`（摘要+徽章，即时计算），
+  热力图/月报走 `get_stats` 入口按需拉取；`clear_stats` 危险区入口；
+  纪念日开关在日记页设置卡。i18n 8 语言 66 键
+- 不注入她的上下文（纪念日轻语是唯一例外，可关）、不注册任何 LLM 工具、
+  零模型调用（月报是模板组装不是成文）
+
 ## Out of Scope
 
 - 情绪日记的 LLM 自动总结写入（v1 只提供模型手写日记工具与人工查看）

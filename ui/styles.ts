@@ -747,6 +747,101 @@ export const PANEL_STYLES = `
   content: ""; position: absolute; right: 2px; top: 9.5px;
   width: 3.5px; height: 3.5px; border-radius: 999px; background: currentColor;
 }
+
+/* ---- 时光页 · 相处统计（1.1.0）---- */
+/* 数字摘要条 */
+.tm-stat-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
+.tm-stat-cell {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 10px 4px; border-radius: 10px; background: rgba(148, 163, 184, 0.1);
+  cursor: default;
+}
+.tm-stat-value { font-size: 17px; font-weight: 700; line-height: 1.2; }
+.tm-stat-label { font-size: 11px; color: var(--muted); }
+/* 徽章墙 */
+.tm-badge-wall { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.tm-badge {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 10px 4px 8px; border-radius: 12px;
+  background: rgba(148, 163, 184, 0.07); border: 1px solid rgba(148, 163, 184, 0.18);
+  opacity: 0.55; filter: grayscale(0.6);
+}
+.tm-badge-on {
+  opacity: 1; filter: none;
+  border-color: rgba(245, 176, 77, 0.45);
+  background: rgba(245, 176, 77, 0.08);
+}
+.tm-badge-medal { font-size: 14px; line-height: 1; color: var(--muted); }
+.tm-badge-lv-on { color: rgb(245, 176, 77); }
+.tm-badge-lv-off { color: var(--muted); }
+.tm-badge-name { font-size: 11.5px; font-weight: 600; text-align: center; line-height: 1.25; }
+.tm-badge-date { font-size: 10.5px; color: var(--muted); }
+/* 热力图 */
+.tm-heat-legend { display: flex; align-items: center; gap: 4px; justify-content: flex-end; margin-bottom: 6px; }
+.tm-heat-legend-label { font-size: 10.5px; color: var(--muted); margin: 0 2px; }
+.tm-heat-scroll { overflow-x: auto; padding-bottom: 4px; }
+.tm-heat-wrap { display: flex; gap: 10px; align-items: flex-end; }
+.tm-heat-month { display: flex; flex-direction: column; gap: 4px; }
+.tm-heat-month-label { font-size: 10px; color: var(--muted); text-align: left; white-space: nowrap; }
+.tm-heat-grid { display: grid; grid-template-columns: repeat(7, 1fr); grid-auto-flow: column; gap: 2.5px; }
+.tm-heat-cell {
+  display: inline-block; width: 9px; height: 9px; border-radius: 2px;
+  background: rgba(148, 163, 184, 0.16); cursor: default;
+}
+.tm-heat-lv1 { background: rgba(96, 165, 250, 0.32); }
+.tm-heat-lv2 { background: rgba(96, 165, 250, 0.55); }
+.tm-heat-lv3 { background: rgba(96, 165, 250, 0.78); }
+.tm-heat-lv4 { background: rgba(96, 165, 250, 1); }
+.tm-heat-today { outline: 1.5px solid rgb(245, 176, 77); outline-offset: 0.5px; }
+.tm-heat-note { font-size: 10.5px; color: var(--muted); margin-top: 6px; }
+/* 月报 */
+.tm-month-nav { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.tm-month-btn {
+  border: 1px solid rgba(148, 163, 184, 0.35); background: transparent; color: inherit;
+  border-radius: 8px; min-width: 26px; height: 24px; cursor: pointer; font-size: 14px; line-height: 1;
+}
+.tm-month-btn:disabled { opacity: 0.35; cursor: default; }
+.tm-month-label { display: flex; align-items: center; gap: 6px; font-weight: 650; }
+.tm-month-loading { color: var(--muted); }
+.tm-month-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.tm-month-cell {
+  display: flex; flex-direction: column; gap: 2px; padding: 9px 4px;
+  border-radius: 10px; background: rgba(148, 163, 184, 0.1); align-items: center;
+}
+.tm-month-cell-value { font-size: 14.5px; font-weight: 700; }
+.tm-month-cell-label { font-size: 11px; color: var(--muted); }
+.tm-month-tone { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.tm-month-tone-label { font-size: 11.5px; color: var(--muted); }
+.tm-month-tone-item {
+  display: inline-flex; align-items: center; gap: 4px; font-size: 12px;
+  padding: 3px 9px; border-radius: 999px; background: rgba(148, 163, 184, 0.12);
+}
+.tm-month-tone-count { font-size: 10.5px; color: var(--muted); }
+.tm-month-tone-dot { display: inline-block; width: 8px; height: 8px; border-radius: 999px; }
+.tm-month-voice { margin-top: 12px; }
+.tm-month-voice-label {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px; color: var(--muted); margin-bottom: 6px;
+}
+.tm-month-voice-text {
+  font-size: 13.5px; line-height: 1.7; padding: 10px 12px;
+  border-left: 3px solid rgba(245, 176, 77, 0.5);
+  background: rgba(148, 163, 184, 0.08); border-radius: 0 10px 10px 0;
+}
+.tm-month-voice-empty { margin-top: 10px; font-size: 12px; color: var(--muted); }
+/* 时光页签图标：时钟（圆 + 指针） */
+.tm-ico-moment { border: 1.5px solid currentColor; border-radius: 999px; }
+.tm-ico-moment::before {
+  content: ""; position: absolute; left: 50%; top: 50%;
+  width: 1.5px; height: 4px; margin: -4px 0 0 -0.75px;
+  background: currentColor; transform-origin: 50% 100%;
+}
+.tm-ico-moment::after {
+  content: ""; position: absolute; left: 50%; top: 50%;
+  width: 3px; height: 1.5px; margin: -0.75px 0 0 -0.75px;
+  background: currentColor;
+}
+
 /* 靶心：日历选日模式按钮 */
 .tm-ico-target { border: 1.5px solid currentColor; border-radius: 999px; }
 .tm-ico-target::after {

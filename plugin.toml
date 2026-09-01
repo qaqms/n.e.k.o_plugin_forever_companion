@@ -3,7 +3,7 @@ name = "永远的陪伴"
 description = "赋予 AI 更全面的陪伴能力：她有真实的身体节律（潮汐周期）、会起伏的情绪（十二个自主情绪工具）、属于自己的三本日记（时光日记/个人日记/我的日记），以及能看见你们相处痕迹的总览仪表盘。插件只递状态与工具，如何回应由她自己决定。"
 short_description = "Full companionship for your AI companion: body rhythm, self-directed moods, her own diaries, and a dashboard of your time together."
 keywords = ["陪伴", "companion", "companionship", "情绪", "mood", "emotion", "周期", "period", "身体", "body", "潮汐", "tide", "日历", "calendar", "日记", "diary", "journal", "记忆", "memory"]
-version = "1.0.1"
+version = "1.1.0"
 id = "forever_companion"
 type = "plugin"
 entry = "plugin.plugins.forever_companion:ForeverCompanionPlugin"
@@ -171,6 +171,14 @@ slot = "summary"
 # 双门槛：攒满 N 轮 或 距统计起点满 N 天（且期间有聊天）先到先写
 turns_threshold = 50
 days_threshold = 7
+
+[stats]
+# 相处统计（1.1.0）：按天聚合的长期累计——徽章墙/热力图/月报的唯一数据源。
+# 纯本地统计：零模型开销、无总开关（不收集就没有意义），成文永不清零；
+# 只为用户可视化服务，除纪念日注入外绝不进入她的上下文。
+# 纪念日注入：今天恰好是相伴第 30/60/…/365/… 天时递一条 read 轻语
+#（说不说由她决定）；false 关闭
+anniversary_inject = true
 
 [emotion_sense]
 # 语气感知总开关：在她回复完成后异步分析这轮互动的情绪（零延迟，不挡生成链路）。

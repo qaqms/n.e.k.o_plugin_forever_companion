@@ -79,6 +79,43 @@ export function journalTrendKey(moodAvg?: number | null): string {
   return "panel.journal.trend.cold"
 }
 
+// ---- 相处统计（1.1.0）----
+// 语气 label → 面板展示词 i18n key（热力图悬停/月报语气主色；与五分类同词表）
+export function toneLabelKey(label?: string): string {
+  const known = ["happy", "sad", "angry", "surprised", "neutral"]
+  const key = String(label || "").trim()
+  return known.indexOf(key) >= 0 ? `panel.stats.tone.${key}` : ""
+}
+
+// 热力图当日心情词：优先当天主导语气，无语气数据时按 valence 均值分桶
+//（与状态栏心情胶囊同款 moodWordOf；两者都没有 → 空串，悬停只显示轮数）
+export function heatDayMoodKey(day: { tone?: string; valence?: number | null }): string {
+  const toneKey = toneLabelKey(day.tone)
+  if (toneKey) return toneKey
+  if (day.valence === null || day.valence === undefined) return ""
+  return moodWordOf(Number(day.valence) || 0, 0.5)
+}
+
+// 热力图格子档位：turns → 0~4 档（0=无记录，1~4 递增），CSS 按档取色
+export function heatLevel(turns?: number): number {
+  const n = Number(turns) || 0
+  if (n <= 0) return 0
+  if (n < 10) return 1
+  if (n < 30) return 2
+  if (n < 80) return 3
+  return 4
+}
+
+// YYYY-MM → 展示文案（如 "2026-08" → "2026 年 8 月"，纯数字替换避免 Intl 依赖）
+export function monthLabel(t: TFunc, month?: string): string {
+  const raw = String(month || "")
+  const match = /^(\d{4})-(\d{2})$/.exec(raw)
+  if (!match) return raw
+  return t("panel.stats.monthFormat", { defaultValue: "{y} 年 {m} 月" })
+    .replace("{y}", match[1])
+    .replace("{m}", String(Number(match[2])))
+}
+
 // 愉悦度显示分制：内部 [-1,1] 映射为 0~100 整数分（50=中性）——静息态显示 50，
 // 避免 "0.00" 看起来像"没有愉悦"；仅显示层换算，数据语义不变
 export function valenceScore(valence: number): number {
@@ -148,6 +185,7 @@ export function settingsToForm(settings: Settings): FormValues {
     review_slot: String(settings.review_slot || "summary"),
     review_turns_threshold: Number(settings.review_turns_threshold ?? 50),
     review_days_threshold: Number(settings.review_days_threshold ?? 7),
+    anniversary_inject: (settings as Record<string, any>).anniversary_inject !== false,
     debug_mode: settings.debug_mode === true,
   }
 }

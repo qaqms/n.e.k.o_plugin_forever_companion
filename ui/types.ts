@@ -138,6 +138,62 @@ export type ReviewBrief = {
 export type ChannelStatusItem = { enabled?: boolean; dormant_reason?: string }
 export type ChannelStatus = { tone?: ChannelStatusItem; fragments?: ChannelStatusItem; review?: ChannelStatusItem }
 
+// ---- 相处统计（1.1.0）----
+// 数字摘要（dashboard stats_summary.summary，纯本地即时计算）
+export type StatsSummary = {
+  days_together?: number
+  next_anniversary_in?: number
+  total_turns?: number
+  active_days?: number
+  cold_wars?: number
+  made_ups?: number
+  warm_moments?: number
+  longest_streak?: number
+  current_streak?: number
+}
+
+// 徽章（dashboard stats_summary.badges）：相伴天数类带 days，事件类（first_*）只看 unlocked
+export type StatsBadge = {
+  id?: string
+  days?: number
+  unlocked?: boolean
+  date?: string
+}
+
+// 热力图单日（get_stats heatmap.days）：turns=0 也是有记录的天（面板按档染色）
+export type HeatDay = {
+  date?: string
+  turns?: number
+  tone?: string
+  valence?: number | null
+}
+
+export type Heatmap = { months?: string[]; days?: HeatDay[] }
+
+// 月报（get_stats month）：voice = 本月声音（她当月写过的最长一条手记摘录）
+export type MonthVoice = { ts?: string; mood?: string; entry?: string }
+
+export type MonthReport = {
+  month?: string
+  turns?: number
+  active_days?: number
+  busiest_day?: string
+  busiest_turns?: number
+  longest_streak?: number
+  cold_wars?: number
+  made_ups?: number
+  warm_moments?: number
+  tone?: Record<string, number>
+  valence_avg?: number | null
+  voice?: MonthVoice | null
+  sealed?: boolean
+}
+
+export type StatsState = {
+  summary?: StatsSummary
+  badges?: StatsBadge[]
+}
+
 export type State = {
   status?: Status
   anchor_date?: string
@@ -156,6 +212,7 @@ export type State = {
   review_brief?: ReviewBrief
   channel_status?: ChannelStatus
   week_activity?: number
+  stats_summary?: StatsState
 }
 
 export type FormValues = {
@@ -181,5 +238,6 @@ export type FormValues = {
   review_slot: string
   review_turns_threshold: number
   review_days_threshold: number
+  anniversary_inject: boolean
   debug_mode: boolean
 }

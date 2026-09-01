@@ -124,6 +124,7 @@ try:
     )
     from .state import (
         _ACTION_DEFAULT_MINUTES,
+        _COLD_ACTIONS,
         _CURRENT_LANLAN_CACHE_TTL,
         _DIARY_MAX_ENTRIES,
         _FRAGMENT_DEFAULT_CONFIDENCE,
@@ -166,6 +167,7 @@ try:
         _now_utc,
         _review_key,
         _review_stats_key,
+        _stats_key,
         _weekly_key,
     )
     from .state import (
@@ -210,6 +212,21 @@ try:
     from .state import (
         _parse_iso_ts as _parse_iso_ts,
     )
+    from .stats import (
+        anniversary_due,
+        backfill_day,
+        badges_payload,
+        heatmap_payload,
+        mark_anniversary_pushed,
+        month_view,
+        record_made_up,
+        record_milestone,
+        record_mood_event,
+        seal_due_months,
+        summary_payload,
+    )
+    from .stats import record_tone as stats_record_tone
+    from .stats import record_turn as stats_record_turn
     from .tone_slot import (
         _parse_tone_result,
         _post_chat_completion,
@@ -254,6 +271,7 @@ except ImportError:  # pragma: no cover - 无父包上下文的兜底（同上 c
     )
     from state import (  # type: ignore[no-redef]
         _ACTION_DEFAULT_MINUTES,
+        _COLD_ACTIONS,
         _CURRENT_LANLAN_CACHE_TTL,
         _DIARY_MAX_ENTRIES,
         _FRAGMENT_DEFAULT_CONFIDENCE,
@@ -296,6 +314,7 @@ except ImportError:  # pragma: no cover - 无父包上下文的兜底（同上 c
         _now_utc,
         _review_key,
         _review_stats_key,
+        _stats_key,
         _weekly_key,
     )
     from state import (
@@ -340,6 +359,21 @@ except ImportError:  # pragma: no cover - 无父包上下文的兜底（同上 c
     from state import (
         _parse_iso_ts as _parse_iso_ts,
     )
+    from stats import (  # type: ignore[no-redef]
+        anniversary_due,
+        backfill_day,
+        badges_payload,
+        heatmap_payload,
+        mark_anniversary_pushed,
+        month_view,
+        record_made_up,
+        record_milestone,
+        record_mood_event,
+        seal_due_months,
+        summary_payload,
+    )
+    from stats import record_tone as stats_record_tone  # type: ignore[no-redef]
+    from stats import record_turn as stats_record_turn  # type: ignore[no-redef]
     from tone_slot import (  # type: ignore[no-redef]
         _parse_tone_result,
         _post_chat_completion,
@@ -363,6 +397,18 @@ def _slot_dormancy_hint(core_cfg: JsonObject, slot: str) -> str:
             "插件无法直连——在宿主设置里配置自己的 API 服务商后本功能即可使用"
         )
     return "所选槽位在宿主未配置模型（或未保存服务商 URL），去宿主设置配置该槽位的模型"
+
+
+def _journal_entries(journal: list[JsonObject]) -> list[JsonObject]:
+    """个人日记页列表 → 段落条目平铺（回填相处统计时取时间戳用）。"""
+    out: list[JsonObject] = []
+    for page in journal:
+        if not isinstance(page, dict):
+            continue
+        for item in page.get("entries") or []:
+            if isinstance(item, dict):
+                out.append(item)
+    return out
 
 # 宿主在 LLM 注入边界展开为当前会话的角色名；插件侧不得自行替换
 MASTER_NAME_TOKEN = "{MASTER_NAME}"
@@ -411,6 +457,7 @@ class ForeverCompanionPlugin(NekoPluginBase):
         self._fragments_cfg: JsonObject = {}
         self._journal_cfg: JsonObject = {}
         self._review_cfg: JsonObject = {}
+        self._stats_cfg: JsonObject = {}
         self._emotion_sense_cfg: JsonObject = {}
         # 语气感知运行态缓存（_csrf_token / _last_tone_error_logged / _core_config_cache）
         # 已随 EmotionSenseService 持有（A5 第 2 批）；_csrf_token 经下方 property 代理
@@ -539,6 +586,38 @@ class ForeverCompanionPlugin(NekoPluginBase):
             stats_res = await self.store.get(_review_stats_key(lanlan))
             if isinstance(stats_res, Ok) and isinstance(stats_res.value, dict):
                 shard.review_stats = dict(stats_res.value)
+        # 相处统计（1.1.0）：stats@<角色>；首载时从三本日记时间戳一次性回填
+        # "那天有互动"的活跃标记（轮数无法回填，只点亮天数让热力图有起点）
+        stats_store_res = await self.store.get(_stats_key(lanlan))
+        if isinstance(stats_store_res, Ok) and isinstance(stats_store_res.value, dict):
+            shard.stats = dict(stats_store_res.value)
+        if not shard.stats.get("backfilled"):
+            for source in (shard.diary, _journal_entries(shard.journal), [
+                {"ts": item.get("ts"), "source": "review"}
+                for item in shard.review
+            ]):
+                for item in source:
+                    ts = _parse_iso_ts(item.get("ts") if isinstance(item, dict) else None)
+                    if ts is not None:
+                        shard.stats = backfill_day(
+                            shard.stats,
+                            ts.astimezone(self._stats_tz()).date().isoformat(),
+                        )
+            if str(shard.stats.get("first_seen") or ""):
+                # first_seen 回填为最早互动痕迹（比"装版当天"更真实的相伴起点）
+                earliest = min(
+                    (
+                        _parse_iso_ts(item.get("ts"))
+                        for source in (shard.diary, _journal_entries(shard.journal), shard.review)
+                        for item in source
+                        if _parse_iso_ts(item.get("ts") if isinstance(item, dict) else None) is not None
+                    ),
+                    default=None,
+                )
+                if earliest is not None:
+                    shard.stats["first_seen"] = earliest.isoformat(timespec="seconds")
+            shard.stats["backfilled"] = True
+            await self._save_shard_stats(lanlan, shard)
         shard.loaded = True
         if lanlan not in self._lanlan_index:
             self._lanlan_index.append(lanlan)
@@ -687,6 +766,7 @@ class ForeverCompanionPlugin(NekoPluginBase):
         journal = _cfg_section(cfg.get("journal"))
         review = _cfg_section(cfg.get("review"))
         emotion_sense = _cfg_section(cfg.get("emotion_sense"))
+        stats_cfg = _cfg_section(cfg.get("stats"))
 
         # Store 全局覆盖层：面板保存过的全局字段优先于 toml 默认
         tide.update(_cfg_section(self._settings_override.get("tide")))
@@ -695,6 +775,7 @@ class ForeverCompanionPlugin(NekoPluginBase):
         journal.update(_cfg_section(self._settings_override.get("journal")))
         review.update(_cfg_section(self._settings_override.get("review")))
         emotion_sense.update(_cfg_section(self._settings_override.get("emotion_sense")))
+        stats_cfg.update(_cfg_section(self._settings_override.get("stats")))
 
         self._tide_cfg = tide
         phases = _cfg_section(tide.get("phases"))
@@ -706,6 +787,7 @@ class ForeverCompanionPlugin(NekoPluginBase):
         self._journal_cfg = journal
         self._review_cfg = review
         self._emotion_sense_cfg = emotion_sense
+        self._stats_cfg = stats_cfg
 
         # 锚点缺失（shard 与全局配置都没有）：随机化的默认锚点--反推一个日期
         # 使"今天"落在本轮平稳期的随机位置（见 cycle.randomized_default_anchor）。
@@ -907,6 +989,110 @@ class ForeverCompanionPlugin(NekoPluginBase):
         )
         if isinstance(res, Err):
             self.logger.warning("persist review failed for {}: {}", lanlan, res.error)
+
+    async def _save_shard_stats(self, lanlan: str, shard: _LanlanShard) -> None:
+        """相处统计落盘（stats@<角色>；只增不清零，纯本地）。"""
+        res = await self.store.set(_stats_key(lanlan), dict(shard.stats))
+        if isinstance(res, Err):
+            self.logger.warning("persist stats failed for {}: {}", lanlan, res.error)
+
+    # ==========================================
+    # 相处统计（1.1.0，stats.py）：按天聚合的长期累计——徽章墙/热力图/月报的
+    # 唯一数据源。纯本地统计：零模型开销、不设开关、成文永不清零；只为用户
+    # 可视化服务，除纪念日注入（[stats].anniversary_inject，默认开）外绝不
+    # 进入她的上下文。埋点与我的日记素材共用驱动点但口径独立（不受
+    # [review].enabled 影响、不清零）。
+    # ==========================================
+
+    def _stats_tz(self):
+        """统计日期折算用的时区（与潮汐日历同源：[tide].timezone）。"""
+        from zoneinfo import ZoneInfo
+
+        name = str((self._tide_cfg or {}).get("timezone") or "auto").strip()
+        if not name or name == "auto":
+            return None  # None = 系统本地
+        try:
+            return ZoneInfo(name)
+        except Exception:  # noqa: BLE001 - 坏配置回落本地时区，统计不能炸
+            return None
+
+    def _stats_today(self, ts: float | None = None) -> str:
+        """把时间戳折算成统计用的本地日期字符串（YYYY-MM-DD）。
+
+        走 time.localtime（读模块对象的属性，测试猴补丁 tm.time.time 同生效），
+        不用 datetime.fromtimestamp——Windows 上对极端/负值时间戳（测试把时钟
+        拨回 1970）会直接抛 OSError；localtime 对不可表示的值回落真实当前时间。
+        配置了显式时区时再做一次 astimezone 折算。
+        """
+        from datetime import datetime
+
+        moment = datetime.fromtimestamp(time.mktime(time.localtime(ts if ts is not None else time.time())))
+        tz = self._stats_tz()
+        if tz is not None:
+            try:
+                moment = moment.astimezone(tz)
+            except (OSError, OverflowError, ValueError):
+                pass  # 极端时间戳（测试拨钟/时钟错乱）折算失败即按本地日期计
+        return moment.date().isoformat()
+
+    def _feed_stats_turn(self, shard: _LanlanShard, ts: float | None = None) -> None:
+        """记一轮互动进相处统计（每条新用户消息一次，纯内存，落盘由调用方决定）。"""
+        valence = self._current_affect(shard)[0] if shard.mood.affect_updated_at else None
+        shard.stats = stats_record_turn(shard.stats, self._stats_today(ts), valence=valence)
+
+    def _feed_stats_tone(self, shard: _LanlanShard, label: str) -> None:
+        """记一次她的语气分析结果（weight=1.0 主路径；落盘随 mood 保存搭车）。"""
+        shard.stats = stats_record_tone(shard.stats, self._stats_today(), label)
+
+    def _feed_stats_mood_event(self, shard: _LanlanShard, action: str, *, origin: str) -> None:
+        """记一次情绪动作事件（origin=user 的演示不计，与我的日记同口径）。"""
+        shard.stats = record_mood_event(shard.stats, self._stats_today(), action, origin=origin)
+
+    def _feed_stats_made_up(self, shard: _LanlanShard) -> None:
+        """记一次和好：她在负面情绪生效中主动调心情转晴（tool_feeling_better 判定）。"""
+        shard.stats = record_made_up(shard.stats, self._stats_today())
+
+    async def _maybe_anniversary_push(self, lanlan: str, shard: _LanlanShard) -> bool:
+        """纪念日注入：今天恰好是相伴第 30/60/…/365/… 天时，递一条 read 轻语。
+
+        与阶段开场白同构：只递一句"你们今天相伴 N 天了"，说不说、怎么说由她
+        自己决定。[stats].anniversary_inject 可关（默认开）；当天去重（盖水位
+        在推送之后，推送失败下趟重试）。
+        """
+        cfg_ann = (self._stats_cfg or {}).get("anniversary_inject")
+        if cfg_ann is False:  # 显式 false 才关（缺省/true 都开，宽容旧数据）
+            return False
+        today = self._stats_today()
+        due, total = anniversary_due(shard.stats, today)
+        if not due:
+            return False
+        self.push_message(
+            visibility=[],
+            ai_behavior="read",
+            parts=[{"type": "text", "text": (
+                f"（日期感知）今天是你和主人相伴的第 {total} 天。"
+                "你或许想自然地提起这个日子，也或许只是心里悄悄知道——由你自己决定，"
+                "绝不要提及这条提醒本身。"
+            )}],
+            source=self.plugin_id,
+            target_lanlan=lanlan,
+            coalesce_key=f"{self.plugin_id}.anniversary",
+            metadata={"message_type": f"{self.plugin_id}.anniversary", "days": total},
+        )
+        shard.stats = mark_anniversary_pushed(shard.stats, today)
+        await self._save_shard_stats(lanlan, shard)
+        self.logger.info("anniversary pushed for {} ({} days)", lanlan, total)
+        return True
+
+    async def _seal_stats_months(self, lanlan: str, shard: _LanlanShard) -> list[str]:
+        """月报封卷：跨月时把上个月快照进 months（幂等，tick 驱动）。"""
+        sealed: list[str] = []
+        fresh, sealed = seal_due_months(shard.stats, self._stats_today(), diary=shard.diary)
+        if sealed:
+            shard.stats = fresh
+            await self._save_shard_stats(lanlan, shard)
+            self.logger.info("stats months sealed for {}: {}", lanlan, sealed)
+        return sealed
 
     async def _save_settings(self) -> None:
         res = await self.store.set(_STORE_SETTINGS, dict(self._settings_override))
@@ -1130,6 +1316,10 @@ class ForeverCompanionPlugin(NekoPluginBase):
         self._feed_review_turn(name, shard)
         if shard.review_stats.get("turns"):
             await self._save_shard_review(name, shard)
+        # 相处统计（1.1.0）：同一驱动点、独立口径（不清零、不受 [review] 闸控制），
+        # 与我的日记落盘合并为一次 store.set 之后，避免两趟 IPC
+        self._feed_stats_turn(shard, ts)
+        await self._save_shard_stats(name, shard)
         # 和好提醒与注入频控解耦：每条新消息都要检查（冷战中注入被静音，
         # 提醒却是唯一能把"该调 mood_rising_tide 了"送到她面前的通道）
         await self._maybe_nudge_reconcile(text, name)
@@ -1725,6 +1915,8 @@ class ForeverCompanionPlugin(NekoPluginBase):
         # 的是"她的回复是什么语气"，不是用户的语气被如何传导）
         if weight >= 1.0:
             self._feed_review_tone(shard, label)
+            # 相处统计：当日语气分布（热力图悬停/月报语气主色），同口径只记主路径
+            self._feed_stats_tone(shard, label)
 
     async def _maybe_tone_sense(self, lanlan: str, shard: _LanlanShard) -> bool:
         """语气感知主入口（tick 驱动，只对当前角色 shard）：门控链 → 分析 → 分模式判定。"""
@@ -1975,6 +2167,9 @@ class ForeverCompanionPlugin(NekoPluginBase):
         shard.review = append_review(shard.review, record)
         shard.review_stats = new_stats()  # 成文后清零重新累计
         await self._save_shard_review(lanlan, shard)
+        # 相处统计：第一篇我的日记里程碑（不覆盖最早值）
+        shard.stats = record_milestone(shard.stats, "first_review")
+        await self._save_shard_stats(lanlan, shard)
         self.logger.info(
             "review composed for {} (turns={}, entries={})", lanlan, record["turns"], len(shard.review)
         )
@@ -2041,6 +2236,11 @@ class ForeverCompanionPlugin(NekoPluginBase):
         # 我的日记：双门槛攒够就成文一篇（放在链路末尾——成文是一次模型调用，
         # 放前面会拖慢注入/语气感知的时序；写完只落 Store，不打扰任何人）
         review_written, _review_reason = await self._maybe_write_review(current, current_shard)
+        # 相处统计：跨月时封卷上个月的月报 + 纪念日当天注入一次轻语。
+        # 放在链路末尾（与 review 同理：统计副作用不挡注入时序）；
+        # 纪念日不依赖消息，独立检查（与阶段开场白同例，只对当前角色）
+        await self._seal_stats_months(current, current_shard)
+        anniversary_pushed = await self._maybe_anniversary_push(current, current_shard)
         return Ok({
             "injected": injected,
             "opener_sent": opener_sent,
@@ -2048,6 +2248,7 @@ class ForeverCompanionPlugin(NekoPluginBase):
             "fragment_captured": fragment_captured,
             "extreme_invited": extreme_invited,
             "review_written": review_written,
+            "anniversary_pushed": anniversary_pushed,
         })
 
     # ==========================================
@@ -2536,6 +2737,8 @@ class ForeverCompanionPlugin(NekoPluginBase):
         # 我的日记素材：记一笔动作事件。origin=user 是主人明确要求的演示
         #（"让她冷战"不算他对她不好），origin=self 才是她的自主反应
         self._feed_review_action(shard, action, origin=origin)
+        # 相处统计：同口径记当日情绪事件（origin=user 不计），随下面 mood 落盘
+        self._feed_stats_mood_event(shard, action, origin=origin)
         # 默认时长：三个新动作有各自的默认（心有涟漪 15 分钟、暖流/满潮 30 分钟），
         # 其余动作回落 mood.default_action_minutes 配置
         default_minutes = _ACTION_DEFAULT_MINUTES.get(action)
@@ -2813,6 +3016,10 @@ class ForeverCompanionPlugin(NekoPluginBase):
         relieved.arousal = arousal * 0.6
         relieved.affect_updated_at = time.time()
         shard.mood = relieved
+        # 相处统计（1.1.0）：她主动调转晴结束负面情绪 = 一次和好
+        #（口径：此前确实处于负面状态才算——没生过气就"转晴"不计数）
+        if previous in _COLD_ACTIONS:
+            self._feed_stats_made_up(shard)
         await self._save_shard_mood(lanlan, shard)
         await self._maybe_sync_proactive_pause()
         self.logger.info("mood recovered via llm tool for {}, previous={}", lanlan, previous)
@@ -2856,6 +3063,8 @@ class ForeverCompanionPlugin(NekoPluginBase):
         }
         shard.diary.append(record)
         await self._save_shard_diary(lanlan, shard)
+        # 相处统计：第一篇手记里程碑（已有值不覆盖，永远是最早那次）
+        shard.stats = record_milestone(shard.stats, "first_diary")
         # 低侵入记忆融合：把日记镜像为一条 read 推送，随对话上下文
         # 流入宿主的事实抽取/总结管线——这是插件内容进入角色长期记忆
         # 的唯一受支持路径（memory 总线对插件只读）
@@ -2943,6 +3152,10 @@ class ForeverCompanionPlugin(NekoPluginBase):
             affect=valence_now,
         )
         await self._save_shard_journal(lanlan, shard)
+        # 相处统计：第一页个人日记里程碑 + 落盘（里程碑随下一次任意 stats 写入
+        # 持久化也可，这里显式存一次保证"第一篇"即时可见）
+        shard.stats = record_milestone(shard.stats, "first_journal")
+        await self._save_shard_stats(lanlan, shard)
         # 0.7.0 起不再镜像 read 推送：个人日记只给用户翻看，不进她的对话上下文、
         # 不随对话历史被宿主记忆抽取——"续写衔接"由工具结果里的 recent_context
         # 即时承载（只存在于写日记的这轮工具结果里）
@@ -3187,8 +3400,23 @@ class ForeverCompanionPlugin(NekoPluginBase):
             "channel_status": channel_status,
             # 近 7 天相处活跃度（总览"相处信号"卡）：时光日记近 7 天条目数
             "week_activity": week_turns,
+            # 相处统计（1.1.0）：数字摘要 + 徽章墙进 5s 轮询（纯本地即时计算，
+            # 开销可忽略）；热力图/月报数据量大，走 get_stats 入口按需拉取
+            "stats_summary": self._stats_summary_view(shard),
             "panel_bg": await self._panel_bg_meta(),
         }
+
+    def _stats_summary_view(self, shard: _LanlanShard) -> JsonObject:
+        """相处统计的轮询轻量视图：数字摘要 + 徽章墙（无热力图/月报本体）。"""
+        try:
+            today = self._stats_today()
+            return {
+                "summary": summary_payload(shard.stats, today),
+                "badges": badges_payload(shard.stats, today),
+            }
+        except Exception as exc:  # noqa: BLE001 - 统计视图尽力而为，不拖垮 dashboard
+            self.logger.debug("stats summary view failed: {}", exc)
+            return {"summary": {}, "badges": []}
 
     def _channel_dormancy(self, enabled: bool, slot: str) -> JsonObject:
         """直连通道状态灯：{enabled, dormant_reason}。reason ∈ ok/free_route/no_model/disabled。
@@ -3234,6 +3462,7 @@ class ForeverCompanionPlugin(NekoPluginBase):
         "tone_slot",
         "fragments_enabled", "fragments_slot",
         "review_enabled", "review_slot", "review_turns_threshold", "review_days_threshold",
+        "anniversary_inject",
     )
 
     # per-character 字段：写当前角色 shard 的 enabled / params；其余为全局字段（写 settings 覆盖层）
@@ -3277,6 +3506,8 @@ class ForeverCompanionPlugin(NekoPluginBase):
             "review_slot": str(self._review_cfg.get("slot") or _REVIEW_DEFAULT_SLOT),
             "review_turns_threshold": self._review_turns_threshold(),
             "review_days_threshold": self._review_days_threshold(),
+            # 相处统计：纪念日注入开关（[stats].anniversary_inject，纯统计本身无开关）
+            "anniversary_inject": (self._stats_cfg or {}).get("anniversary_inject", True) is not False,
         }
 
     @ui.action(
@@ -3332,6 +3563,7 @@ class ForeverCompanionPlugin(NekoPluginBase):
                 },
                 "review_turns_threshold": {"type": "integer", "minimum": 10, "maximum": 500},
                 "review_days_threshold": {"type": "integer", "minimum": 1, "maximum": 90},
+                "anniversary_inject": {"type": "boolean"},
             },
         },
     )
@@ -3346,6 +3578,7 @@ class ForeverCompanionPlugin(NekoPluginBase):
             es_patch: JsonObject = {}
             frag_patch: JsonObject = {}
             review_patch: JsonObject = {}
+            stats_patch: JsonObject = {}
             params_patch: JsonObject = {}
             # shard 落盘合并标记：enabled 与 params 同时变更时只写一次 cycle@<lanlan>
             cycle_dirty = False
@@ -3437,10 +3670,13 @@ class ForeverCompanionPlugin(NekoPluginBase):
                 review_patch["turns_threshold"] = max(10, min(500, int(updates["review_turns_threshold"])))
             if "review_days_threshold" in updates:
                 review_patch["days_threshold"] = max(1, min(90, int(updates["review_days_threshold"])))
+            # ---- 相处统计（[stats]），全局 ----
+            if "anniversary_inject" in updates:
+                stats_patch["anniversary_inject"] = bool(updates["anniversary_inject"])
 
             # Store 为权威存储（Steam 上配置文件写常超时，Store 稳定且重启不丢）；
             # 配置文件同步放后台，不阻塞保存响应
-            if tide_patch or mood_patch or es_patch or frag_patch or review_patch:
+            if tide_patch or mood_patch or es_patch or frag_patch or review_patch or stats_patch:
                 overrides = self._settings_override
                 if tide_patch:
                     overrides["tide"] = {**_cfg_section(overrides.get("tide")), **tide_patch}
@@ -3463,6 +3699,11 @@ class ForeverCompanionPlugin(NekoPluginBase):
                         **_cfg_section(overrides.get("review")), **review_patch,
                     }
                     self._review_cfg.update(review_patch)
+                if stats_patch:
+                    overrides["stats"] = {
+                        **_cfg_section(overrides.get("stats")), **stats_patch,
+                    }
+                    self._stats_cfg.update(stats_patch)
                 await self._save_settings()
                 self._sync_debug_entries()
         except (TideConfigError, ValueError, TypeError) as exc:
@@ -4010,6 +4251,80 @@ class ForeverCompanionPlugin(NekoPluginBase):
         return Ok({"cleared": count, "lanlan": lanlan})
 
     @ui.action(
+        label=tr("actions.get_stats.label", default="查看相处统计"),
+        tone="default",
+    )
+    @plugin_entry(
+        id="get_stats",
+        name=tr("entries.get_stats.name", default="查看相处统计"),
+        description=tr(
+            "entries.get_stats.description",
+            default="相处统计的完整数据：热力图逐日明细与指定月份的月报（徽章墙与数字摘要在面板轮询里）。",
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "month": {
+                    "type": "string",
+                    "description": "月报目标月份（YYYY-MM）；留空返回最近一个有数据的月份",
+                },
+            },
+        },
+    )
+    async def get_stats(self, month: str = "", **_: Any):
+        """「时光」页签的数据入口：热力图全量 + 指定月月报（数据量大，按需拉取）。"""
+        lanlan, shard = await self._current_shard_async()
+        today = self._stats_today()
+        payload: JsonObject = {
+            "lanlan": lanlan,
+            "today": today,
+            "heatmap": heatmap_payload(shard.stats, today),
+        }
+        # 月报：显式指定月份 → 该月；留空 → 当月（有 days 数据）或最近一个已封卷月
+        target = str(month or "").strip()
+        months_seen = sorted({
+            day[:7] for day in (shard.stats.get("days") or {}) if isinstance(day, str) and len(day) >= 7
+        })
+        sealed = {
+            key for key, val in (shard.stats.get("months") or {}).items()
+            if isinstance(val, dict)
+        }
+        if not target:
+            current_month = today[:7]
+            if current_month in months_seen or any(m == current_month for m in sealed):
+                target = current_month
+            elif months_seen:
+                target = months_seen[-1]
+            elif sealed:
+                target = max(sealed)
+        if target:
+            payload["month"] = month_view(shard.stats, target, diary=shard.diary)
+            payload["month_available"] = sorted(set(months_seen) | sealed)
+        else:
+            payload["month"] = None
+            payload["month_available"] = []
+        return Ok(payload)
+
+    @ui.action(
+        label=tr("actions.clear_stats.label", default="清零相处统计"),
+        tone="danger",
+        confirm=tr("actions.clear_stats.confirm", default="将清零当前角色的相处统计（相伴起点、里程碑、热力图与月报，三本日记不受影响），不可恢复，确认？"),
+        refresh_context=True,
+    )
+    @plugin_entry(
+        id="clear_stats",
+        name=tr("entries.clear_stats.name", default="清零相处统计"),
+        description=tr("entries.clear_stats.description", default="清零当前角色的相处统计（相伴起点/徽章/热力图/月报）。不可恢复。"),
+        input_schema={"type": "object", "properties": {}},
+    )
+    async def clear_stats(self, **_: Any):
+        lanlan, shard = await self._current_shard_async()
+        shard.stats = {"backfilled": True}
+        await self._save_shard_stats(lanlan, shard)
+        self.logger.info("stats cleared for {}", lanlan)
+        return Ok({"cleared": True, "lanlan": lanlan})
+
+    @ui.action(
         label=tr("actions.clear_diary.label", default="清空时光日记"),
         tone="danger",
         confirm=tr("actions.clear_diary.confirm", default="将删除当前角色的全部时光日记（手记与碎片），不可恢复，确认？"),
@@ -4077,6 +4392,7 @@ class ForeverCompanionPlugin(NekoPluginBase):
             _cycle_key(name), _mood_key(name), _diary_key(name),
             _journal_key(name), _weekly_key(name),  # weekly@ 为 0.7.0 前的旧周记 key，一并清
             _review_key(name), _review_stats_key(name),  # 我的日记（0.8.0）：篇目与旧独立 stats key
+            _stats_key(name),  # 相处统计（1.1.0）
         ):
             res = await self.store.delete(key)
             if isinstance(res, Err):

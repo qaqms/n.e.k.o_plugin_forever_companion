@@ -21,8 +21,9 @@ import { DiarySettingsCard } from "./settings_diary"
 import { SaveBar } from "./savebar"
 import { ManagePane } from "./manage"
 import { DiaryPane } from "./diary"
+import { MomentPane } from "./moment"
 import { AppearanceCard } from "./appearance"
-import type { DiaryItem, JournalPage, ReviewEntry, ReviewProgress } from "./types"
+import type { DiaryItem, JournalPage, Heatmap, MonthReport, ReviewEntry, ReviewProgress } from "./types"
 import { unwrapCallResult } from "./utils"
 
 export default function Panel(props: PluginSurfaceProps<State>) {
@@ -40,6 +41,12 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   const [bgUrl, setBgUrl] = useState<string>("")
   const [bgDim, setBgDim] = useState<number>(0.3)
   const [bgSaving, setBgSaving] = useState(false)
+  // 时光页：相处统计的热力图/月报数据量大，进页时按需拉取（不随 5s 轮询）；
+  // 切角色时清掉旧数据等下次进页重拉
+  const [heatData, setHeatData] = useState<Heatmap | null>(null)
+  const [monthData, setMonthData] = useState<MonthReport | null>(null)
+  const [monthList, setMonthList] = useState<string[]>([])
+  const [statsLoading, setStatsLoading] = useState(false)
 
   function updateForm(patch: Partial<FormValues>) {
     setForm((prev) => ({ ...prev, ...patch }))
@@ -70,6 +77,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     settings.review_slot,
     settings.review_turns_threshold,
     settings.review_days_threshold,
+    (settings as Record<string, any>).anniversary_inject,
   ])
 
   // 面板打开期间周期性同步 context：宿主切换角色后自动跟上，情绪状态/阶段等外部变化
@@ -319,6 +327,37 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     }
   }
 
+  async function onLoadStats(month?: string) {
+    setStatsLoading(true)
+    try {
+      const payload = unwrapCallResult(await props.api.call("get_stats", month ? { month } : {}))
+      const r = (payload || {}) as Record<string, any>
+      setHeatData((r.heatmap || {}) as Heatmap)
+      setMonthData((r.month || null) as MonthReport | null)
+      setMonthList(Array.isArray(r.month_available) ? (r.month_available as string[]) : [])
+    } catch (err) {
+      console.warn("[forever_companion] load stats failed:", err)
+    } finally {
+      setStatsLoading(false)
+    }
+  }
+
+  // 切角色时旧统计立即失效：清到空态，避免上一个角色的热力图残留展示
+  useEffect(() => {
+    setHeatData(null)
+    setMonthData(null)
+    setMonthList([])
+  }, [state.lanlan])
+
+  // 进时光页时按需拉取一次热力图/月报（徽章与摘要在 5s 轮询里）；
+  // 已有数据不重拉，翻月由 onPickMonth 显式触发
+  useEffect(() => {
+    if (tab === "moment" && !heatData && !statsLoading) {
+      onLoadStats()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, heatData])
+
   async function onPruneLanlan(name: string) {
     if (!pruneLanlan) {
       toast.error(t("panel.errors.actionUnavailable", { defaultValue: "操作不可用（插件可能未运行）" }))
@@ -371,7 +410,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     }
   }
 
-  const VALID_TABS = ["overview", "calendar", "cycle", "mood", "diary", "settings"]
+  const VALID_TABS = ["overview", "calendar", "cycle", "mood", "diary", "moment", "settings"]
   const activeTab = VALID_TABS.indexOf(tab) >= 0 ? tab : "overview"
 
   // 面板始终跟随宿主当前角色（5 秒轮询自动跟上切卡），lanlan_list 提供全部已知角色的状态摘要
@@ -384,6 +423,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     { id: "cycle", label: t("panel.tab.cycle", { defaultValue: "周期" }) },
     { id: "mood", label: t("panel.tab.mood", { defaultValue: "情绪" }) },
     { id: "diary", label: t("panel.tab.diary", { defaultValue: "日记" }) },
+    { id: "moment", label: t("panel.tab.moment", { defaultValue: "时光" }) },
     { id: "settings", label: t("panel.tab.settings", { defaultValue: "设置" }) },
   ]
 
@@ -511,6 +551,19 @@ export default function Panel(props: PluginSurfaceProps<State>) {
                   <SaveBar t={t} canSave={!!updateSettingsAction} onSave={saveSettings} />
                 </>
               )}
+            />
+          ) : null}
+          {activeTab === "moment" ? (
+            <MomentPane
+              t={t}
+              lanlan={state.lanlan}
+              summary={state.stats_summary ? state.stats_summary.summary : undefined}
+              badges={state.stats_summary ? state.stats_summary.badges : undefined}
+              heatmap={heatData}
+              month={monthData}
+              monthAvailable={monthList}
+              monthLoading={statsLoading}
+              onPickMonth={(month: string) => onLoadStats(month)}
             />
           ) : null}
           {activeTab === "settings" ? (

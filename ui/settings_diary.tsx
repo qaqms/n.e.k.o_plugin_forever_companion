@@ -29,6 +29,18 @@ export function DiarySettingsCard(props: {
       ) : null}
 
       <div className="tm-review-settings">
+        <div className="tm-subcard-title">{t("panel.settings.stats", { defaultValue: "相处统计（时光页）" })}</div>
+        <Switch
+          checked={form.anniversary_inject}
+          label={t("settings.anniversary.title", { defaultValue: "纪念日提醒" })}
+          onChange={(value: boolean) => updateForm({ anniversary_inject: value })}
+        />
+        <div className="tm-derived">
+          {t("settings.anniversary.desc", { defaultValue: "满 30/100/… 天的纪念日当天，她会知道你们相伴了多少天（说不说由她决定）。" })}
+        </div>
+      </div>
+
+      <div className="tm-review-settings">
         <div className="tm-subcard-title">{t("panel.settings.review", { defaultValue: "我的日记（互动评价）" })}</div>
         <Switch
           checked={form.review_enabled}

@@ -72,6 +72,17 @@ def _review_stats_key(lanlan: str) -> str:
     return f"review_stats@{lanlan}"
 
 
+def _stats_key(lanlan: str) -> str:
+    """相处统计（1.1.0）：按天聚合的长期累计（徽章/热力图/月报），按角色分片。
+
+    数据安全底座：宿主把 PluginStore 落在独立数据目录（resolve_plugin_data_dir，
+    与插件源码目录物理分离）——Market 更新/导入覆盖只替换源码目录，本 key 与
+    全部陪伴记录在升级中原样存活；删除插件也只删源码，用户想彻底清除需走
+    插件的清零入口（README「平台机制」节有用户版说明）。
+    """
+    return f"stats@{lanlan}"
+
+
 # 情绪动作统一采用潮汐意象命名（id 即存储键）
 _MOOD_ACTION_LABEL_KEYS = {
     "ebb_tide": "mood.ebb_tide",
@@ -118,6 +129,20 @@ _PROACTIVE_PAUSE_ACTIONS = frozenset({
 # 正面动作：到期恢复台词按温和回落语气处理（区别于冲突导向的重度负面），
 # 面板徽标 tone 也据此分色
 _POSITIVE_ACTIONS = frozenset({"warm_current", "spring_tide"})
+
+# ---- 相处统计（1.1.0，stats.py）----
+# 冷战类动作：相处统计里"冷战次数"只统计她自主发起的这些动作
+#（心有涟漪是小情绪不算冷战，与主动搭话暂停白名单语义不同，单列表）
+_COLD_ACTIONS = frozenset({
+    "ebb_tide", "sea_fog", "shallow_reef", "storm_surge", "seek_harbor",
+})
+# days 逐日聚合的保留上限：超出窗口的旧天丢弃（徽章/累计总数即时重算不受影响，
+# 热力图窗口 12 个月远小于此上限；上限防的是"每天都聊"极端用户的 Store 膨胀）
+_STATS_DAYS_MAX = 730
+# 热力图窗口：最近 N 个月（含当月）
+_STATS_HEATMAP_MONTHS = 12
+# 月报封卷的保留上限：超出淘汰最旧（与个人日记/我的日记 52 篇同量级）
+_STATS_MONTHS_MAX = 24
 
 # 时光日记的保留条数（内存与落盘一致，每个角色各自一份）：
 # 0.7.0 起时间线混排"她的手记"(source=self) 与"自动碎片"(source=auto)，
@@ -408,6 +433,7 @@ class _LanlanShard:
         "journal",
         "review_stats",
         "review",
+        "stats",
         "last_injected_message_ts",
         "user_message_count_since_inject",
         "last_injected_whisper_key",
@@ -441,6 +467,9 @@ class _LanlanShard:
         # 重新累计，见 review.py）；review = 已成文的评价篇目（时间正序列表）
         self.review_stats: JsonObject = {}
         self.review: list[JsonObject] = []
+        # 相处统计（1.1.0，stats.py）：按天聚合的长期累计（徽章/热力图/月报），
+        # 只增不清零、不受 [review].enabled 闸控制，纯本地纯统计零模型开销
+        self.stats: JsonObject = {}
         self.last_injected_message_ts = 0.0
         self.user_message_count_since_inject = 0
         self.last_injected_whisper_key = ""
