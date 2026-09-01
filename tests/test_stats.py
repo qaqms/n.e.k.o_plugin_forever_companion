@@ -370,17 +370,20 @@ def test_fabricate_demo_stats_covers_visual_branches() -> None:
     stats = st.fabricate_demo_stats("2026-09-02")
     days = stats["days"]
     # 窗口：起点回拨 119 天，今天不进（已完结天口径）
-    assert min(days) == "2026-05-06"
+    assert min(days) == "2026-05-04"
     assert max(days) < "2026-09-02"
     assert len(days) >= 100  # 有断续空缺但主体覆盖
     # 确定性：同参数两次生成完全一致（零随机，回归可断言）
     assert st.fabricate_demo_stats("2026-09-02") == stats
     # 相伴天数 120：d7/d30/d100 解锁、d365 未解锁
     total = st.days_together(stats, "2026-09-02")
-    assert total == 120
+    assert total == 122
     badges = {b["id"]: b for b in st.badges_payload(stats, "2026-09-02")}
     assert badges["d30"]["unlocked"] is True
     assert badges["d365"]["unlocked"] is False
+    # 纪念日节点刻意避开今天：下一个节点还差 28 天（150 - 122），进度环显示非零
+    node, until_next = st.next_anniversary(stats, "2026-09-02")
+    assert (node, until_next) == (150, 28)
     # 事件徽章全解锁（三个里程碑都在窗口内）
     assert badges["first_diary"]["unlocked"] is True
     assert badges["first_journal"]["unlocked"] is True
@@ -429,10 +432,10 @@ def test_debug_stats_seed_restore_clear_flow(plugin_factory) -> None:
     assert res.value["seeded"] is True
     backup = run(p.store.get("stats@default|pre-debug"))
     assert backup.value["first_seen"] == real_first_seen
-    assert st.days_together(shard.stats, p._stats_today()) == 120
+    assert st.days_together(shard.stats, p._stats_today()) == 122
     assert st.summary_payload(shard.stats, p._stats_today())["total_turns"] != real_turns
     saved = run(p.store.get("stats@default"))
-    assert st.days_together(saved.value, p._stats_today()) == 120
+    assert st.days_together(saved.value, p._stats_today()) == 122
 
     # 连续 seed 不覆盖最早的备份（还原永远回到最初真实数据）
     run(p._handle_new_user_message(2000.0, "再来一条", "default"))

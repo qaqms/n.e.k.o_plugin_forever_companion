@@ -4,7 +4,7 @@
 // hosted-tsx 约束：唯一 export 排在任何 JSX 闭合标签之前；辅助组件放文件尾部靠函数声明提升
 import { Card, EmptyState, StatusBadge, useRef } from "@neko/plugin-ui"
 import type { HeatDay, Heatmap, MonthReport, StatsBadge, StatsSummary, TFunc } from "./types"
-import { heatDayMoodKey, heatLevel, monthLabel, moodDotColor, toneLabelKey } from "./utils"
+import { heatLevel, monthLabel, moodDotColor, toneLabelKey } from "./utils"
 
 export function MomentPane(props: {
   t: TFunc
@@ -339,11 +339,12 @@ function badgeLabel(t: TFunc, badge: StatsBadge): string {
   return map[id] || id
 }
 
-// 热力图（GitHub 贡献图布局）：列 = 周（近 12 个月 ≈ 53 列），行 = 星期几（周一起 7 行）。
+// 热力图（GitHub 贡献图布局）：列 = 周（近 12 个月固定窗口 ≈ 53 列），行 = 星期几（周一起 7 行）。
+// 窗口永远固定为 12 个月：数据不足时左侧照常铺空格——列数不随数据起点缩水
+// （否则只有一两个月数据时格子会被 cqw 弹性公式压到 7px 下限，整图缩成一窄条）。
 // 月份标签只标包含新月首日的那一列（顶部），左侧标一/三/五。
-// 双层表达：格子深浅（4 档蓝）= 当天互动轮数；格内底部色条 = 她那天的心情。
-// 无记录天 = 浅灰格；今天之后不渲染（透明占位保持列高）。
-// 无数据时默认铺满近 12 个月的日历格（GitHub 式空网格）——亮起来只是时间问题
+// 格子深浅（4 档蓝）= 当天互动轮数；无记录天 = 浅灰格；今天之后不渲染（透明占位保持列高）。
+// 无数据时同样铺满近 12 个月的日历格（GitHub 式空网格）——亮起来只是时间问题
 // hosted-tsx 无 SVG：格子用 div + 档位色；悬停 Tooltip 显示当日明细
 function HeatGrid(props: { t: TFunc; heatmap: Heatmap | null }) {
   const { t, heatmap } = props
@@ -353,8 +354,10 @@ function HeatGrid(props: { t: TFunc; heatmap: Heatmap | null }) {
   days.forEach((day) => {
     if (day && day.date) byDate[String(day.date)] = day
   })
-  const firstDate = days.length ? String(days[0].date) : ""
-  const lastDate = days.length ? String(days[days.length - 1].date) : ""
+  // 窗口锚定日历（近 12 个月），真实数据只是往里填格
+  const windowDays = buildCalendarDays()
+  const firstDate = windowDays.length ? String(windowDays[0].date) : ""
+  const lastDate = windowDays.length ? String(windowDays[windowDays.length - 1].date) : ""
   const weeks = buildWeekColumns(firstDate, lastDate).map((week) => ({
     ...week,
     monthLabel: week.monthNo ? t("panel.stats.monthShort", { defaultValue: "{m}月" }).replace("{m}", String(week.monthNo)) : "",
@@ -395,20 +398,11 @@ function HeatGrid(props: { t: TFunc; heatmap: Heatmap | null }) {
                     }
                     const day = byDate[date]
                     const lv = heatLevel(day ? day.turns : 0)
-                    const moodKey = day ? heatDayMoodKey(day) : ""
-                    const moodWord = moodKey ? t(moodKey, { defaultValue: "" }) : ""
-                    const moodCls = moodBarClass(day)
-                    const tip = [
-                      date,
-                      t("panel.stats.heatTipTurns", { defaultValue: "互动 {n} 轮" }).replace("{n}", String((day && day.turns) || 0)),
-                      moodWord ? t("panel.stats.heatTipMood", { defaultValue: "她那天：{m}" }).replace("{m}", moodWord) : "",
-                    ].filter(Boolean).join(" · ")
+                    const tip = `${date} · ${t("panel.stats.heatTipTurns", { defaultValue: "互动 {n} 轮" }).replace("{n}", String((day && day.turns) || 0))}`
                     // 悬停明细由自适应 Tip 承载（顶部行自动向下翻、左右缘自动收拢）
                     return (
                       <AdaptiveTip key={date} content={tip}>
-                        <span className={`tm-heat-cell tm-heat-lv${lv}`}>
-                          <span className={`tm-heat-mood ${moodCls}`} />
-                        </span>
+                        <span className={`tm-heat-cell tm-heat-lv${lv}`} />
                       </AdaptiveTip>
                     )
                   })}
@@ -421,23 +415,15 @@ function HeatGrid(props: { t: TFunc; heatmap: Heatmap | null }) {
       <div className="tm-heat-footer">
         <span className="tm-heat-note">
           {real.length
-            ? t("panel.stats.heatNote", { defaultValue: "颜色深浅 = 当天互动轮数；悬停查看她那天的心情" })
+            ? t("panel.stats.heatNote", { defaultValue: "颜色深浅 = 当天互动轮数；悬停查看明细" })
             : t("panel.stats.heatEmptySub", { defaultValue: "互动过的日子会在这里亮起来。" })}
         </span>
         <div className="tm-heat-legend">
           <span className="tm-heat-legend-label">{t("panel.stats.heatLess", { defaultValue: "少" })}</span>
           {[0, 1, 2, 3, 4].map((lv) => (
-            <span key={lv} className={`tm-heat-cell tm-heat-lv${lv}`}>
-              <span className="tm-heat-mood tm-heat-mood-neutral" />
-            </span>
+            <span key={lv} className={`tm-heat-cell tm-heat-lv${lv}`} />
           ))}
           <span className="tm-heat-legend-label">{t("panel.stats.heatMore", { defaultValue: "多" })}</span>
-          <span className="tm-heat-legend-sep" />
-          <span className="tm-heat-legend-mood">
-            <span className="tm-heat-mood tm-heat-mood-warm" />
-            <span className="tm-heat-mood tm-heat-mood-cold" />
-            {t("panel.stats.heatMoodLegend", { defaultValue: "她那天的心情" })}
-          </span>
         </div>
       </div>
     </div>
@@ -506,15 +492,6 @@ function buildCalendarDays(): HeatDay[] {
     cursor.setDate(cursor.getDate() + 1)
   }
   return out
-}
-
-// 当日心情色条档位：正 valence 暖琥珀、负灰蓝、无采样中性
-function moodBarClass(day?: { valence?: number | null }): string {
-  if (!day || day.valence === null || day.valence === undefined) return "tm-heat-mood-none"
-  const v = Number(day.valence) || 0
-  if (v > 0.08) return "tm-heat-mood-warm"
-  if (v < -0.08) return "tm-heat-mood-cold"
-  return "tm-heat-mood-neutral"
 }
 
 // 月报导航：左右翻月 + 月份标题（历史封卷月固定，当月实时）

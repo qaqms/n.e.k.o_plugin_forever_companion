@@ -1081,16 +1081,6 @@ export const PANEL_STYLES = `
 .tm-heat-lv2 { background: rgba(96, 165, 250, 0.55); }
 .tm-heat-lv3 { background: rgba(96, 165, 250, 0.78); }
 .tm-heat-lv4 { background: rgba(96, 165, 250, 1); }
-/* 心情色条：格子底部亮条，正=暖琥珀、负=灰蓝、无采样=不亮；
-   尺寸改为百分比随格子缩放（cqw 下格子是 7~11px 弹性值，固定像素会溢出小格） */
-.tm-heat-mood {
-  position: absolute; left: 18%; right: 18%; bottom: 12%; height: 24%;
-  border-radius: 1.5px; pointer-events: none;
-}
-.tm-heat-mood-warm { background: rgb(245, 176, 77); box-shadow: 0 0 3px rgba(245, 176, 77, 0.65); }
-.tm-heat-mood-cold { background: rgb(110, 141, 171); }
-.tm-heat-mood-neutral { background: rgba(148, 163, 184, 0.5); }
-.tm-heat-mood-none { background: transparent; }
 /* 滚动条彻底隐藏（overflow-x:hidden 已物理禁止；此处双保险把 gutter
    也归零——Windows 上 overflow 容器即使无溢出也可能保留 scrollbar gutter） */
 .tm-heat-scroll { scrollbar-width: none; }
@@ -1105,14 +1095,6 @@ export const PANEL_STYLES = `
    固定 10px 小方块，与网格格子语义解耦 */
 .tm-heat-legend .tm-heat-cell { width: 10px; height: 10px; flex: 0 0 10px; }
 .tm-heat-legend-label { font-size: 10.5px; color: var(--muted); margin: 0 2px; }
-.tm-heat-legend-sep { width: 1px; height: 12px; margin: 0 6px; background: rgba(148, 163, 184, 0.35); }
-.tm-heat-legend-mood { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; color: var(--muted); position: relative; }
-/* 图例里的心情示意色块：.tm-heat-mood 基类是 absolute + 百分比尺寸（为格子内色条设计），
-   直接复用会逃逸出未定位的图例容器、按外层定位祖先（整页）计算尺寸——曾渲染出一条
-   横贯页面的蓝色长条。这里收编为 static 固定小色块（暖=正、灰蓝=负） */
-.tm-heat-legend-mood .tm-heat-mood {
-  position: static; width: 10px; height: 5px; border-radius: 1.5px;
-}
 
 /* ---- 月报 ---- */
 .tm-month-nav { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }

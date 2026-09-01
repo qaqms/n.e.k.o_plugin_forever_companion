@@ -587,11 +587,12 @@ def mark_anniversary_pushed(stats: JsonObject, today: str) -> JsonObject:
 def fabricate_demo_stats(today: str) -> JsonObject:
     """调试用假数据（[tide].debug_mode 的 debug_stats 入口）：确定性、无随机。
 
-    生成以 today 为终点、起点回拨 119 天（共 120 天窗口）的相处分布，覆盖面板
+    生成以 today 为终点、起点回拨 121 天（共 122 天窗口）的相处分布，覆盖面板
     时光页的全部可视化分支：
-    - 相伴天数 120 → 徽章解锁 d7/d30/d100，d365 进度条 ~1/3
+    - 相伴天数 122 → 徽章解锁 d7/d30/d100，d365 进度条 ~1/3；
+      下一个纪念日节点是第 150 天（还差 28 天）——刻意避开节点当天，
+      否则"距纪念日 0 天"卡住不动，进度环看不出变化
     - 轮数 0~34 铺开 → 热力图 5 档颜色 + 空白天 + 连续/断续节奏
-    - valence 正/负/中性按周期摆动 → 暖琥珀/灰蓝/中性格底色条
     - 语气分布 happy/neutral/sad/angry 混合 → 悬停明细与月报语气胶囊
     - 冷战/和好/暖流计数 + 三本日记里程碑 → 数字摘要与事件徽章
     纯函数不碰 first_seen 的真实语义：写死为起点日期 00:00（本地日），调用方
@@ -601,9 +602,9 @@ def fabricate_demo_stats(today: str) -> JsonObject:
         anchor = date.fromisoformat(today)
     except ValueError:
         return new_stats()
-    start = anchor - timedelta(days=119)
+    start = anchor - timedelta(days=121)
     days: JsonObject = {}
-    for offset in range(120):
+    for offset in range(122):
         day = (start + timedelta(days=offset)).isoformat()
         if day >= today:
             break  # 今天不进热力图（已完结天口径），假数据同样遵守
