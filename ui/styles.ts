@@ -797,10 +797,16 @@ export const PANEL_STYLES = `
 @keyframes tm-hero-glow { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
 .tm-hero-card > * { position: relative; z-index: 1; }
 
-/* ---- 自适应悬停提示（AdaptiveTip）：fixed 定位，不受祖先 overflow 裁剪 ----
-   坐标由悬停瞬间的视口量测写入 style；上弹时底边对齐 top、下翻时顶边对齐 top */
-/* 包裹层需保留盒模型（量测坐标用）：inline-block 适配 flex/块级/行内各宿主布局 */
-.tm-tip-wrap { display: inline-block; vertical-align: top; }
+/* ---- 自适应悬停提示（AdaptiveTip）：tip 单例挂在 document.body 的 fixed 元素 ----
+   坐标由悬停瞬间的视口量测写入 style；上弹时底边对齐 top、下翻时顶边对 top。
+   必须挂 body：.tm-heat-scroll 的 container-type 与 .neko-card 的 backdrop-filter
+   都会劫持 fixed 后代的包含块（视口坐标被按容器内坐标解释，实测偏移 ~180px），
+   卡片 overflow:hidden 还会裁剪——body 无 transform/filter 祖先，fixed 即真视口系 */
+/* 包裹层保留盒模型（量测坐标用）。display:block + line-height:0：inline-block 会被
+   行内 strut（基础字号行高 ~19px）撑高——10px 格子行实际 ~20.5px，行距翻倍且左侧
+   星期标签列（11.5px 节距）与之渐行错位；压掉 strut 后包裹层高度即内容本高。
+   hero 统计卡/徽章卡的包裹层在 flex/grid 上下文里不含行内内容，不受影响 */
+.tm-tip-wrap { display: block; line-height: 0; }
 .tm-tip {
   position: fixed; z-index: 10000; transform: translate(-50%, -100%);
   max-width: 240px; padding: 5px 9px; border-radius: 8px;
