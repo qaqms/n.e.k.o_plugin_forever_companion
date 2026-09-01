@@ -359,3 +359,100 @@ def test_seal_stats_months_via_tick_guard(plugin_factory) -> None:
         sealed = run(p._seal_stats_months("default", shard))
         assert "2020-01" in sealed
         assert shard.stats["months"]["2020-01"]["sealed"] is True
+
+
+# ---------------------------------------------------------------------------
+# 调试入口：debug_stats 假数据注入/还原（[tide].debug_mode 下的时光页验证）
+# ---------------------------------------------------------------------------
+
+def test_fabricate_demo_stats_covers_visual_branches() -> None:
+    """纯逻辑：120 天确定性分布，覆盖热力图档位/色条/徽章/月报所需的全部分支。"""
+    stats = st.fabricate_demo_stats("2026-09-02")
+    days = stats["days"]
+    # 窗口：起点回拨 119 天，今天不进（已完结天口径）
+    assert min(days) == "2026-05-06"
+    assert max(days) < "2026-09-02"
+    assert len(days) >= 100  # 有断续空缺但主体覆盖
+    # 确定性：同参数两次生成完全一致（零随机，回归可断言）
+    assert st.fabricate_demo_stats("2026-09-02") == stats
+    # 相伴天数 120：d7/d30/d100 解锁、d365 未解锁
+    total = st.days_together(stats, "2026-09-02")
+    assert total == 120
+    badges = {b["id"]: b for b in st.badges_payload(stats, "2026-09-02")}
+    assert badges["d30"]["unlocked"] is True
+    assert badges["d365"]["unlocked"] is False
+    # 事件徽章全解锁（三个里程碑都在窗口内）
+    assert badges["first_diary"]["unlocked"] is True
+    assert badges["first_journal"]["unlocked"] is True
+    assert badges["first_review"]["unlocked"] is True
+    # 热力图：多档轮数 + 正/负/中性 valence + 语气多样（悬停明细可见）
+    heat = st.heatmap_payload(stats, "2026-09-02")
+    heat_days = heat["days"]
+    turns_set = {d["turns"] for d in heat_days}
+    assert max(turns_set) > 25 and min(turns_set) > 0
+    valences = {d["valence"] for d in heat_days}
+    assert any(v is not None and v > 0.3 for v in valences)
+    assert any(v is not None and v < -0.3 for v in valences)
+    tones = {d["tone"] for d in heat_days if d["tone"]}
+    assert {"happy", "sad", "neutral"} <= tones
+    # 冷战/和好/暖流都有计数（数字摘要非零）+ 连续天数 ≥ 1
+    s = st.summary_payload(stats, "2026-09-02")
+    assert s["cold_wars"] >= 1 and s["made_ups"] >= 1 and s["warm_moments"] >= 1
+    assert s["total_turns"] > 500
+    assert s["current_streak"] >= 1
+    # 月报：窗口内任一已完结月可聚合
+    month = st.month_view(stats, "2026-08")
+    assert month["month"] == "2026-08"
+    assert month["turns"] > 0
+
+
+def test_debug_stats_seed_restore_clear_flow(plugin_factory) -> None:
+    """主链路：seed 备份→注入→restore 还原→备份清掉；互斥校验；clear 清空。"""
+    p = plugin_factory()
+    # 先造一份"真实"数据
+    run(p._handle_new_user_message(1000.0, "你好", "default"))
+    shard = p._get_shard("default")
+    real_first_seen = shard.stats["first_seen"]
+    real_turns = st.summary_payload(shard.stats, p._stats_today())["total_turns"]
+
+    # 无参：只回显概要
+    res = run(p._debug_stats())
+    assert res.value["lanlan"] == "default"
+    assert res.value["summary"]["total_turns"] == real_turns
+
+    # 互斥：seed+restore 同传被拒（conftest 桩的 Err：结果带 .error 无 .value）
+    res = run(p._debug_stats(seed=True, restore=True))
+    assert getattr(res, "error", None) is not None
+
+    # seed：备份真实数据并注入假数据
+    res = run(p._debug_stats(seed=True))
+    assert res.value["seeded"] is True
+    backup = run(p.store.get("stats@default|pre-debug"))
+    assert backup.value["first_seen"] == real_first_seen
+    assert st.days_together(shard.stats, p._stats_today()) == 120
+    assert st.summary_payload(shard.stats, p._stats_today())["total_turns"] != real_turns
+    saved = run(p.store.get("stats@default"))
+    assert st.days_together(saved.value, p._stats_today()) == 120
+
+    # 连续 seed 不覆盖最早的备份（还原永远回到最初真实数据）
+    run(p._handle_new_user_message(2000.0, "再来一条", "default"))
+    run(p._debug_stats(seed=True))
+    backup2 = run(p.store.get("stats@default|pre-debug"))
+    assert backup2.value["first_seen"] == real_first_seen
+
+    # restore：还原真实数据、清掉备份
+    res = run(p._debug_stats(restore=True))
+    assert res.value["restored"] is True
+    assert shard.stats["first_seen"] == real_first_seen
+    backup3 = run(p.store.get("stats@default|pre-debug"))
+    assert backup3.value is None
+    # 再 restore：无备份提示
+    res = run(p._debug_stats(restore=True))
+    assert res.value["restored"] is False
+
+    # clear：清空为空白
+    res = run(p._debug_stats(clear=True))
+    assert res.value["cleared"] is True
+    assert st.summary_payload(shard.stats, p._stats_today())["days_together"] == 0
+    saved = run(p.store.get("stats@default"))
+    assert st.summary_payload(saved.value, p._stats_today())["total_turns"] == 0

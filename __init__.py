@@ -113,7 +113,6 @@ try:
         append_review,
         build_review_prompt,
         can_force_write,
-        new_stats,
         parse_review_response,
         record_action,
         record_fragment,
@@ -122,6 +121,7 @@ try:
         review_due,
         review_record,
     )
+    from .review import new_stats as review_new_stats
     from .state import (
         _ACTION_DEFAULT_MINUTES,
         _COLD_ACTIONS,
@@ -216,9 +216,11 @@ try:
         anniversary_due,
         backfill_day,
         badges_payload,
+        fabricate_demo_stats,
         heatmap_payload,
         mark_anniversary_pushed,
         month_view,
+        new_stats,
         record_made_up,
         record_milestone,
         record_mood_event,
@@ -260,7 +262,6 @@ except ImportError:  # pragma: no cover - 无父包上下文的兜底（同上 c
         append_review,
         build_review_prompt,
         can_force_write,
-        new_stats,
         parse_review_response,
         record_action,
         record_fragment,
@@ -269,6 +270,7 @@ except ImportError:  # pragma: no cover - 无父包上下文的兜底（同上 c
         review_due,
         review_record,
     )
+    from review import new_stats as review_new_stats  # type: ignore[no-redef]
     from state import (  # type: ignore[no-redef]
         _ACTION_DEFAULT_MINUTES,
         _COLD_ACTIONS,
@@ -363,9 +365,11 @@ except ImportError:  # pragma: no cover - 无父包上下文的兜底（同上 c
         anniversary_due,
         backfill_day,
         badges_payload,
+        fabricate_demo_stats,
         heatmap_payload,
         mark_anniversary_pushed,
         month_view,
+        new_stats,
         record_made_up,
         record_milestone,
         record_mood_event,
@@ -2165,7 +2169,7 @@ class ForeverCompanionPlugin(NekoPluginBase):
         stats_snapshot = dict(shard.review_stats)
         record = review_record(_now_utc().isoformat(timespec="seconds"), stats_snapshot, text)
         shard.review = append_review(shard.review, record)
-        shard.review_stats = new_stats()  # 成文后清零重新累计
+        shard.review_stats = review_new_stats()  # 成文后清零重新累计（review 的 new_stats，勿与 stats 的同名混淆）
         await self._save_shard_review(lanlan, shard)
         # 相处统计：第一篇我的日记里程碑（不覆盖最早值）
         shard.stats = record_milestone(shard.stats, "first_review")
@@ -3873,7 +3877,7 @@ class ForeverCompanionPlugin(NekoPluginBase):
         shard.diary = []
         # 我的日记一并重置（重置语义是"当前角色清零重来"，评价与素材同属）
         shard.review = []
-        shard.review_stats = new_stats()
+        shard.review_stats = review_new_stats()
         await self._save_shard_cycle(lanlan, shard)
         await self._save_shard_mood(lanlan, shard)
         await self._save_shard_diary(lanlan, shard)
@@ -4246,7 +4250,7 @@ class ForeverCompanionPlugin(NekoPluginBase):
         lanlan, shard = await self._current_shard_async()
         count = len(shard.review)
         shard.review = []
-        shard.review_stats = new_stats()
+        shard.review_stats = review_new_stats()
         await self._save_shard_review(lanlan, shard)
         return Ok({"cleared": count, "lanlan": lanlan})
 
@@ -4515,6 +4519,20 @@ class ForeverCompanionPlugin(NekoPluginBase):
                 "type": "object",
                 "properties": {
                     "force": {"type": "boolean", "description": "true = 跳过门槛立即成文（素材不足仍会拒绝）"},
+                    **_DEBUG_LANLAN_PROP,
+                },
+            },
+        ),
+        (
+            "debug_stats",
+            "调试：相处统计假数据注入/还原",
+            "为时光页（热力图/徽章/月报/数字摘要）注入 120 天确定性假数据用于界面验证；真实 stats 先备份，restore=true 还原，clear=true 清空。",
+            {
+                "type": "object",
+                "properties": {
+                    "seed": {"type": "boolean", "description": "true = 备份现有数据并注入假数据（默认 false）"},
+                    "restore": {"type": "boolean", "description": "true = 从备份还原真实数据（默认 false）"},
+                    "clear": {"type": "boolean", "description": "true = 清空为空白统计（不自动备份，默认 false）"},
                     **_DEBUG_LANLAN_PROP,
                 },
             },
@@ -4790,6 +4808,76 @@ class ForeverCompanionPlugin(NekoPluginBase):
             payload["forced_write"] = written
             payload["write_reason"] = write_reason
         return Ok(payload)
+
+    async def _debug_stats(
+        self,
+        seed: bool = False,
+        restore: bool = False,
+        clear: bool = False,
+        lanlan: str = "",
+        **_: Any,
+    ):
+        """相处统计假数据注入/还原（时光页界面验证，零随机可复现）。
+
+        seed：真实 stats 备份到 stats@<角色>|pre-debug 后覆盖为 fabricate_demo_stats
+        的 120 天分布（热力图全档位/色条、徽章、月报、数字摘要全覆盖）；
+        restore：从备份还原；clear：清空为空白（不备份，适合反复 seed 用）。
+        三个参数互斥，都不带时只回显当前统计概要。只动当前角色的 stats 分片，
+        周期/情绪/日记等其他数据一概不碰。
+        """
+        name, shard = await self._debug_target_shard(lanlan)
+        flags = [bool(seed), bool(restore), bool(clear)]
+        if sum(flags) > 1:
+            return Err(SdkError("seed / restore / clear 互斥，一次只传一个"))
+        backup_key = f"{_stats_key(name)}|pre-debug"
+        today = self._stats_today()
+        if seed:
+            backup = await self.store.get(backup_key)
+            if not isinstance(backup, Err) and backup.value is None:
+                # 首次 seed 才备份：连续 seed 不覆盖最早的备份（还原永远回到最初真实数据）
+                saved = await self.store.set(backup_key, dict(shard.stats))
+                if isinstance(saved, Err):
+                    return Err(SdkError("备份真实数据失败，已中止注入"))
+            shard.stats = fabricate_demo_stats(today)
+            await self._save_shard_stats(name, shard)
+            self.logger.info("debug stats seeded for {}", name)
+            return Ok({
+                "seeded": True,
+                "lanlan": name,
+                "note": "已注入 120 天假数据；打开时光页即可验证热力图/徽章/月报/摘要。"
+                        "测完 restore=true 还原真实数据。",
+                **self._debug_stats_brief(shard, today),
+            })
+        if restore:
+            backup = await self.store.get(backup_key)
+            if isinstance(backup, Err) or backup.value is None:
+                return Ok({"restored": False, "lanlan": name, "note": "没有可还原的备份（从未 seed 过）。"})
+            shard.stats = dict(backup.value)
+            await self._save_shard_stats(name, shard)
+            await self.store.set(backup_key, None)
+            self.logger.info("debug stats restored for {}", name)
+            return Ok({
+                "restored": True,
+                "lanlan": name,
+                "note": "真实相处统计已还原，备份已清除。",
+                **self._debug_stats_brief(shard, today),
+            })
+        if clear:
+            shard.stats = new_stats()
+            await self._save_shard_stats(name, shard)
+            return Ok({"cleared": True, "lanlan": name, **self._debug_stats_brief(shard, today)})
+        return Ok({
+            "lanlan": name,
+            "note": "带 seed=true 注入假数据 / restore=true 还原 / clear=true 清空。",
+            **self._debug_stats_brief(shard, today),
+        })
+
+    def _debug_stats_brief(self, shard: _LanlanShard, today: str) -> JsonObject:
+        """debug_stats 回显用的统计概要（与面板时光页同源的派生视图）。"""
+        return {
+            "summary": summary_payload(shard.stats, today),
+            "heat_days": len(heatmap_payload(shard.stats, today).get("days") or []),
+        }
 
     async def _debug_force_activity(
         self,

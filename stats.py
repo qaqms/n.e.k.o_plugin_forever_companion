@@ -582,3 +582,59 @@ def mark_anniversary_pushed(stats: JsonObject, today: str) -> JsonObject:
     fresh = dict(stats)
     fresh["anniversary"] = {**dict(fresh.get("anniversary") if isinstance(fresh.get("anniversary"), dict) else {}), "last_pushed": str(today)}
     return fresh
+
+
+def fabricate_demo_stats(today: str) -> JsonObject:
+    """调试用假数据（[tide].debug_mode 的 debug_stats 入口）：确定性、无随机。
+
+    生成以 today 为终点、起点回拨 119 天（共 120 天窗口）的相处分布，覆盖面板
+    时光页的全部可视化分支：
+    - 相伴天数 120 → 徽章解锁 d7/d30/d100，d365 进度条 ~1/3
+    - 轮数 0~34 铺开 → 热力图 5 档颜色 + 空白天 + 连续/断续节奏
+    - valence 正/负/中性按周期摆动 → 暖琥珀/灰蓝/中性格底色条
+    - 语气分布 happy/neutral/sad/angry 混合 → 悬停明细与月报语气胶囊
+    - 冷战/和好/暖流计数 + 三本日记里程碑 → 数字摘要与事件徽章
+    纯函数不碰 first_seen 的真实语义：写死为起点日期 00:00（本地日），调用方
+    只把它覆盖进当前角色的 stats@ 分片（备份由主类负责）。
+    """
+    try:
+        anchor = date.fromisoformat(today)
+    except ValueError:
+        return new_stats()
+    start = anchor - timedelta(days=119)
+    days: JsonObject = {}
+    for offset in range(120):
+        day = (start + timedelta(days=offset)).isoformat()
+        if day >= today:
+            break  # 今天不进热力图（已完结天口径），假数据同样遵守
+        # 每周一天完全空缺（断续感），周末更热
+        weekday = (start + timedelta(days=offset)).weekday()
+        if weekday == 3 and offset % 7 in (0, 3):
+            continue
+        base = 2 + (offset % 5) * 3 + (6 if weekday >= 5 else 0)
+        turns = min(34, base + (offset // 11))  # 缓慢爬升，偶有高峰
+        valence_cycle = ((offset % 21) - 10) / 10.0  # -1.0 ~ +1.0 三周摆动
+        v = round(max(-0.85, min(0.9, valence_cycle + (0.15 if weekday >= 5 else -0.1))), 2)
+        tone = "happy" if v > 0.3 else "sad" if v < -0.5 else "neutral"
+        if offset % 17 == 0:
+            tone = "angry"
+        bucket: JsonObject = {
+            "turns": turns,
+            "v_sum": round(v * 3, 3),
+            "v_n": 3,
+            "tone": {tone: 3, "neutral": 1},
+            "cold": 1 if offset % 29 == 0 else 0,
+            "made_up": 1 if offset % 29 == 0 else 0,
+            "warm": 1 if offset % 13 == 0 else 0,
+        }
+        days[day] = bucket
+    stats = new_stats()
+    stats["first_seen"] = f"{start.isoformat()}T00:00:00"
+    stats["days"] = days
+    # 三本日记的第一天都点亮（事件徽章全解锁）；纪念日去重水位留空（不伪造今天已注入）
+    stats["milestones"] = {
+        "first_diary": f"{(start + timedelta(days=9)).isoformat()}T21:30:00",
+        "first_journal": f"{(start + timedelta(days=23)).isoformat()}T22:10:00",
+        "first_review": f"{(start + timedelta(days=44)).isoformat()}T23:00:00",
+    }
+    return stats
