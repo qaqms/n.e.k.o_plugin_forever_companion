@@ -816,10 +816,11 @@ export const PANEL_STYLES = `
   pointer-events: none; white-space: normal;
 }
 .tm-tip-below { transform: translate(-50%, 0); }
-/* hero 数字区：相伴天数大数字 + 纪念日进度环（氛围卡内上半区） */
+/* hero 数字区：相伴天数大数字 + 纪念日进度环（氛围卡内上半区）。
+   与下方统计卡的间距 12→18px：统计卡与 hero 同为玻璃质感，间距小了糊成一片 */
 .tm-hero {
   display: flex; align-items: center; justify-content: space-between; gap: 18px;
-  flex-wrap: wrap; margin-bottom: 12px;
+  flex-wrap: wrap; margin-bottom: 18px;
 }
 .tm-hero-days { display: flex; flex-direction: column; gap: 2px; cursor: default; }
 .tm-hero-days-value {
@@ -829,7 +830,10 @@ export const PANEL_STYLES = `
   font-variant-numeric: tabular-nums;
 }
 .tm-hero-days-label { font-size: 12.5px; color: var(--muted); font-weight: 600; }
-/* 纪念日进度环：conic-gradient 填充 + 玻璃内芯（数字居中） */
+/* 纪念日进度环：conic-gradient 填充 + 玻璃内芯（数字居中）。
+   内芯 inset 6px → 实际 52px，数字/单位行盒必须 ≤52（曾写死 line-height:64px，
+   52px 容器里塞 64px 行盒 + baseline 对齐 → 整组字下溢、数字中心偏离圆心）；
+   line-height:1 让文字盒=字号，align-items:center 把盒中心压到圆心 */
 .tm-hero-ring { display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: default; }
 .tm-hero-ring-track {
   position: relative; width: 64px; height: 64px; border-radius: 999px;
@@ -838,12 +842,12 @@ export const PANEL_STYLES = `
 }
 .tm-hero-ring-inner {
   position: absolute; inset: 6px; border-radius: 999px;
-  display: flex; align-items: baseline; justify-content: center; gap: 1px;
+  display: flex; align-items: center; justify-content: center; gap: 1px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(255, 255, 255, 0.78) 100%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 1), 0 1px 3px rgba(100, 116, 139, 0.18);
 }
-.tm-hero-ring-num { font-size: 19px; font-weight: 800; line-height: 64px; font-variant-numeric: tabular-nums; }
-.tm-hero-ring-unit { font-size: 10px; color: var(--muted); line-height: 64px; }
+.tm-hero-ring-num { font-size: 19px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+.tm-hero-ring-unit { font-size: 10px; color: var(--muted); line-height: 1; }
 .tm-hero-ring-label { font-size: 11px; color: var(--muted); font-weight: 600; }
 /* 统计玻璃小卡（氛围卡内底边距由卡片接管） */
 .tm-stat-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
