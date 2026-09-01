@@ -44,6 +44,22 @@ export const PANEL_STYLES = `
 /* 宿主 kit 对禁用按钮用了 cursor: wait（Windows 上显示转圈忙碌光标），这里纠正为不可点击 */
 .neko-page .neko-button:disabled { cursor: not-allowed; }
 
+/* ---- Tooltip 修复（宿主 kit 缺陷，仅本面板内覆盖）----
+   宿主 .neko-tooltip-content 是挂在被悬停元素（往往只有 50px 宽的徽章格/热力格）里的
+   absolute 元素：没写宽度下限，shrink-to-fit 的可用宽被包含块（那个小格子）压窄，
+   一句话被折成 44px 宽的竖条（一字一行）。修复：
+   1) width: max-content —— 先按内容自然宽；
+   2) max-width: min(280px, 80vw) —— 超长文到上限才优雅折行（自适应换行）；
+   3) 边缘翻转：靠近面板左缘时以左缘为锚向右展开、右缘同理向左——
+      用 :has() 容器查询近似"贴边"判定不可靠（沙箱运行时对 :has 支持未验证），
+      改用更稳的做法：父级 .neko-tooltip 若是行内首/尾元素，用 text-align 感知不现实，
+      故采用 grid 隐式列 + 匿名盒定位——最终方案见下方实现注释。 */
+.neko-page .neko-tooltip-content {
+  width: max-content;
+  max-width: min(280px, 80vw);
+  white-space: normal;
+}
+
 .tm-statusbar {
   display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
   padding: 14px 22px;
@@ -632,6 +648,7 @@ export const PANEL_STYLES = `
   }
   .tm-book-entry-text { color: #d8d2c2; }
   .tm-book-entry-ts { color: rgba(168, 155, 126, 0.9); }
+
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -748,87 +765,475 @@ export const PANEL_STYLES = `
   width: 3.5px; height: 3.5px; border-radius: 999px; background: currentColor;
 }
 
-/* ---- 时光页 · 相处统计（1.1.0）---- */
-/* 数字摘要条 */
-.tm-stat-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
+/* ---- 时光页 · 相处统计（1.1.0 · 磨砂玻璃精致化）---- */
+/* 里程碑氛围卡：包住 hero 行 + 四个统计小卡的对角双色氛围容器 */
+.tm-hero-card {
+  position: relative;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.35) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  /* 双色落影：只留若有若无的微光浮起感（不做明显影块） */
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 4px 14px rgba(245, 176, 77, 0.04),
+    0 4px 14px rgba(96, 165, 250, 0.05);
+}
+/* 氛围光斑：左上暖橙 / 右下冷蓝（与橙色对称的强度与尺寸），
+   伪元素承载并极慢呼吸（错开半拍）；内容经 z-index 置于光斑之上 */
+.tm-hero-card::before, .tm-hero-card::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit;
+  pointer-events: none; z-index: 0;
+}
+.tm-hero-card::before {
+  background: radial-gradient(240px 120px at 12% 0%, rgba(245, 176, 77, 0.10), transparent 70%);
+  animation: tm-hero-glow 9s ease-in-out infinite;
+}
+.tm-hero-card::after {
+  background: radial-gradient(240px 120px at 88% 100%, rgba(96, 165, 250, 0.10), transparent 70%);
+  animation: tm-hero-glow 9s ease-in-out infinite;
+  animation-delay: -4.5s;
+}
+@keyframes tm-hero-glow { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+.tm-hero-card > * { position: relative; z-index: 1; }
+
+/* ---- 自适应悬停提示（AdaptiveTip）：fixed 定位，不受祖先 overflow 裁剪 ----
+   坐标由悬停瞬间的视口量测写入 style；上弹时底边对齐 top、下翻时顶边对齐 top */
+/* 包裹层需保留盒模型（量测坐标用）：inline-block 适配 flex/块级/行内各宿主布局 */
+.tm-tip-wrap { display: inline-block; vertical-align: top; }
+.tm-tip {
+  position: fixed; z-index: 10000; transform: translate(-50%, -100%);
+  max-width: 240px; padding: 5px 9px; border-radius: 8px;
+  background: rgba(15, 23, 42, 0.94); color: #e6edf7;
+  font-size: 11px; line-height: 1.45; text-align: center;
+  box-shadow: 0 4px 14px rgba(2, 6, 23, 0.35);
+  pointer-events: none; white-space: normal;
+}
+.tm-tip-below { transform: translate(-50%, 0); }
+/* hero 数字区：相伴天数大数字 + 纪念日进度环（氛围卡内上半区） */
+.tm-hero {
+  display: flex; align-items: center; justify-content: space-between; gap: 18px;
+  flex-wrap: wrap; margin-bottom: 12px;
+}
+.tm-hero-days { display: flex; flex-direction: column; gap: 2px; cursor: default; }
+.tm-hero-days-value {
+  font-size: 40px; font-weight: 800; line-height: 1; letter-spacing: -0.5px;
+  background: linear-gradient(180deg, #3c4a5e 0%, #5a6b82 100%);
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  font-variant-numeric: tabular-nums;
+}
+.tm-hero-days-label { font-size: 12.5px; color: var(--muted); font-weight: 600; }
+/* 纪念日进度环：conic-gradient 填充 + 玻璃内芯（数字居中） */
+.tm-hero-ring { display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: default; }
+.tm-hero-ring-track {
+  position: relative; width: 64px; height: 64px; border-radius: 999px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 10px rgba(245, 176, 77, 0.22);
+}
+.tm-hero-ring-inner {
+  position: absolute; inset: 6px; border-radius: 999px;
+  display: flex; align-items: baseline; justify-content: center; gap: 1px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(255, 255, 255, 0.78) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 1), 0 1px 3px rgba(100, 116, 139, 0.18);
+}
+.tm-hero-ring-num { font-size: 19px; font-weight: 800; line-height: 64px; font-variant-numeric: tabular-nums; }
+.tm-hero-ring-unit { font-size: 10px; color: var(--muted); line-height: 64px; }
+.tm-hero-ring-label { font-size: 11px; color: var(--muted); font-weight: 600; }
+/* 统计玻璃小卡（氛围卡内底边距由卡片接管） */
+.tm-stat-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
+.tm-hero-card .tm-stat-strip { margin-bottom: 0; }
 .tm-stat-cell {
   display: flex; flex-direction: column; align-items: center; gap: 2px;
-  padding: 10px 4px; border-radius: 10px; background: rgba(148, 163, 184, 0.1);
+  padding: 10px 4px; border-radius: 10px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.32) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
   cursor: default;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
-.tm-stat-value { font-size: 17px; font-weight: 700; line-height: 1.2; }
+.tm-stat-cell:hover { transform: translateY(-1px); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 4px 12px rgba(96, 165, 250, 0.14); }
+.tm-stat-value { font-size: 17px; font-weight: 750; line-height: 1.2; font-variant-numeric: tabular-nums; }
 .tm-stat-label { font-size: 11px; color: var(--muted); }
-/* 徽章墙 */
-.tm-badge-wall { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-.tm-badge {
-  display: flex; flex-direction: column; align-items: center; gap: 3px;
-  padding: 10px 4px 8px; border-radius: 12px;
-  background: rgba(148, 163, 184, 0.07); border: 1px solid rgba(148, 163, 184, 0.18);
-  opacity: 0.55; filter: grayscale(0.6);
+@media (max-width: 560px) {
+  .tm-stat-strip { grid-template-columns: repeat(2, 1fr); }
 }
-.tm-badge-on {
-  opacity: 1; filter: none;
-  border-color: rgba(245, 176, 77, 0.45);
-  background: rgba(245, 176, 77, 0.08);
+
+/* ---- 相处徽章墙（成就卡片式 2.0）：横向 4 列卡片（窄面板降列），月光蓝主调 ----
+   天数类按难度升级月相（新月→半月→满月→星拱月→潮汐月），
+   事件类专属图形（羽毛笔/书页/信封）；未解锁整卡灰化剪影 + 进度条 */
+/* 徽章墙横向排列：4 列 × 2 行，窄面板逐级降列 */
+.tm-badge-wall { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.tm-ach {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px; border-radius: 12px;
+  background: rgba(148, 163, 184, 0.06); border: 1px solid rgba(148, 163, 184, 0.16);
+  cursor: default;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
-.tm-badge-medal { font-size: 14px; line-height: 1; color: var(--muted); }
-.tm-badge-lv-on { color: rgb(245, 176, 77); }
-.tm-badge-lv-off { color: var(--muted); }
-.tm-badge-name { font-size: 11.5px; font-weight: 600; text-align: center; line-height: 1.25; }
-.tm-badge-date { font-size: 10.5px; color: var(--muted); }
-/* 热力图 */
-.tm-heat-legend { display: flex; align-items: center; gap: 4px; justify-content: flex-end; margin-bottom: 6px; }
-.tm-heat-legend-label { font-size: 10.5px; color: var(--muted); margin: 0 2px; }
-.tm-heat-scroll { overflow-x: auto; padding-bottom: 4px; }
-.tm-heat-wrap { display: flex; gap: 10px; align-items: flex-end; }
-.tm-heat-month { display: flex; flex-direction: column; gap: 4px; }
-.tm-heat-month-label { font-size: 10px; color: var(--muted); text-align: left; white-space: nowrap; }
-.tm-heat-grid { display: grid; grid-template-columns: repeat(7, 1fr); grid-auto-flow: column; gap: 2.5px; }
+.tm-ach:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(2, 6, 23, 0.10); }
+.tm-ach-on {
+  background:
+    radial-gradient(140px 70px at 18% 0%, rgba(96, 165, 250, 0.14), transparent 70%),
+    rgba(96, 165, 250, 0.05);
+  border-color: rgba(96, 165, 250, 0.42);
+}
+.tm-ach-on:hover { box-shadow: 0 6px 18px rgba(96, 165, 250, 0.22); }
+/* 左侧圆形图标底座：深海军蓝夜空底，解锁态星光点点 */
+.tm-ach-icon {
+  position: relative; flex: 0 0 46px; width: 46px; height: 46px; border-radius: 999px;
+  display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(circle at 36% 30%, #2b4a72 0%, #17294a 58%, #0c1830 100%);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.18), inset 0 -2px 5px rgba(2, 6, 23, 0.5), 0 1px 3px rgba(2, 6, 23, 0.18);
+}
+.tm-ach-on .tm-ach-icon {
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.28), inset 0 -2px 5px rgba(2, 6, 23, 0.5), 0 0 12px rgba(125, 180, 255, 0.35);
+}
+.tm-ach-on .tm-ach-icon::before {
+  content: ""; position: absolute; inset: 0; border-radius: 999px; pointer-events: none;
+  background-image:
+    radial-gradient(circle 1px, rgba(226, 240, 255, 0.95) 50%, transparent 52%),
+    radial-gradient(circle 0.8px, rgba(226, 240, 255, 0.8) 50%, transparent 52%),
+    radial-gradient(circle 0.7px, rgba(226, 240, 255, 0.7) 50%, transparent 52%);
+  background-position: 22% 24%, 76% 20%, 70% 78%;
+  background-repeat: no-repeat;
+}
+.tm-ach-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.tm-ach-name { font-size: 12px; font-weight: 700; line-height: 1.25; }
+.tm-ach-sub { font-size: 10.5px; color: var(--muted); line-height: 1.25; }
+.tm-ach-on .tm-ach-sub { color: rgba(96, 140, 200, 0.95); }
+/* 相伴进度条：未解锁时显示当前相伴天数占目标的进度 */
+.tm-ach-bar {
+  display: block; height: 3px; margin-top: 2px; border-radius: 999px;
+  background: rgba(148, 163, 184, 0.28); overflow: hidden;
+}
+.tm-ach-bar-fill {
+  display: block; height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg, rgba(96, 165, 250, 0.5), rgba(96, 165, 250, 0.85));
+}
+/* 未解锁：整卡灰化剪影。图标底座换成中性灰夜空（不白不黑），
+   不再用深海军蓝灰化后的偏黑底 */
+.tm-ach:not(.tm-ach-on) .tm-ach-icon {
+  filter: grayscale(1);
+  background: radial-gradient(circle at 36% 30%, #d2d7df 0%, #a9b1bd 58%, #8b93a1 100%);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.4), inset 0 -2px 5px rgba(51, 65, 85, 0.28), 0 1px 3px rgba(2, 6, 23, 0.12);
+}
+.tm-ach:not(.tm-ach-on) .tm-ach-bar-fill { background: rgba(148, 163, 184, 0.6); }
+
+/* ---- 徽章图形：月相五档 + 羽毛笔/书页/信封（配色走月光银蓝）---- */
+.tm-glyph { position: relative; display: block; width: 26px; height: 26px; }
+.tm-ach-on .tm-glyph { color: #eaf3ff; }
+.tm-ach:not(.tm-ach-on) .tm-glyph { color: rgba(160, 174, 192, 0.8); }
+/* 新月：银蓝圆盘 + mask 切出一弯（镂空处透出底座夜空色，不产生色差） */
+.tm-glyph-crescent {
+  border-radius: 999px;
+  background: radial-gradient(circle at 34% 30%, #ffffff 0%, #dcebff 45%, #9cc2ef 100%);
+  box-shadow: 0 0 6px rgba(190, 220, 255, 0.55);
+  -webkit-mask: radial-gradient(circle at 74% 24%, transparent 52%, #000 54%);
+  mask: radial-gradient(circle at 74% 24%, transparent 52%, #000 54%);
+}
+.tm-ach:not(.tm-ach-on) .tm-glyph-crescent { box-shadow: none; }
+/* 半月：右半亮面 */
+.tm-glyph-half {
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(148, 178, 214, 0.3) 0 50%, #dcebff 50% 62%, #9cc2ef 100%);
+  box-shadow: 0 0 6px rgba(190, 220, 255, 0.45);
+}
+.tm-ach:not(.tm-ach-on) .tm-glyph-half { box-shadow: none; }
+/* 满月：圆满亮盘 + 光晕 */
+.tm-glyph-full {
+  border-radius: 999px;
+  background: radial-gradient(circle at 36% 30%, #ffffff 0%, #e8f2ff 42%, #b6d2f2 75%, #8fb6e4 100%);
+  box-shadow: 0 0 8px rgba(200, 228, 255, 0.65);
+}
+.tm-ach:not(.tm-ach-on) .tm-glyph-full { box-shadow: none; }
+/* 星拱月：满月居中 + 环拱星光点 */
+.tm-glyph-orbit { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; }
+.tm-glyph-orbit .tm-glyph-full { width: 17px; height: 17px; }
+.tm-glyph-orbit::before, .tm-glyph-orbit::after {
+  content: ""; position: absolute; border-radius: 999px;
+  background: #dcebff; box-shadow: 0 0 4px rgba(200, 228, 255, 0.8);
+}
+.tm-glyph-orbit::before { left: 1px; top: 7px; width: 3px; height: 3px; }
+.tm-glyph-orbit::after { right: 2px; top: 17px; width: 2.5px; height: 2.5px; }
+/* 潮汐月：新月上浮 + 两道涌动潮水线 */
+.tm-glyph-tide { width: 30px; height: 30px; }
+.tm-glyph-tide .tm-glyph-crescent {
+  position: absolute; left: 50%; top: 1px; width: 15px; height: 15px; margin-left: -7.5px;
+}
+.tm-glyph-wave {
+  position: absolute; left: 3px; width: 24px; height: 3px; border-radius: 2px;
+  background: linear-gradient(90deg, transparent, #9cc2ef 18%, #e8f2ff 50%, #9cc2ef 82%, transparent);
+}
+.tm-glyph-w1 { bottom: 7px; }
+.tm-glyph-w2 { bottom: 2px; left: 6px; width: 18px; opacity: 0.65; }
+/* 羽毛笔：斜笔杆（圆角长条旋转）+ 笔尖三角 */
+.tm-glyph-quill-body {
+  position: absolute; left: 5px; top: 2px; width: 5.5px; height: 16px;
+  border-radius: 3px 3px 1px 1px;
+  background: currentColor; opacity: 0.9;
+  transform: rotate(32deg);
+}
+.tm-glyph-quill-nib {
+  position: absolute; left: 10.5px; top: 14.5px; width: 0; height: 0;
+  border-left: 2.6px solid transparent; border-right: 2.6px solid transparent;
+  border-top: 5px solid currentColor;
+  transform: rotate(32deg);
+}
+/* 书页：摊开双页（两个带折角的梯形）+ 两行字线 */
+.tm-glyph-book-page {
+  position: absolute; top: 5px; width: 10px; height: 14px;
+  background: currentColor; opacity: 0.85;
+}
+.tm-glyph-book-left { left: 2px; clip-path: polygon(0 12%, 100% 0, 100% 100%, 0 100%); }
+.tm-glyph-book-right { right: 2px; clip-path: polygon(0 0, 100% 12%, 100% 100%, 0 100%); }
+.tm-glyph-book-line { position: absolute; height: 1.6px; border-radius: 1px; background: rgba(23, 41, 74, 0.85); }
+.tm-glyph-book-l1 { left: 4.5px; top: 10px; width: 6.5px; }
+.tm-glyph-book-l2 { left: 13px; top: 10px; width: 6.5px; }
+/* 信封：矩形底 + 盖片三角 + 封口圆点 */
+.tm-glyph-letter { border: 1.8px solid currentColor; border-radius: 3px; opacity: 1; }
+.tm-glyph-letter-flap {
+  position: absolute; left: 0; top: 0; width: 0; height: 0;
+  border-left: 10.5px solid transparent; border-right: 10.5px solid transparent;
+  border-top: 7px solid currentColor; opacity: 0.85;
+}
+.tm-glyph-letter-seal {
+  position: absolute; left: 50%; top: 12px; width: 4.5px; height: 4.5px; margin-left: -2.25px;
+  border-radius: 999px; background: currentColor;
+}
+@media (max-width: 720px) {
+  .tm-badge-wall { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 440px) {
+  .tm-badge-wall { grid-template-columns: 1fr; }
+}
+
+/* ---- 热力图（GitHub 贡献图布局：列=周，行=星期几）----
+   tm-gh = 网格骨架：月行（顶）+ 星期列（左）+ 周列区；
+   tm-heat-cell 延续双层表达（深浅=互动量、格底色条=心情）。
+   自适应无滚动（GitHub 同款观感）：滚动容器声明 container-type，
+   格子/间距用 cqw 弹性伸缩——49 列在常规面板宽度下恰好填满。
+   overflow-x 用 hidden 而非 auto：自适应公式已保证装得下，物理上
+   禁止滚动条出现（Electron 面板环境对 overflow:auto 的原生滚动条
+   渲染无法被 ::-webkit-scrollbar 完全约束——沙箱 iframe 里实测
+   无溢出但仍出现蓝灰色横条的案例）；代价是极窄面板（<464px，格子
+   已到 7px 下限）时右侧裁掉少许列，可接受。
+   cqw 兼容性：宿主 Plugin Manager 自身已用 container-type/@container
+   （PluginCard.vue），面板 iframe 同一 Chromium 内核，安全；不支持时
+   clamp() 回退 min 参数（7px 固定格），布局仍成立 */
+.tm-heat-scroll { overflow-x: hidden; padding-bottom: 2px; container-type: inline-size; }
+/* 格子尺寸与间距变量：随容器宽伸缩。真实宽度账本（实测核对）：
+   总宽 = 星期列 18 + body gap 4 + 49 列×(格+gap) − 尾列 1 个 gap
+   ⇒ 可用 = 容器宽 − 22 − 48×gap。gap 固定 2px（clamp 下限）时每列
+   可摊 = (100cqw − 118px) ÷ 49。格子 7px 下限 ⇒ 容器 <461px 才滚动。
+   面板 606px → 格 ~9.9px；720px+ → 11px 顶格 */
+.tm-gh {
+  --tm-gh-cell: clamp(7px, calc((100cqw - 121px) / 49), 11px);
+  --tm-gh-gap: 1.5px;
+  display: inline-flex; flex-direction: column; gap: 1px;
+}
+/* 热力图卡的紧凑间距（第三档·极限）：header 6/0 + body 4/6 —— 上下缓冲压到
+   视觉贴边（卡片有圆角边框做天然边界，不需要大 padding 撑呼吸感）。
+   月报/徽章卡维持默认 —— 阅读型内容需要呼吸感 */
+.tm-heat-card .neko-card-header { padding-top: 6px; padding-bottom: 0; }
+.tm-heat-card .neko-card-body { padding-top: 4px; padding-bottom: 6px; }
+/* 顶部月份行：每列一个等宽槽，只有含新月 1 号的槽渲染标签；
+   高度与格子完全等高（文字用绝对定位垂直居中，不占额外行高位） */
+.tm-gh-monthrow { display: flex; gap: var(--tm-gh-gap); }
+.tm-gh-corner { width: 22px; flex: 0 0 22px; }
+.tm-gh-monthslot { width: var(--tm-gh-cell); flex: 0 0 var(--tm-gh-cell); height: var(--tm-gh-cell); position: relative; }
+/* 月份标签（"10月"≈16px）比格子槽（8~11px）宽，absolute 默认从槽左缘向右伸出 ~5px；
+   在网格最右缘（最后一个槽）会撑大 scrollWidth 制造假滚动条——末槽标签改为右对齐
+   （right:0 向左展开），完整显示且不越出容器右缘；中间槽的伸出被右侧相邻列自然覆盖，
+   不会累计到 scrollWidth 之外。垂直：top/bottom 0 + line-height 撑格高，文字随格居中 */
+.tm-gh-monthslot:last-child .tm-gh-month { left: auto; right: 0; }
+.tm-gh-month {
+  position: absolute; left: 0; top: 0; white-space: nowrap;
+  font-size: 9.5px; color: var(--muted); font-weight: 600;
+  line-height: var(--tm-gh-cell);
+}
+/* 主体：左侧星期标签列 + 周列区 */
+.tm-gh-body { display: flex; gap: 4px; }
+.tm-gh-wdcol { display: flex; flex-direction: column; gap: var(--tm-gh-gap); width: 18px; flex: 0 0 18px; }
+.tm-gh-wd {
+  height: var(--tm-gh-cell); font-size: 9.5px; color: var(--muted); line-height: 11px;
+  display: flex; align-items: center; user-select: none;
+}
+.tm-gh-wd-empty { visibility: hidden; }
+.tm-gh-cols { display: flex; gap: var(--tm-gh-gap); }
+.tm-gh-col { display: flex; flex-direction: column; gap: var(--tm-gh-gap); }
+/* 未来/窗口外占位：透明格保持列高对齐 */
+.tm-heat-future { display: inline-block; width: var(--tm-gh-cell); height: var(--tm-gh-cell); }
+/* 格子本体 */
 .tm-heat-cell {
-  display: inline-block; width: 9px; height: 9px; border-radius: 2px;
+  position: relative; display: inline-block;
+  width: var(--tm-gh-cell); height: var(--tm-gh-cell); border-radius: 3px;
   background: rgba(148, 163, 184, 0.16); cursor: default;
+  transition: transform 0.12s ease;
 }
+.tm-heat-cell:hover { transform: scale(1.25); }
 .tm-heat-lv1 { background: rgba(96, 165, 250, 0.32); }
 .tm-heat-lv2 { background: rgba(96, 165, 250, 0.55); }
 .tm-heat-lv3 { background: rgba(96, 165, 250, 0.78); }
 .tm-heat-lv4 { background: rgba(96, 165, 250, 1); }
-.tm-heat-today { outline: 1.5px solid rgb(245, 176, 77); outline-offset: 0.5px; }
-.tm-heat-note { font-size: 10.5px; color: var(--muted); margin-top: 6px; }
-/* 月报 */
+/* 心情色条：格子底部亮条，正=暖琥珀、负=灰蓝、无采样=不亮；
+   尺寸改为百分比随格子缩放（cqw 下格子是 7~11px 弹性值，固定像素会溢出小格） */
+.tm-heat-mood {
+  position: absolute; left: 18%; right: 18%; bottom: 12%; height: 24%;
+  border-radius: 1.5px; pointer-events: none;
+}
+.tm-heat-mood-warm { background: rgb(245, 176, 77); box-shadow: 0 0 3px rgba(245, 176, 77, 0.65); }
+.tm-heat-mood-cold { background: rgb(110, 141, 171); }
+.tm-heat-mood-neutral { background: rgba(148, 163, 184, 0.5); }
+.tm-heat-mood-none { background: transparent; }
+/* 滚动条彻底隐藏（overflow-x:hidden 已物理禁止；此处双保险把 gutter
+   也归零——Windows 上 overflow 容器即使无溢出也可能保留 scrollbar gutter） */
+.tm-heat-scroll { scrollbar-width: none; }
+.tm-heat-scroll::-webkit-scrollbar { display: none; height: 0; }
+.tm-heat-scroll::-webkit-scrollbar-track { background: transparent; }
+.tm-heat-scroll::-webkit-scrollbar-thumb { background: transparent; }
+/* 底部脚注：说明文案 + 图例（GitHub 同款右下角布局） */
+.tm-heat-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 3px; }
+.tm-heat-note { font-size: 10.5px; color: var(--muted); }
+.tm-heat-legend { display: flex; align-items: center; gap: 4px; justify-content: flex-end; margin-left: auto; }
+/* 图例在 .tm-heat-scroll 之外，拿不到 --tm-gh-cell（cqw 变量只在容器后代有效）；
+   固定 10px 小方块，与网格格子语义解耦 */
+.tm-heat-legend .tm-heat-cell { width: 10px; height: 10px; flex: 0 0 10px; }
+.tm-heat-legend-label { font-size: 10.5px; color: var(--muted); margin: 0 2px; }
+.tm-heat-legend-sep { width: 1px; height: 12px; margin: 0 6px; background: rgba(148, 163, 184, 0.35); }
+.tm-heat-legend-mood { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; color: var(--muted); position: relative; }
+/* 图例里的心情示意色块：.tm-heat-mood 基类是 absolute + 百分比尺寸（为格子内色条设计），
+   直接复用会逃逸出未定位的图例容器、按外层定位祖先（整页）计算尺寸——曾渲染出一条
+   横贯页面的蓝色长条。这里收编为 static 固定小色块（暖=正、灰蓝=负） */
+.tm-heat-legend-mood .tm-heat-mood {
+  position: static; width: 10px; height: 5px; border-radius: 1.5px;
+}
+
+/* ---- 月报 ---- */
 .tm-month-nav { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .tm-month-btn {
-  border: 1px solid rgba(148, 163, 184, 0.35); background: transparent; color: inherit;
-  border-radius: 8px; min-width: 26px; height: 24px; cursor: pointer; font-size: 14px; line-height: 1;
+  border: 1px solid rgba(255, 255, 255, 0.8); background: rgba(255, 255, 255, 0.55); color: inherit;
+  border-radius: 999px; min-width: 28px; height: 26px; cursor: pointer; font-size: 14px; line-height: 1;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 1px 3px rgba(96, 165, 250, 0.12);
+  transition: transform 0.12s ease, background 0.12s ease;
 }
+.tm-month-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.8); transform: scale(1.08); }
 .tm-month-btn:disabled { opacity: 0.35; cursor: default; }
-.tm-month-label { display: flex; align-items: center; gap: 6px; font-weight: 650; }
+.tm-month-label { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 13.5px; }
 .tm-month-loading { color: var(--muted); }
 .tm-month-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .tm-month-cell {
-  display: flex; flex-direction: column; gap: 2px; padding: 9px 4px;
-  border-radius: 10px; background: rgba(148, 163, 184, 0.1); align-items: center;
+  display: flex; flex-direction: column; gap: 2px; padding: 10px 4px;
+  border-radius: 10px; align-items: center;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.32) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
 }
-.tm-month-cell-value { font-size: 14.5px; font-weight: 700; }
+.tm-month-cell-value { font-size: 14.5px; font-weight: 750; font-variant-numeric: tabular-nums; }
 .tm-month-cell-label { font-size: 11px; color: var(--muted); }
 .tm-month-tone { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .tm-month-tone-label { font-size: 11.5px; color: var(--muted); }
 .tm-month-tone-item {
   display: inline-flex; align-items: center; gap: 4px; font-size: 12px;
-  padding: 3px 9px; border-radius: 999px; background: rgba(148, 163, 184, 0.12);
+  padding: 3px 9px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.55); border: 1px solid rgba(255, 255, 255, 0.75);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 .tm-month-tone-count { font-size: 10.5px; color: var(--muted); }
 .tm-month-tone-dot { display: inline-block; width: 8px; height: 8px; border-radius: 999px; }
+/* 本月声音：玻璃引言卡（渐变顶边 + 大引号 + 衬线引文） */
 .tm-month-voice { margin-top: 12px; }
 .tm-month-voice-label {
   display: flex; align-items: center; gap: 6px;
   font-size: 11.5px; color: var(--muted); margin-bottom: 6px;
 }
 .tm-month-voice-text {
-  font-size: 13.5px; line-height: 1.7; padding: 10px 12px;
-  border-left: 3px solid rgba(245, 176, 77, 0.5);
-  background: rgba(148, 163, 184, 0.08); border-radius: 0 10px 10px 0;
+  position: relative; font-size: 13.5px; line-height: 1.8; padding: 14px 16px 12px 38px;
+  border-radius: 0 12px 12px 0;
+  background: linear-gradient(180deg, rgba(253, 250, 240, 0.72) 0%, rgba(250, 245, 232, 0.55) 100%);
+  border: 1px solid rgba(231, 220, 195, 0.55);
+  border-left: 3px solid rgb(245, 176, 77);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+.tm-month-voice-text::before {
+  content: "“"; position: absolute; left: 10px; top: 6px;
+  font-size: 26px; line-height: 1; font-family: Georgia, "Times New Roman", serif;
+  color: rgba(245, 176, 77, 0.75); pointer-events: none;
 }
 .tm-month-voice-empty { margin-top: 10px; font-size: 12px; color: var(--muted); }
+
+/* ---- 时光页 · 暗色主题（放在浅色规则之后保证覆盖顺序）---- */
+@media (prefers-color-scheme: dark) {
+  /* ---- 时光页（1.1.0 精致化）暗色适配 ---- */
+  .tm-hero-card {
+    background: linear-gradient(180deg, rgba(30, 41, 59, 0.6) 0%, rgba(30, 41, 59, 0.42) 100%);
+    border-color: rgba(148, 163, 184, 0.18);
+    box-shadow:
+      inset 0 1px 0 rgba(148, 163, 184, 0.14),
+      0 4px 14px rgba(245, 176, 77, 0.03),
+      0 4px 14px rgba(96, 165, 250, 0.04);
+  }
+  .tm-hero-card::before {
+    background: radial-gradient(240px 120px at 12% 0%, rgba(245, 176, 77, 0.08), transparent 70%);
+  }
+  .tm-hero-card::after {
+    background: radial-gradient(240px 120px at 88% 100%, rgba(96, 165, 250, 0.08), transparent 70%);
+  }
+  .tm-hero-days-value {
+    background: linear-gradient(180deg, #e8eef7 0%, #b3bfd2 100%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .tm-hero-ring-inner {
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.9) 0%, rgba(15, 23, 42, 0.75) 100%);
+    box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.16), 0 1px 3px rgba(2, 6, 23, 0.5);
+  }
+  .tm-stat-cell {
+    background: linear-gradient(180deg, rgba(30, 41, 59, 0.55) 0%, rgba(30, 41, 59, 0.38) 100%);
+    border-color: rgba(148, 163, 184, 0.16);
+    box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.12);
+  }
+  .tm-stat-cell:hover { box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.18), 0 4px 12px rgba(2, 6, 23, 0.4); }
+  .tm-ach { background: rgba(15, 23, 42, 0.4); border-color: rgba(148, 163, 184, 0.16); }
+  .tm-ach:hover { box-shadow: 0 6px 16px rgba(2, 6, 23, 0.45); }
+  .tm-ach-on {
+    background:
+      radial-gradient(140px 70px at 18% 0%, rgba(96, 165, 250, 0.12), transparent 70%),
+      rgba(96, 165, 250, 0.04);
+    border-color: rgba(96, 165, 250, 0.32);
+  }
+  .tm-ach:not(.tm-ach-on) .tm-glyph { color: rgba(203, 213, 225, 0.7); }
+  /* 未解锁图标底座：暗色主题下同步压成中性灰（比亮色态略深一档） */
+  .tm-ach:not(.tm-ach-on) .tm-ach-icon {
+    background: radial-gradient(circle at 36% 30%, #9aa2b0 0%, #767e8c 58%, #5c6370 100%);
+    box-shadow: inset 0 1px 1px rgba(226, 232, 240, 0.25), inset 0 -2px 5px rgba(2, 6, 23, 0.4), 0 1px 3px rgba(2, 6, 23, 0.3);
+  }
+  /* 热力图 GitHub 骨架暗色：标签提亮、空格底压暗（只动 lv0——
+     覆盖 .tm-heat-cell 基类 background 会把 lv1~4 的档位色一起吞掉） */
+  .tm-gh-month, .tm-gh-wd { color: rgba(148, 163, 184, 0.9); }
+  .tm-heat-lv0 { background: rgba(51, 65, 85, 0.55); }
+  .tm-heat-mood-neutral { background: rgba(148, 163, 184, 0.4); }
+  .tm-month-btn {
+    background: rgba(51, 65, 85, 0.55); border-color: rgba(148, 163, 184, 0.22);
+    box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.16), 0 1px 3px rgba(2, 6, 23, 0.35);
+  }
+  .tm-month-btn:hover:not(:disabled) { background: rgba(51, 65, 85, 0.8); }
+  .tm-month-cell {
+    background: linear-gradient(180deg, rgba(30, 41, 59, 0.55) 0%, rgba(30, 41, 59, 0.38) 100%);
+    border-color: rgba(148, 163, 184, 0.16);
+    box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.12);
+  }
+  .tm-month-tone-item {
+    background: rgba(30, 41, 59, 0.55); border-color: rgba(148, 163, 184, 0.18);
+    box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.14);
+  }
+  .tm-month-voice-text {
+    background: linear-gradient(180deg, rgba(38, 33, 24, 0.7) 0%, rgba(32, 28, 20, 0.6) 100%);
+    border-color: rgba(180, 165, 130, 0.28);
+    color: #d8d2c2;
+    box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.08);
+  }
+  .tm-month-voice-text::before { color: rgba(245, 176, 77, 0.6); }
+}
+
 /* 时光页签图标：时钟（圆 + 指针） */
 .tm-ico-moment { border: 1.5px solid currentColor; border-radius: 999px; }
 .tm-ico-moment::before {

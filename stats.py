@@ -363,7 +363,7 @@ def heatmap_payload(stats: JsonObject, today: str) -> JsonObject:
 
     tone = 当天主导语气 label（次数最多的；平票按 happy>neutral>surprised>sad>angry 排），
     valence = 当天心情均值（无采样为 None）。面板按 turns 分档染色、悬停显示明细。
-    只下发窗口内存在的天（缺失天由面板留白）。
+    只下发窗口内存在的**已完结天**（今天的数据未统计完，明天才亮格；缺失天由面板留白）。
     """
     try:
         anchor = date.fromisoformat(today)
@@ -383,6 +383,8 @@ def heatmap_payload(stats: JsonObject, today: str) -> JsonObject:
     tone_order = {"happy": 0, "neutral": 1, "surprised": 2, "sad": 3, "angry": 4}
     for day, bucket in sorted(_iter_days(stats)):
         if day < month_keys[0]:
+            continue
+        if day >= today:  # 今天尚未过完，数据不完整，明天才进热力图
             continue
         tone = ""
         tone_map = bucket.get("tone") if isinstance(bucket.get("tone"), dict) else {}

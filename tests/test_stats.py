@@ -148,9 +148,9 @@ def test_heatmap_payload_window_and_tone() -> None:
     assert heat["months"][-1] == "2026-09"
     days = {d["date"]: d for d in heat["days"]}
     assert days["2026-08-30"]["turns"] == 2
-    # 主导语气落在 09-01；无语气数据的天（09-03）为空串
+    # 主导语气落在 09-01；今天（09-03）未过完不进热力图，明天才亮格
     assert days["2026-09-01"]["tone"] == "happy"
-    assert days["2026-09-03"]["tone"] == ""
+    assert "2026-09-03" not in days
     # 窗口起点之前的旧月份被裁掉
     heat_old = st.heatmap_payload(stats, "2026-09-03")
     earliest = heat_old["months"][0]
@@ -312,15 +312,18 @@ def test_clear_stats_entry(plugin_factory) -> None:
 def test_anniversary_push_respects_switch_and_dedupe(plugin_factory) -> None:
     """纪念日注入：节点当天推送一次 + 水位去重 + 开关关闭即静默。
 
-    _maybe_anniversary_push 里的"今天"来自 _stats_today（真实时钟），测试把
-    first_seen 反推成"29 天前"使今天恰好是第 30 天，与真实日期无关。
+    _maybe_anniversary_push 里的"今天"来自 _stats_today（真实时钟、本地时区），
+    而 days_together 用 first_seen 的 **UTC 日期** 减本地今日。故把 first_seen 锚到
+    「本地今天 − 29 天」的 UTC 正午，使今天恒为第 30 天，与真实日期和时区无关。
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import date, datetime, timedelta, timezone
 
     p = plugin_factory()
     shard = p._get_shard("default")
-    now = datetime.now(timezone.utc) - timedelta(days=29)
-    shard.stats["first_seen"] = now.isoformat()
+    today = date.fromisoformat(p._stats_today())
+    fs = datetime.combine(today - timedelta(days=29), datetime.min.time(), tzinfo=timezone.utc)
+    fs = fs.replace(hour=12)
+    shard.stats["first_seen"] = fs.isoformat()
 
     # 推送成功：一条 read 轻语 + 水位盖戳
     pushed = run(p._maybe_anniversary_push("default", shard))

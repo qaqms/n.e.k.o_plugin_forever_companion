@@ -1,9 +1,9 @@
-// 时光页（1.1.0）· 相处统计：相处里程碑（徽章墙 + 数字摘要）
-// + 相处热力图（近 12 个月，悬停看当日互动与她的心情）
-// + 我们的一月（月报，可翻历史月份）。
+// 时光页（1.1.0）· 相处统计：数字摘要（hero 大数字 + 纪念日进度环）
+// + 相处热力图（近 12 个月双层表达；无数据时也默认铺满日历网格，GitHub 式）
+// + 我们的一月（月报，可翻历史月份）+ 相处徽章（同页最底部的收藏墙）。
 // hosted-tsx 约束：唯一 export 排在任何 JSX 闭合标签之前；辅助组件放文件尾部靠函数声明提升
-import { Card, EmptyState, StatusBadge, Tooltip } from "@neko/plugin-ui"
-import type { Heatmap, MonthReport, StatsBadge, StatsSummary, TFunc } from "./types"
+import { Card, EmptyState, StatusBadge } from "@neko/plugin-ui"
+import type { HeatDay, Heatmap, MonthReport, StatsBadge, StatsSummary, TFunc } from "./types"
 import { heatDayMoodKey, heatLevel, monthLabel, moodDotColor, toneLabelKey } from "./utils"
 
 export function MomentPane(props: {
@@ -18,31 +18,18 @@ export function MomentPane(props: {
   onPickMonth: (month: string) => void
 }) {
   const { t, lanlan, summary, badges, heatmap, month, monthAvailable, monthLoading, onPickMonth } = props
-  const days = (summary && summary.days_together) || 0
 
-  if (days <= 0 && (!summary || !summary.total_turns)) {
-    return (
-      <div className="tm-pane">
-        <Card title={t("panel.stats.title", { defaultValue: "我们的时光" })}>
-          <EmptyState
-            title={t("panel.stats.empty", { defaultValue: "还没有相处记录" })}
-            description={t("panel.stats.emptySub", { defaultValue: "和她聊聊天，你们的第一天就从现在开始。" })}
-          />
-        </Card>
-      </div>
-    )
-  }
-
+  // 不做整体空态早退：无数据时热力图铺默认网格、徽章全部锁定占位，
+  // 页面结构与有数据时完全一致（GitHub 式），装完即知会长成什么样
   return (
     <div className="tm-pane">
-      {/* ---- 相处里程碑：数字摘要 + 徽章墙 ---- */}
+      {/* ---- 相处里程碑：hero 数字 + 统计卡 ---- */}
       <Card title={t("panel.stats.milestones", { defaultValue: "相处里程碑" })}>
-        <SummaryStrip t={t} summary={summary} lanlan={lanlan} />
-        <BadgeWall t={t} badges={badges} />
+        <SummaryHero t={t} summary={summary} lanlan={lanlan} />
       </Card>
 
       {/* ---- 相处热力图 ---- */}
-      <Card title={t("panel.stats.heatmap", { defaultValue: "相处热力图" })}>
+      <Card title={t("panel.stats.heatmap", { defaultValue: "相处热力图" })} className="tm-heat-card">
         <HeatGrid t={t} heatmap={heatmap} />
       </Card>
 
@@ -57,23 +44,33 @@ export function MomentPane(props: {
         />
         <MonthReportView t={t} month={month} />
       </Card>
+
+      {/* ---- 相处徽章：时光页最底部的收藏墙（翻完整页正好收获） ---- */}
+      <Card title={t("panel.stats.badgeWall", { defaultValue: "相处徽章" })}>
+        <BadgeWall t={t} badges={badges} daysTogether={summary ? summary.days_together : undefined} />
+      </Card>
     </div>
   )
 }
 
-// 数字摘要条：相伴天数/互动轮数/连续天数/冷战与和好/开心时刻
-function SummaryStrip(props: { t: TFunc; summary?: StatsSummary; lanlan?: string }) {
+// hero 数字区：相伴天数大数字 + 纪念日进度环（纯 CSS 圆环，conic-gradient 填充）+ 其余统计玻璃小卡。
+// 进度环语义：从上一个节点到下一个纪念日节点的旅程完成度，到节点当天闭合。
+function SummaryHero(props: { t: TFunc; summary?: StatsSummary; lanlan?: string }) {
   const { t, summary, lanlan } = props
   const s = summary || {}
-  const items = [
-    {
-      key: "days",
-      value: String(s.days_together ?? 0),
-      label: t("panel.stats.sum.days", { defaultValue: "相伴天数" }),
-      hint: lanlan
-        ? t("panel.stats.sum.daysHint", { defaultValue: "自你们的第一句互动起算（跟随 {n}）" }).replace("{n}", String(lanlan))
-        : t("panel.stats.sum.daysHintPlain", { defaultValue: "自你们的第一句互动起算" }),
-    },
+  const days = Number(s.days_together ?? 0)
+  const untilNext = Number(s.next_anniversary_in ?? 0)
+  // 节点节奏与后端 next_anniversary 一致：30 的倍数或 365 的倍数
+  const nextNode = days + untilNext
+  const prevNode = lastAnniversaryNode(days)
+  // days=0（还没有相处记录）时环不显示，progress 归 0 兜底
+  const progress = days > 0 ? (nextNode > prevNode ? (days - prevNode) / (nextNode - prevNode) : 1) : 0
+  const ringPct = Math.max(0, Math.min(1, progress)) * 100
+  const ringStyle = { background: `conic-gradient(rgb(245, 176, 77) ${ringPct}%, rgba(148, 163, 184, 0.22) 0)` }
+  const daysHint = lanlan
+    ? t("panel.stats.sum.daysHint", { defaultValue: "自你们的第一句互动起算（跟随 {n}）" }).replace("{n}", String(lanlan))
+    : t("panel.stats.sum.daysHintPlain", { defaultValue: "自你们的第一句互动起算" })
+  const cells = [
     {
       key: "turns",
       value: String(s.total_turns ?? 0),
@@ -100,51 +97,217 @@ function SummaryStrip(props: { t: TFunc; summary?: StatsSummary; lanlan?: string
       label: t("panel.stats.sum.warm", { defaultValue: "开心时刻" }),
       hint: t("panel.stats.sum.warmHint", { defaultValue: "她自己起的暖流与满潮" }),
     },
-    {
-      key: "next",
-      value: String(s.next_anniversary_in ?? 0),
-      label: t("panel.stats.sum.next", { defaultValue: "距纪念日" }),
-      hint: t("panel.stats.sum.nextHint", { defaultValue: "满 30/100/… 天的日子，她当天会知道" }),
-    },
   ]
   return (
-    <div className="tm-stat-strip">
-      {items.map((item) => (
-        <Tooltip key={item.key} content={item.hint} placement="bottom">
-          <div className="tm-stat-cell">
-            <span className="tm-stat-value">{item.value}</span>
-            <span className="tm-stat-label">{item.label}</span>
+    <div className="tm-hero-card">
+      <div className="tm-hero">
+        <AdaptiveTip content={daysHint} place="bottom">
+          <div className="tm-hero-days">
+            <span className="tm-hero-days-value">{days}</span>
+            <span className="tm-hero-days-label">
+              {t("panel.stats.sum.days", { defaultValue: "相伴天数" })}
+            </span>
           </div>
-        </Tooltip>
-      ))}
+        </AdaptiveTip>
+        {days > 0 ? (
+          <AdaptiveTip
+            content={t("panel.stats.sum.nextHint", { defaultValue: "满 30/100/… 天的日子，她当天会知道" })}
+            place="bottom"
+          >
+            <div className="tm-hero-ring">
+              <div className="tm-hero-ring-track" style={ringStyle}>
+                <div className="tm-hero-ring-inner">
+                  <span className="tm-hero-ring-num">{untilNext}</span>
+                  <span className="tm-hero-ring-unit">{t("panel.days", { defaultValue: "天" })}</span>
+                </div>
+              </div>
+              <span className="tm-hero-ring-label">{t("panel.stats.sum.next", { defaultValue: "距纪念日" })}</span>
+            </div>
+          </AdaptiveTip>
+        ) : null}
+      </div>
+      <div className="tm-stat-strip">
+        {cells.map((item) => (
+          <AdaptiveTip key={item.key} content={item.hint} place="bottom">
+            <div className="tm-stat-cell">
+              <span className="tm-stat-value">{item.value}</span>
+              <span className="tm-stat-label">{item.label}</span>
+            </div>
+          </AdaptiveTip>
+        ))}
+      </div>
     </div>
   )
 }
 
-// 徽章墙：天数徽章 + 第一次徽章；未解锁灰显（占位形成"还差 X 天"的期待感）
-function BadgeWall(props: { t: TFunc; badges?: StatsBadge[] }) {
-  const { t, badges } = props
-  const list = badges || []
-  if (!list.length) return null
+// 上一个纪念日节点：与 next_anniversary 同一节奏（30/365 的倍数），用于进度环起算
+function lastAnniversaryNode(days: number): number {
+  if (days < 30) return 0
+  let node = 0
+  for (let d = 30; d <= days; d++) {
+    if (d % 30 === 0 || d % 365 === 0) node = d
+  }
+  return node
+}
+
+// 徽章墙兜底数据：dashboard 的 stats_summary 异常兜底路径会返回空 badges，
+// 用与后端同构的 8 枚标准徽章占位（全锁定态），避免页底卡片空壳
+const FALLBACK_BADGES: StatsBadge[] = [
+  { id: "d7", days: 7, unlocked: false, date: "" },
+  { id: "d30", days: 30, unlocked: false, date: "" },
+  { id: "d100", days: 100, unlocked: false, date: "" },
+  { id: "d365", days: 365, unlocked: false, date: "" },
+  { id: "d730", days: 730, unlocked: false, date: "" },
+  { id: "first_diary", unlocked: false, date: "" },
+  { id: "first_journal", unlocked: false, date: "" },
+  { id: "first_review", unlocked: false, date: "" },
+]
+
+// 徽章墙（成就卡片式 2.0）：2 列横排卡片，左图标右文案。蓝色系月光/潮汐/羽毛意象；
+// 天数类按难度升级月相（新月→半月→满月→星拱月→潮汐月），事件类专属图形（羽毛笔/书页/信封）；
+// 未解锁整卡灰化剪影 + 相伴天数进度条，解锁后月光蓝点亮 + 微光晕
+function BadgeWall(props: { t: TFunc; badges?: StatsBadge[]; daysTogether?: number }) {
+  const { t, badges, daysTogether } = props
+  const list = (badges && badges.length) ? badges : FALLBACK_BADGES
+  const cur = Math.max(0, Number(daysTogether || 0))
   return (
     <div className="tm-badge-wall">
       {list.map((badge) => {
         const unlocked = !!badge.unlocked
         const label = badgeLabel(t, badge)
         const sub = unlocked
-          ? String(badge.date || "")
+          ? t("panel.stats.badge.unlockedOn", { defaultValue: "{d} 解锁" }).replace("{d}", String(badge.date || "—"))
           : (badge.days
               ? t("panel.stats.badge.inDays", { defaultValue: "还差 {n} 天" }).replace("{n}", String(badge.days))
               : t("panel.stats.badge.locked", { defaultValue: "还未发生" }))
+        const icon = badgeShape(badge)
+        const tip = unlocked
+          ? t("panel.stats.badge.unlockedOn", { defaultValue: "{d} 解锁" }).replace("{d}", String(badge.date || "—"))
+          : t("panel.stats.badge.lockedTip", { defaultValue: "继续相处，它会在某一天悄悄点亮" })
+        const pct = unlocked ? 100 : Math.min(100, Math.round((cur / Number(badge.days)) * 100))
         return (
-          <div key={badge.id || label} className={`tm-badge ${unlocked ? "tm-badge-on" : ""}`}>
-            <span className={`tm-badge-medal tm-badge-lv-${unlocked ? "on" : "off"}`}>{unlocked ? "✦" : "·"}</span>
-            <span className="tm-badge-name">{label}</span>
-            <span className="tm-badge-date">{sub}</span>
-          </div>
+          <AdaptiveTip key={badge.id || label} content={`${label} · ${tip}`}>
+            <div className={`tm-ach ${unlocked ? "tm-ach-on" : ""}`}>
+              <span className="tm-ach-icon"><BadgeGlyph id={icon} /></span>
+              <span className="tm-ach-body">
+                <span className="tm-ach-name">{label}</span>
+                <span className="tm-ach-sub">{sub}</span>
+                {badge.days ? (
+                  <span className="tm-ach-bar"><span className="tm-ach-bar-fill" style={{ width: `${pct}%` }} /></span>
+                ) : null}
+              </span>
+            </div>
+          </AdaptiveTip>
         )
       })}
     </div>
+  )
+}
+
+// 徽章 id → 图标档位（天数越高月相越圆满：新月→半月→满月→星拱月→潮汐月）
+function badgeShape(badge: StatsBadge): string {
+  const id = String(badge.id || "")
+  if (badge.days) {
+    if (badge.days >= 730) return "tide" // 潮汐月：新月 + 涌动的潮水线（相伴如潮）
+    if (badge.days >= 365) return "orbit" // 星拱月：满月 + 环拱星光（一整年的星光）
+    if (badge.days >= 100) return "full" // 满月：光晕圆满（百日圆满）
+    if (badge.days >= 30) return "half" // 半月（初见轮廓）
+    return "crescent" // 新月（初识的一弯）
+  }
+  if (id === "first_diary") return "quill"
+  if (id === "first_journal") return "book"
+  if (id === "first_review") return "letter"
+  return "crescent"
+}
+
+// 徽章图形（纯 CSS 结构，配色由样式层按 lit/dim 两态控制 currentColor 与容器底色）：
+// 月相五档（相伴天数）+ 羽毛笔/书页/信封（三本日记的「第一次」）
+function BadgeGlyph(props: { id: string }) {
+  const { id } = props
+  if (id === "crescent") {
+    return <span className="tm-glyph tm-glyph-crescent" />
+  }
+  if (id === "half") {
+    return <span className="tm-glyph tm-glyph-half" />
+  }
+  if (id === "full") {
+    return <span className="tm-glyph tm-glyph-full" />
+  }
+  if (id === "orbit") {
+    return (
+      <span className="tm-glyph tm-glyph-orbit">
+        <span className="tm-glyph-full" />
+      </span>
+    )
+  }
+  if (id === "tide") {
+    return (
+      <span className="tm-glyph tm-glyph-tide">
+        <span className="tm-glyph-crescent" />
+        <span className="tm-glyph-wave tm-glyph-w1" />
+        <span className="tm-glyph-wave tm-glyph-w2" />
+      </span>
+    )
+  }
+  if (id === "quill") {
+    return (
+      <span className="tm-glyph tm-glyph-quill">
+        <span className="tm-glyph-quill-nib" />
+        <span className="tm-glyph-quill-body" />
+      </span>
+    )
+  }
+  if (id === "book") {
+    return (
+      <span className="tm-glyph tm-glyph-book">
+        <span className="tm-glyph-book-page tm-glyph-book-left" />
+        <span className="tm-glyph-book-page tm-glyph-book-right" />
+        <span className="tm-glyph-book-line tm-glyph-book-l1" />
+        <span className="tm-glyph-book-line tm-glyph-book-l2" />
+      </span>
+    )
+  }
+  if (id === "letter") {
+    return (
+      <span className="tm-glyph tm-glyph-letter">
+        <span className="tm-glyph-letter-flap" />
+        <span className="tm-glyph-letter-seal" />
+      </span>
+    )
+  }
+  return null
+}
+
+// 自适应悬停提示：解决宿主 Tooltip 的固定方向限制——顶部元素向上弹被视口/滚动容器
+// 裁剪、左右缘出格。悬停瞬间量取触发元的视口坐标，用 position:fixed 绘制（不受任何
+// 祖先 overflow 裁剪）：上方空间不足自动向下翻、左右越界自动收拢。place 仅作首选方向。
+function AdaptiveTip(props: { key?: string; content: string; place?: string; children?: any }) {
+  const ref = useRef(null)
+  const [tip, setTip] = useState(null)
+  const show = () => {
+    const el = ref.current as HTMLElement | null
+    if (!el || !props.content) return
+    const r = el.getBoundingClientRect()
+    const vw = window.innerWidth || 800
+    const vh = window.innerHeight || 600
+    const below = (props.place || "top") === "bottom" || r.top < 72
+    const x = Math.max(8, Math.min(vw - 8, r.left + r.width / 2))
+    const y = below ? r.bottom + 7 : r.top - 7
+    setTip({ x, y, below } as any)
+  }
+  const hide = () => setTip(null)
+  return (
+    <span ref={ref as any} className="tm-tip-wrap" onMouseEnter={show} onMouseLeave={hide}>
+      {props.children}
+      {tip ? (
+        <span
+          className={`tm-tip ${(tip as any).below ? "tm-tip-below" : ""}`}
+          style={{ left: `${(tip as any).x}px`, top: `${(tip as any).y}px` }}
+        >
+          {props.content}
+        </span>
+      ) : null}
+    </span>
   )
 }
 
@@ -162,79 +325,185 @@ function badgeLabel(t: TFunc, badge: StatsBadge): string {
   return map[id] || id
 }
 
-// 热力图：近 12 个月逐日格子（列=周，GitHub 式横向布局用 CSS 网格实现）。
+// 热力图（GitHub 贡献图布局）：列 = 周（近 12 个月 ≈ 53 列），行 = 星期几（周一起 7 行）。
+// 月份标签只标包含新月首日的那一列（顶部），左侧标一/三/五。
+// 双层表达：格子深浅（4 档蓝）= 当天互动轮数；格内底部色条 = 她那天的心情。
+// 无记录天 = 浅灰格；今天之后不渲染（透明占位保持列高）。
+// 无数据时默认铺满近 12 个月的日历格（GitHub 式空网格）——亮起来只是时间问题
 // hosted-tsx 无 SVG：格子用 div + 档位色；悬停 Tooltip 显示当日明细
 function HeatGrid(props: { t: TFunc; heatmap: Heatmap | null }) {
   const { t, heatmap } = props
-  const days = (heatmap && heatmap.days) || []
-  if (!days.length) {
-    return (
-      <EmptyState
-        title={t("panel.stats.heatEmpty", { defaultValue: "还没有可展示的日子" })}
-        description={t("panel.stats.heatEmptySub", { defaultValue: "互动过的日子会在这里亮起来。" })}
-      />
-    )
-  }
-  const byDate: Record<string, typeof days[number]> = {}
+  const real: HeatDay[] = (heatmap && heatmap.days) || []
+  const days: HeatDay[] = real.length ? real : buildCalendarDays()
+  const byDate: Record<string, HeatDay> = {}
   days.forEach((day) => {
     if (day && day.date) byDate[String(day.date)] = day
   })
-  // 布局：按月分块横向排（12 个月一行放不下时自动换行），每块内 7 列周网格
-  const months: Record<string, string[]> = {}
-  days.forEach((day) => {
-    const date = String((day && day.date) || "")
-    if (date.length < 7) return
-    const month = date.slice(0, 7)
-    if (!months[month]) months[month] = []
-    months[month].push(date)
-  })
-  const monthKeys = Object.keys(months).sort()
-  const today = days.length ? String(days[days.length - 1].date) : ""
+  const firstDate = days.length ? String(days[0].date) : ""
+  const lastDate = days.length ? String(days[days.length - 1].date) : ""
+  const weeks = buildWeekColumns(firstDate, lastDate).map((week) => ({
+    ...week,
+    monthLabel: week.monthNo ? t("panel.stats.monthShort", { defaultValue: "{m}月" }).replace("{m}", String(week.monthNo)) : "",
+  }))
+  const wdLabels = [
+    t("panel.stats.heatWd1", { defaultValue: "一" }),
+    "",
+    t("panel.stats.heatWd3", { defaultValue: "三" }),
+    "",
+    t("panel.stats.heatWd5", { defaultValue: "五" }),
+    "",
+    "",
+  ]
   return (
     <div>
-      <div className="tm-heat-legend">
-        <span className="tm-heat-legend-label">{t("panel.stats.heatLess", { defaultValue: "少" })}</span>
-        {[0, 1, 2, 3, 4].map((lv) => (
-          <span key={lv} className={`tm-heat-cell tm-heat-lv${lv}`} />
-        ))}
-        <span className="tm-heat-legend-label">{t("panel.stats.heatMore", { defaultValue: "多" })}</span>
-      </div>
       <div className="tm-heat-scroll">
-        <div className="tm-heat-wrap">
-          {monthKeys.map((month) => (
-            <div key={month} className="tm-heat-month">
-              <div className="tm-heat-month-label">{monthLabel(t, month)}</div>
-              <div className="tm-heat-grid">
-                {months[month].map((date) => {
-                  const day = byDate[date]
-                  const lv = heatLevel(day ? day.turns : 0)
-                  const isToday = date === today
-                  const moodKey = day ? heatDayMoodKey(day) : ""
-                  const moodWord = moodKey ? t(moodKey, { defaultValue: "" }) : ""
-                  const tip = [
-                    date,
-                    t("panel.stats.heatTipTurns", { defaultValue: "互动 {n} 轮" }).replace("{n}", String((day && day.turns) || 0)),
-                    moodWord ? t("panel.stats.heatTipMood", { defaultValue: "她那天：{m}" }).replace("{m}", moodWord) : "",
-                  ].filter(Boolean).join(" · ")
-                  return (
-                    <Tooltip key={date} content={tip} placement="top">
-                      <span
-                        className={`tm-heat-cell tm-heat-lv${lv} ${isToday ? "tm-heat-today" : ""} ${moodWord ? "" : "tm-heat-muted"}`}
-                      />
-                    </Tooltip>
-                  )
-                })}
-              </div>
+        <div className="tm-gh">
+          <div className="tm-gh-monthrow">
+            <span className="tm-gh-corner" />
+            {weeks.map((week) => (
+              <span key={week.key} className="tm-gh-monthslot">
+                {week.monthLabel ? <span className="tm-gh-month">{week.monthLabel}</span> : null}
+              </span>
+            ))}
+          </div>
+          <div className="tm-gh-body">
+            <div className="tm-gh-wdcol">
+              {wdLabels.map((wd, i) => (
+                <span key={i} className={`tm-gh-wd ${wd ? "" : "tm-gh-wd-empty"}`}>{wd}</span>
+              ))}
             </div>
-          ))}
+            <div className="tm-gh-cols">
+              {weeks.map((week, wi) => (
+                <div key={week.key} className="tm-gh-col">
+                  {week.cells.map((date, i) => {
+                    if (!date) {
+                      return <span key={i} className="tm-heat-future" />
+                    }
+                    const day = byDate[date]
+                    const lv = heatLevel(day ? day.turns : 0)
+                    const moodKey = day ? heatDayMoodKey(day) : ""
+                    const moodWord = moodKey ? t(moodKey, { defaultValue: "" }) : ""
+                    const moodCls = moodBarClass(day)
+                    const tip = [
+                      date,
+                      t("panel.stats.heatTipTurns", { defaultValue: "互动 {n} 轮" }).replace("{n}", String((day && day.turns) || 0)),
+                      moodWord ? t("panel.stats.heatTipMood", { defaultValue: "她那天：{m}" }).replace("{m}", moodWord) : "",
+                    ].filter(Boolean).join(" · ")
+                    // 悬停明细由自适应 Tip 承载（顶部行自动向下翻、左右缘自动收拢）
+                    return (
+                      <AdaptiveTip key={date} content={tip}>
+                        <span className={`tm-heat-cell tm-heat-lv${lv}`}>
+                          <span className={`tm-heat-mood ${moodCls}`} />
+                        </span>
+                      </AdaptiveTip>
+                    )
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
-      <div className="tm-heat-note">{t("panel.stats.heatNote", { defaultValue: "颜色深浅 = 当天互动轮数；悬停查看她那天的心情" })}</div>
+      <div className="tm-heat-footer">
+        <span className="tm-heat-note">
+          {real.length
+            ? t("panel.stats.heatNote", { defaultValue: "颜色深浅 = 当天互动轮数；悬停查看她那天的心情" })
+            : t("panel.stats.heatEmptySub", { defaultValue: "互动过的日子会在这里亮起来。" })}
+        </span>
+        <div className="tm-heat-legend">
+          <span className="tm-heat-legend-label">{t("panel.stats.heatLess", { defaultValue: "少" })}</span>
+          {[0, 1, 2, 3, 4].map((lv) => (
+            <span key={lv} className={`tm-heat-cell tm-heat-lv${lv}`}>
+              <span className="tm-heat-mood tm-heat-mood-neutral" />
+            </span>
+          ))}
+          <span className="tm-heat-legend-label">{t("panel.stats.heatMore", { defaultValue: "多" })}</span>
+          <span className="tm-heat-legend-sep" />
+          <span className="tm-heat-legend-mood">
+            <span className="tm-heat-mood tm-heat-mood-warm" />
+            <span className="tm-heat-mood tm-heat-mood-cold" />
+            {t("panel.stats.heatMoodLegend", { defaultValue: "她那天的心情" })}
+          </span>
+        </div>
+      </div>
     </div>
   )
 }
 
-// 月报导航：左右翻月 + 月份下拉（历史封卷月固定，当月实时）
+// ISO 日期串 → 本地 Date（手动解析避免时区歧义）
+function parseISODate(iso: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ""))
+  if (!match) return null
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+}
+
+// Date → ISO 日期串
+function isoOfDate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
+// 周一基 0 的星期序号（JS getDay 周日=0；GitHub 布局顶行是周一）
+function weekdayIndex(d: Date): number {
+  return (d.getDay() + 6) % 7
+}
+
+// 周列生成：窗口起点对齐到周一，每列 7 格（周一→周日），终点=窗口最后一天所在周。
+// monthNo = 列内含某月 1 号时的月号（首列特例：不含 1 号也标首列月）；短月名由渲染层 i18n
+function buildWeekColumns(firstDate: string, lastDate: string): WeekColumn[] {
+  const first = parseISODate(firstDate)
+  const last = parseISODate(lastDate)
+  if (!first || !last) return []
+  const start = new Date(first.getFullYear(), first.getMonth(), first.getDate() - weekdayIndex(first))
+  const weeks: WeekColumn[] = []
+  let cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate())
+  let idx = 0
+  while (cursor.getTime() <= last.getTime()) {
+    const cells: string[] = []
+    let monthNo = 0
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + i)
+      cells.push(d.getTime() <= last.getTime() ? isoOfDate(d) : "")
+      if (d.getDate() === 1 && d.getTime() <= last.getTime()) {
+        monthNo = d.getMonth() + 1
+      }
+    }
+    if (idx === 0 && !monthNo) {
+      monthNo = cursor.getMonth() + 1
+    }
+    weeks.push({ key: isoOfDate(cursor), cells, monthNo })
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 7)
+    idx++
+  }
+  return weeks
+}
+
+type WeekColumn = { key: string; cells: string[]; monthNo: number }
+
+// 近 12 个月的占位日历（GitHub 式空网格）：本月 1 号往前推 11 个月到昨天（今天未过完不显示），
+// 每天 turns=0、无心情采样——格子全走 lv0 灰底
+function buildCalendarDays(): HeatDay[] {
+  const out: HeatDay[] = []
+  const today = new Date()
+  const end = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1)
+  const start = new Date(today.getFullYear(), today.getMonth() - 11, 1)
+  const cursor = new Date(start.getTime())
+  while (cursor.getTime() <= end.getTime()) {
+    out.push({ date: isoOfDate(cursor), turns: 0, valence: null })
+    cursor.setDate(cursor.getDate() + 1)
+  }
+  return out
+}
+
+// 当日心情色条档位：正 valence 暖琥珀、负灰蓝、无采样中性
+function moodBarClass(day?: { valence?: number | null }): string {
+  if (!day || day.valence === null || day.valence === undefined) return "tm-heat-mood-none"
+  const v = Number(day.valence) || 0
+  if (v > 0.08) return "tm-heat-mood-warm"
+  if (v < -0.08) return "tm-heat-mood-cold"
+  return "tm-heat-mood-neutral"
+}
+
+// 月报导航：左右翻月 + 月份标题（历史封卷月固定，当月实时）
 function MonthNav(props: {
   t: TFunc
   month?: MonthReport | null
@@ -277,7 +546,7 @@ function MonthNav(props: {
   )
 }
 
-// 月报正文：数字网格 + 语气主色 + 本月声音（她当月写过的最长一条手记）
+// 月报正文：玻璃数字卡 + 语气主色胶囊 + 本月声音（玻璃引言卡）
 function MonthReportView(props: { t: TFunc; month?: MonthReport | null }) {
   const { t, month } = props
   if (!month || !month.month) {
