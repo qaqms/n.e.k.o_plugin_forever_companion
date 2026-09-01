@@ -608,14 +608,29 @@ def fabricate_demo_stats(today: str) -> JsonObject:
         day = (start + timedelta(days=offset)).isoformat()
         if day >= today:
             break  # 今天不进热力图（已完结天口径），假数据同样遵守
-        # 每周一天完全空缺（断续感），周末更热
-        weekday = (start + timedelta(days=offset)).weekday()
-        if weekday == 3 and offset % 7 in (0, 3):
+        # 断续空缺：确定性散布（零随机、可复现）。两层叠加——
+        # ① 单日散布 (7o+13)%41<7（空缺不与星期几对齐；早前版本跳过条件
+        #   恰好恒落在同一天：起点周一时 offset%7==3 永远是周四，热力图
+        #   呈现整行全空像渲染 bug）；
+        # ② 每 19 天一段 2 天连缺（段起点按段号散开错位星期，模拟
+        #   "忙起来两天没聊"）。合计空缺 ~26%，每星期 12~14 天有数据。
+        # 尾部 3 天强制有数据：假数据"最近肯定在聊"，也让 current_streak
+        # 演示值稳定（早前连缺恰好吃掉最后两天，摘要"当前连续"归 0）
+        if offset >= 119:
+            pass
+        elif (offset * 7 + 13) % 41 < 7:
             continue
+        else:
+            seg = offset % 19
+            seg_start = (offset // 19 * 3) % 7 + 1
+            if seg == seg_start or seg == seg_start + 1:
+                continue
+        # 周末更热（真实作息感）
+        weekday = (start + timedelta(days=offset)).weekday()
         base = 2 + (offset % 5) * 3 + (6 if weekday >= 5 else 0)
         turns = min(34, base + (offset // 11))  # 缓慢爬升，偶有高峰
-        valence_cycle = ((offset % 21) - 10) / 10.0  # -1.0 ~ +1.0 三周摆动
-        v = round(max(-0.85, min(0.9, valence_cycle + (0.15 if weekday >= 5 else -0.1))), 2)
+        tone_cycle = ((offset % 21) - 10) / 10.0  # 三周摆动的语气基调
+        v = round(max(-0.85, min(0.9, tone_cycle + (0.15 if weekday >= 5 else -0.1))), 2)
         tone = "happy" if v > 0.3 else "sad" if v < -0.5 else "neutral"
         if offset % 17 == 0:
             tone = "angry"

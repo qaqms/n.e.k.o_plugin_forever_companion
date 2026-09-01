@@ -366,13 +366,22 @@ def test_seal_stats_months_via_tick_guard(plugin_factory) -> None:
 # ---------------------------------------------------------------------------
 
 def test_fabricate_demo_stats_covers_visual_branches() -> None:
-    """纯逻辑：120 天确定性分布，覆盖热力图档位/色条/徽章/月报所需的全部分支。"""
+    """纯逻辑：122 天确定性分布，覆盖热力图档位/徽章/月报所需的全部分支。"""
     stats = st.fabricate_demo_stats("2026-09-02")
     days = stats["days"]
     # 窗口：起点回拨 119 天，今天不进（已完结天口径）
     assert min(days) == "2026-05-04"
     assert max(days) < "2026-09-02"
-    assert len(days) >= 100  # 有断续空缺但主体覆盖
+    assert len(days) >= 85  # 有空缺（~26%）但主体覆盖
+    # 关键回归：空缺是散布的，不存在任何一行星期整行空缺
+    #（旧版跳过条件 offset%7==3 在起点周一时恒落周四 → 热力图中间一行全灰）
+    per_wd = {}
+    from datetime import date
+    for d_str in days:
+        wd = date.fromisoformat(d_str).weekday()
+        per_wd[wd] = per_wd.get(wd, 0) + 1
+    # 121 天窗口里每个星期出现 17~18 次；每行至少覆盖 55%
+    assert min(per_wd.values()) >= len(days) / 7 * 0.77  # ≈55%/71.5% 留余量
     # 确定性：同参数两次生成完全一致（零随机，回归可断言）
     assert st.fabricate_demo_stats("2026-09-02") == stats
     # 相伴天数 120：d7/d30/d100 解锁、d365 未解锁
@@ -402,7 +411,7 @@ def test_fabricate_demo_stats_covers_visual_branches() -> None:
     s = st.summary_payload(stats, "2026-09-02")
     assert s["cold_wars"] >= 1 and s["made_ups"] >= 1 and s["warm_moments"] >= 1
     assert s["total_turns"] > 500
-    assert s["current_streak"] >= 1
+    assert s["current_streak"] >= 3  # 尾部 3 天强制有数据（tail guard 回归钉）
     # 月报：窗口内任一已完结月可聚合
     month = st.month_view(stats, "2026-08")
     assert month["month"] == "2026-08"
