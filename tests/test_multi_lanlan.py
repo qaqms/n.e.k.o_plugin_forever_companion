@@ -87,6 +87,42 @@ def test_two_lanlan_cycle_mood_diary_isolated(plugin_factory_full, tm) -> None:
     assert p._enabled(ling) is True
 
 
+# ---------- 快进与潮汐首日（锚点）互相干扰回归 ----------
+
+
+def test_set_anchor_clears_advance_days(plugin_factory_full, tm) -> None:
+    """快进后再设首日：首日必须落在所设日期上，快进天数清零。
+
+    1.1.3 的 bug：set_anchor 只改锚点不清 advance_days，而阶段计算用
+    effective = today + advance_days 与 anchor 比对，日历上的首日标记
+    因此落在「所设日期 - 快进天数」，用户看到的就是"刚设的首日也被
+    快进了一天"。
+    """
+    p = plugin_factory_full(http=_HostHttp(current="YUI"))
+    shard = p._get_shard("YUI")
+    shard.cycle["advance_days"] = 1
+    run(p._save_shard_cycle("YUI", shard))
+
+    res = run(p.set_anchor(date="2026-09-03"))
+    value = getattr(res, "value", None)
+    assert value and value["anchor_date"] == "2026-09-03"
+    assert value["advance_days"] == 0
+    # 落盘数据同步清零，锚点就是所设日期本身
+    saved = p.store.data[tm._cycle_key("YUI")]
+    assert saved["anchor_date"] == "2026-09-03"
+    assert not saved.get("advance_days")
+    assert shard.cycle["advance_days"] == 0
+
+
+def test_advance_after_set_anchor_still_shifts_clock(plugin_factory_full) -> None:
+    """清零不伤快进本身：重设首日之后再快进，身体时钟照常前移。"""
+    p = plugin_factory_full(http=_HostHttp(current="YUI"))
+    run(p.set_anchor(date="2026-09-03"))
+    res = run(p.advance_days_entry(days=1))
+    value = getattr(res, "value", None)
+    assert value and value["advance_days"] == 1
+
+
 # ---------- 旧版单角色数据迁移 ----------
 
 

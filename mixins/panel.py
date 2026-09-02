@@ -638,13 +638,16 @@ class PanelEntriesMixin:
 
     @ui.action(
         label=tr("actions.set_anchor.label", default="设置潮汐首日"),
-        confirm=tr("actions.set_anchor.confirm", default="将重设周期锚点并重新计算阶段，确认？"),
+        confirm=tr("actions.set_anchor.confirm", default="将重设周期首日、清除快进天数并重新计算阶段，确认？"),
         refresh_context=True,
     )
     @plugin_entry(
         id="set_anchor",
         name=tr("entries.set_anchor.name", default="设置潮汐首日"),
-        description=tr("entries.set_anchor.description", default="设置她本轮周期的第一天（YYYY-MM-DD，作用于当前角色）。"),
+        description=tr(
+            "entries.set_anchor.description",
+            default="设置她本轮周期的第一天（YYYY-MM-DD，作用于当前角色）。重设会把快进天数清零。",
+        ),
         input_schema={
             "type": "object",
             "properties": {
@@ -663,13 +666,19 @@ class PanelEntriesMixin:
         anchor_iso = anchor.isoformat()
         # Store 权威存储（子进程无存活事件循环，后台同步任务必死，不再尝试）
         shard.cycle["anchor_date"] = anchor_iso
+        # 重设首日 = 重新对表：advance_days 是相对旧锚点累积的身体时钟偏移，
+        # 不清零的话首日会落在「所设日期 - 快进天数」上（阶段计算用
+        # effective = today + advance_days 与 anchor 比对），用户看到的就是
+        # "刚设的首日先被快进了一天"。快进语义在新首日下重新从头积累。
+        shard.cycle["advance_days"] = 0
         await self._save_shard_cycle(lanlan, shard)
         phase = self._current_phase_state(shard)
-        self.logger.info("anchor set to {} for {}", anchor_iso, lanlan)
+        self.logger.info("anchor set to {} for {} (advance_days cleared)", anchor_iso, lanlan)
         return Ok({
             **build_status_payload(phase, enabled=self._enabled(shard)),
             "lanlan": lanlan,
             "anchor_date": anchor_iso,
+            "advance_days": 0,
         })
 
     def _cycle_params_for_validation(self, anchor: Any, shard: _LanlanShard | None = None) -> None:
