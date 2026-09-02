@@ -24,7 +24,6 @@ try:
         build_status_payload,
         compute_phase_state,
         parse_anchor_date,
-        resolve_today,
     )
     from .journal import page_header
     from .review import new_stats as review_new_stats
@@ -68,7 +67,6 @@ except ImportError:  # pragma: no cover - 无父包上下文的兜底（同 __in
         build_status_payload,
         compute_phase_state,
         parse_anchor_date,
-        resolve_today,
     )
     from journal import page_header  # type: ignore[no-redef]
     from review import new_stats as review_new_stats  # type: ignore[no-redef]
@@ -216,7 +214,7 @@ class PanelEntriesMixin:
         calendar = None
         try:
             params = self._cycle_params(shard)
-            today = resolve_today(str(self._tide_cfg.get("timezone") or "auto"))
+            today = self._today_str()
             cal_key = (
                 lanlan,
                 today.isoformat(),
@@ -726,7 +724,7 @@ class PanelEntriesMixin:
         params = self._cycle_params(shard)
         params["anchor"] = anchor
         compute_phase_state(
-            today=resolve_today(str(self._tide_cfg.get("timezone") or "auto")),
+            today=self._today_str(),
             **params,
         )
 

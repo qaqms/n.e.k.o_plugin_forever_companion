@@ -1,0 +1,571 @@
+"""分片基建与配置状态：shard 存取 / 当前角色解析 / 周期参数 / 落盘 / legacy 迁移。
+
+拆分自 __init__.py（方法逐字搬移，仅换文件与导入）；经 Mixin 组合回
+ForeverCompanionPlugin。含：_get_shard/_ensure_shard 的惰性载入、
+_resolve_current_lanlan 的两级回落（宿主 HTTP → ctx 粘滞缓存）、
+_refresh_config 的 settings 覆盖层合并、_save_shard_* 的分片持久化、
+旧版单角色数据的一次性迁移，以及给测试保留的属性代理
+（_mood_state/_diary/_last_injected_* 等直读当前 shard 字段）。
+"""
+
+from __future__ import annotations
+
+import time
+from typing import Any
+
+from plugin.sdk.plugin import Err, Ok, Result
+
+try:
+    from .affect import _MOOD_AFFECT_IMPULSES
+    from .cycle import (
+        compute_phase_state,
+        derive_cycle_params,
+        parse_anchor_date,
+        randomized_default_anchor,
+    )
+    from .journal import migrate_weekly_to_pages
+    from .state import (
+        _CURRENT_LANLAN_CACHE_TTL,
+        _DIARY_MAX_ENTRIES,
+        _JOURNAL_MAX_PAGES,
+        _KNOWN_CATGIRLS_CACHE_TTL,
+        _STORE_CYCLE,
+        _STORE_DIARY,
+        _STORE_LANLAN_INDEX,
+        _STORE_MOOD,
+        _STORE_PROACTIVE,
+        _STORE_SETTINGS,
+        _cfg_section,
+        _cycle_key,
+        _diary_key,
+        _journal_key,
+        _LanlanShard,
+        _mood_key,
+        _MoodState,
+        _parse_iso_ts,
+        _review_key,
+        _review_stats_key,
+        _stats_key,
+        _weekly_key,
+    )
+    from .stats import backfill_day
+except ImportError:  # pragma: no cover - 无父包上下文的兜底（同 __init__.py 惯例）
+    from affect import _MOOD_AFFECT_IMPULSES as _MOOD_AFFECT_IMPULSES  # type: ignore[no-redef]
+    from cycle import (  # type: ignore[no-redef]
+        compute_phase_state,
+        derive_cycle_params,
+        parse_anchor_date,
+        randomized_default_anchor,
+    )
+    from journal import migrate_weekly_to_pages  # type: ignore[no-redef]
+    from state import (  # type: ignore[no-redef]
+        _CURRENT_LANLAN_CACHE_TTL,
+        _DIARY_MAX_ENTRIES,
+        _JOURNAL_MAX_PAGES,
+        _KNOWN_CATGIRLS_CACHE_TTL,
+        _STORE_CYCLE,
+        _STORE_DIARY,
+        _STORE_LANLAN_INDEX,
+        _STORE_MOOD,
+        _STORE_PROACTIVE,
+        _STORE_SETTINGS,
+        _cfg_section,
+        _cycle_key,
+        _diary_key,
+        _journal_key,
+        _LanlanShard,
+        _mood_key,
+        _MoodState,
+        _parse_iso_ts,
+        _review_key,
+        _review_stats_key,
+        _stats_key,
+        _weekly_key,
+    )
+    from stats import backfill_day  # type: ignore[no-redef]
+
+JsonObject = dict[str, Any]
+
+
+def _journal_entries(journal: list[JsonObject]) -> list[JsonObject]:
+    """个人日记页列表 → 段落条目平铺（迁移/回填时取时间戳用；与 __init__.py 同款复刻）。"""
+    out: list[JsonObject] = []
+    for page in journal:
+        if not isinstance(page, dict):
+            continue
+        for item in page.get("entries") or []:
+            if isinstance(item, dict):
+                out.append(item)
+    return out
+
+
+class ShardsMixin:
+    """per-lanlan 状态分片：存取、当前角色解析、配置覆盖层、持久化。"""
+
+    # ==========================================
+    # 分片基建：shard 存取 / 当前角色解析
+    # ==========================================
+
+    def _get_shard(self, lanlan: str) -> _LanlanShard:
+        """同步取 shard：不存在则建空壳（loaded=False，待 _ensure_shard 从 Store 载入）。
+
+        同步路径（属性代理、纯计算）只允许读；任何写入前必须先经过 _ensure_shard。
+        """
+        shard = self._shards.get(lanlan)
+        if shard is None:
+            shard = self._shards[lanlan] = _LanlanShard()
+        return shard
+
+    async def _ensure_shard(self, lanlan: str) -> _LanlanShard:
+        """确保角色 shard 已从 Store 载入，并登记进 lanlan_index（面板只读角色列表数据源）。"""
+        shard = self._get_shard(lanlan)
+        if shard.loaded:
+            return shard
+        cycle_res = await self.store.get(_cycle_key(lanlan))
+        if isinstance(cycle_res, Ok) and isinstance(cycle_res.value, dict):
+            shard.cycle = dict(cycle_res.value)
+        mood_res = await self.store.get(_mood_key(lanlan))
+        if isinstance(mood_res, Ok):
+            shard.mood = _MoodState.from_mapping(mood_res.value)
+        diary_res = await self.store.get(_diary_key(lanlan))
+        if isinstance(diary_res, Ok) and isinstance(diary_res.value, list):
+            shard.diary = [dict(item) for item in diary_res.value if isinstance(item, dict)]
+        # 个人日记（0.7.0）：journal@ 优先；缺失且存在旧版 weekly@ 时一次性迁移
+        # （每条周记成为独立一页，legacy 标记），旧 key 原样保留作备份不再写入
+        journal_res = await self.store.get(_journal_key(lanlan))
+        if isinstance(journal_res, Ok) and isinstance(journal_res.value, list):
+            shard.journal = [dict(item) for item in journal_res.value if isinstance(item, dict)]
+        else:
+            weekly_res = await self.store.get(_weekly_key(lanlan))
+            if isinstance(weekly_res, Ok) and isinstance(weekly_res.value, list):
+                legacy = [dict(item) for item in weekly_res.value if isinstance(item, dict)]
+                shard.journal = migrate_weekly_to_pages(legacy)
+                if shard.journal:
+                    await self._save_shard_journal(lanlan, shard)
+                    self.logger.info(
+                        "weekly reviews migrated to journal pages for {} ({} pages)",
+                        lanlan, len(shard.journal),
+                    )
+        # 我的日记（0.8.0）：已成文篇目 + 累计中的素材统计合并存一个 key
+        #（成文时篇目追加与 stats 清零原子地一次写入；独立 stats key 仅作
+        # 旧数据兼容读取，不再写入）
+        review_res = await self.store.get(_review_key(lanlan))
+        if isinstance(review_res, Ok) and isinstance(review_res.value, dict):
+            raw_review = review_res.value
+            shard.review = [dict(item) for item in raw_review.get("entries") or [] if isinstance(item, dict)]
+            stats = raw_review.get("stats")
+            shard.review_stats = dict(stats) if isinstance(stats, dict) else {}
+        else:
+            stats_res = await self.store.get(_review_stats_key(lanlan))
+            if isinstance(stats_res, Ok) and isinstance(stats_res.value, dict):
+                shard.review_stats = dict(stats_res.value)
+        # 相处统计（1.1.0）：stats@<角色>；首载时从三本日记时间戳一次性回填
+        # "那天有互动"的活跃标记（轮数无法回填，只点亮天数让热力图有起点）
+        stats_store_res = await self.store.get(_stats_key(lanlan))
+        if isinstance(stats_store_res, Ok) and isinstance(stats_store_res.value, dict):
+            shard.stats = dict(stats_store_res.value)
+        if not shard.stats.get("backfilled"):
+            for source in (shard.diary, _journal_entries(shard.journal), [
+                {"ts": item.get("ts"), "source": "review"}
+                for item in shard.review
+            ]):
+                for item in source:
+                    ts = _parse_iso_ts(item.get("ts") if isinstance(item, dict) else None)
+                    if ts is not None:
+                        shard.stats = backfill_day(
+                            shard.stats,
+                            ts.astimezone(self._stats_tz()).date().isoformat(),
+                        )
+            if str(shard.stats.get("first_seen") or ""):
+                # first_seen 回填为最早互动痕迹（比"装版当天"更真实的相伴起点）
+                earliest = min(
+                    (
+                        _parse_iso_ts(item.get("ts"))
+                        for source in (shard.diary, _journal_entries(shard.journal), shard.review)
+                        for item in source
+                        if _parse_iso_ts(item.get("ts") if isinstance(item, dict) else None) is not None
+                    ),
+                    default=None,
+                )
+                if earliest is not None:
+                    shard.stats["first_seen"] = earliest.isoformat(timespec="seconds")
+            shard.stats["backfilled"] = True
+            await self._save_shard_stats(lanlan, shard)
+        shard.loaded = True
+        if lanlan not in self._lanlan_index:
+            self._lanlan_index.append(lanlan)
+            await self._save_lanlan_index()
+            self.logger.info("lanlan shard registered: {}", lanlan)
+        return shard
+
+    def _current_shard_name(self) -> str:
+        """同步路径的角色名回落：最近一次解析结果 → default。"""
+        return self._last_resolved_lanlan or "default"
+
+    def _current_shard(self) -> _LanlanShard:
+        return self._get_shard(self._current_shard_name())
+
+    async def _resolve_current_lanlan(self) -> str:
+        """解析宿主当前角色：HTTP current_catgirl（权威，15s 缓存）→ ctx._current_lanlan → "default"。
+
+        ctx._current_lanlan 只是"最近触发角色"的粘滞缓存，不能当权威来源，
+        仅作 HTTP 不可达时的兜底。角色名取档案名原文，不做 normalize。
+        """
+        name, ts = self._current_lanlan_cache
+        if name and time.monotonic() - ts < _CURRENT_LANLAN_CACHE_TTL:
+            return name
+        resolved = ""
+        payload = await self._proactive_http("GET", "/api/characters/current_catgirl")
+        if isinstance(payload, dict):
+            resolved = str(payload.get("current_catgirl") or "").strip()
+        if not resolved:
+            resolved = str(getattr(self.ctx, "_current_lanlan", "") or "").strip()
+        if not resolved:
+            resolved = "default"
+        self._current_lanlan_cache = (resolved, time.monotonic())
+        self._last_resolved_lanlan = resolved
+        return resolved
+
+    async def _fetch_known_catgirls(self) -> set[str] | None:
+        """拉取宿主现存角色档案名单（GET /api/characters 响应里 ["猫娘"] dict 的 keys，档案名原文）。
+
+        孤儿判定的唯一权威来源。带 Accept-Language: zh-CN 让宿主跳过 persona
+        翻译开销（我们只取 key，不读人设正文）。成功结果缓存 60s；任何失败
+        （不可达/结构异常）返回 None 表示"未知"且不缓存——调用方必须把未知
+        按"非孤儿"处理，绝不可因宿主暂时不可达而误标/误删。
+        """
+        names, ts = self._known_catgirls_cache
+        if names is not None and time.monotonic() - ts < _KNOWN_CATGIRLS_CACHE_TTL:
+            return names
+        payload = await self._proactive_http(
+            "GET", "/api/characters", headers={"Accept-Language": "zh-CN"}
+        )
+        catgirls = payload.get("猫娘") if isinstance(payload, dict) else None
+        if not isinstance(catgirls, dict):
+            return None
+        names = {str(k) for k in catgirls}
+        self._known_catgirls_cache = (names, time.monotonic())
+        return names
+
+    async def _attribution_lanlan(self, kwargs: JsonObject) -> str:
+        """工具/入口调用的归因角色：宿主传入的 ``_ctx.lanlan_name`` 优先。
+
+        LLM 工具调用未证实一定携带 _ctx，故兜底为宿主当前角色。
+        study_companion 同款归因模式。
+        """
+        ctx = kwargs.get("_ctx") if isinstance(kwargs, dict) else None
+        name = ""
+        if isinstance(ctx, dict):
+            name = str(ctx.get("lanlan_name") or "").strip()
+        elif ctx is not None:
+            name = str(getattr(ctx, "lanlan_name", "") or "").strip()
+        if name:
+            return name
+        return await self._resolve_current_lanlan()
+
+    async def _current_shard_async(self) -> tuple[str, _LanlanShard]:
+        """面板/用户入口的作用对象：始终跟随宿主当前角色（无手动选中态）。"""
+        name = await self._resolve_current_lanlan()
+        return name, await self._ensure_shard(name)
+
+    # ---- 同步属性代理：指向"当前 shard"（最近解析 → default）----
+    # 多角色路径一律显式传 shard；这些代理只服务无 lanlan 上下文的同步调用方与既有测试。
+
+    @property
+    def _mood_state(self) -> _MoodState:
+        return self._current_shard().mood
+
+    @_mood_state.setter
+    def _mood_state(self, value: _MoodState) -> None:
+        self._current_shard().mood = value
+
+    @property
+    def _diary(self) -> list[JsonObject]:
+        return self._current_shard().diary
+
+    @_diary.setter
+    def _diary(self, value: list[JsonObject]) -> None:
+        self._current_shard().diary = value
+
+    @property
+    def _last_injected_message_ts(self) -> float:
+        return self._current_shard().last_injected_message_ts
+
+    @_last_injected_message_ts.setter
+    def _last_injected_message_ts(self, value: float) -> None:
+        self._current_shard().last_injected_message_ts = value
+
+    @property
+    def _user_message_count_since_inject(self) -> int:
+        return self._current_shard().user_message_count_since_inject
+
+    @_user_message_count_since_inject.setter
+    def _user_message_count_since_inject(self, value: int) -> None:
+        self._current_shard().user_message_count_since_inject = value
+
+    @property
+    def _last_injected_whisper_key(self) -> str:
+        return self._current_shard().last_injected_whisper_key
+
+    @_last_injected_whisper_key.setter
+    def _last_injected_whisper_key(self, value: str) -> None:
+        self._current_shard().last_injected_whisper_key = value
+
+    @property
+    def _last_activity_context_key(self) -> str:
+        return self._current_shard().last_activity_context_key
+
+    @_last_activity_context_key.setter
+    def _last_activity_context_key(self, value: str) -> None:
+        self._current_shard().last_activity_context_key = value
+
+    # ==========================================
+    # 配置与状态
+    # ==========================================
+
+    async def _refresh_config(self) -> None:
+        """加载全局配置：plugin.toml 默认值 + Store settings 覆盖层（权威）。
+
+        这里只产全局配置（注入策略/提示词/时区等）；per-character 的开关/锚点/
+        周期参数在 shard 上，读取时按"全局默认 ← shard.params 覆盖 ← shard.anchor_date"
+        合成（见 _cycle_params）。Steam 环境下配置文件持久化常超时（4.5s 硬上限），
+        因此用户在面板改过的设置以 PluginStore 为准，重启不丢。
+        """
+        raw = await self.config.dump(timeout=5.0)
+        cfg = _cfg_section(raw)
+        tide = _cfg_section(cfg.get("tide"))
+        mood = _cfg_section(cfg.get("mood"))
+        fragments = _cfg_section(cfg.get("fragments"))
+        journal = _cfg_section(cfg.get("journal"))
+        review = _cfg_section(cfg.get("review"))
+        emotion_sense = _cfg_section(cfg.get("emotion_sense"))
+        stats_cfg = _cfg_section(cfg.get("stats"))
+
+        # Store 全局覆盖层：面板保存过的全局字段优先于 toml 默认
+        tide.update(_cfg_section(self._settings_override.get("tide")))
+        mood.update(_cfg_section(self._settings_override.get("mood")))
+        fragments.update(_cfg_section(self._settings_override.get("fragments")))
+        journal.update(_cfg_section(self._settings_override.get("journal")))
+        review.update(_cfg_section(self._settings_override.get("review")))
+        emotion_sense.update(_cfg_section(self._settings_override.get("emotion_sense")))
+        stats_cfg.update(_cfg_section(self._settings_override.get("stats")))
+
+        self._tide_cfg = tide
+        phases = _cfg_section(tide.get("phases"))
+        self._phases_cfg = {key: _cfg_section(val) for key, val in phases.items()}
+        words = tide.get("forbidden_words")
+        self._forbidden_words = [str(w) for w in words] if isinstance(words, list) else []
+        self._mood_cfg = mood
+        self._fragments_cfg = fragments
+        self._journal_cfg = journal
+        self._review_cfg = review
+        self._emotion_sense_cfg = emotion_sense
+        self._stats_cfg = stats_cfg
+
+        # 锚点缺失（shard 与全局配置都没有）：随机化的默认锚点--反推一个日期
+        # 使"今天"落在本轮平稳期的随机位置（见 cycle.randomized_default_anchor）。
+        # 装完前几天必是平稳期、每次安装起点各不相同，且立即落盘固化
+        # （重启不重新随机）；只写内存，随后 shard 落盘/shutdown 会带上
+        #（不写配置文件，见上）
+        if not str(tide.get("anchor_date") or "").strip():
+            today = self._today_str(tide)
+            for shard in self._shards.values():
+                if shard.loaded and not str(shard.cycle.get("anchor_date") or "").strip():
+                    params = self._effective_cycle_settings(shard)
+                    anchor = randomized_default_anchor(
+                        today=today,
+                        cycle_length=int(params["cycle_length"]),
+                        period_length=int(params["period_length"]),
+                        ovulation_day=int(params["ovulation_day"]),
+                        ovulation_window=int(params["ovulation_window"]),
+                    )
+                    shard.cycle["anchor_date"] = anchor.isoformat()
+                    self.logger.info(
+                        "randomized default anchor {} assigned (luteal-phase start)",
+                        anchor.isoformat(),
+                    )
+
+    def _shard_params(self, shard: _LanlanShard) -> JsonObject:
+        params = shard.cycle.get("params")
+        return params if isinstance(params, dict) else {}
+
+    def _auto_derive(self, shard: _LanlanShard | None = None) -> bool:
+        """自动演算开关：开启时潮汐期长度/活跃日/活跃窗口由周期长度推导。"""
+        params = self._shard_params(shard or self._current_shard())
+        if "auto_derive" in params:
+            return bool(params["auto_derive"])
+        return bool((self._tide_cfg or {}).get("auto_derive", True))
+
+    def _effective_cycle_settings(self, shard: _LanlanShard | None = None) -> JsonObject:
+        """某角色生效的周期参数：shard.params 覆盖全局默认；自动演算开启时由周期长度推导。"""
+        shard = shard or self._current_shard()
+        params = self._shard_params(shard)
+        tide = self._tide_cfg or {}
+        cycle_length = int(params.get("cycle_length") or tide.get("cycle_length") or 28)
+        if self._auto_derive(shard):
+            return derive_cycle_params(cycle_length)
+        return {
+            "cycle_length": cycle_length,
+            "period_length": int(params.get("period_length") or tide.get("period_length") or 5),
+            "ovulation_day": int(params.get("ovulation_day") or tide.get("ovulation_day") or 14),
+            "ovulation_window": int(params.get("ovulation_window") or tide.get("ovulation_window") or 3),
+        }
+
+    def _cycle_params(self, shard: _LanlanShard | None = None) -> JsonObject:
+        """合成某角色的完整周期参数：全局默认 ← shard.params 覆盖 ← shard.anchor_date。"""
+        shard = shard or self._current_shard()
+        anchor_raw = str(shard.cycle.get("anchor_date") or "").strip()
+        if not anchor_raw:
+            anchor_raw = str(self._tide_cfg.get("anchor_date") or "").strip()
+        if not anchor_raw:
+            # shard 与全局都缺锚点：随机化兜底（正常路径下 _refresh_config 已落
+            # 随机默认值；这里只是异常路径的兜底，同样取平稳期随机位置）
+            today = self._today_str()
+            params = self._effective_cycle_settings(shard)
+            anchor_raw = randomized_default_anchor(
+                today=today,
+                cycle_length=int(params["cycle_length"]),
+                period_length=int(params["period_length"]),
+                ovulation_day=int(params["ovulation_day"]),
+                ovulation_window=int(params["ovulation_window"]),
+            ).isoformat()
+        return {
+            "anchor": parse_anchor_date(anchor_raw),
+            **self._effective_cycle_settings(shard),
+            "advance_days": max(0, int(shard.cycle.get("advance_days") or 0)),
+        }
+
+    def _enabled(self, shard: _LanlanShard | None = None) -> bool:
+        shard = shard or self._current_shard()
+        enabled = shard.cycle.get("enabled")
+        if enabled is None:
+            # 与 plugin.toml [tide] enabled = false 一致：配置缺失时保持关闭（fail-closed）。
+            # 新角色 shard 没有任何覆写时同样回落到这里——默认不对未设置的角色开启模拟
+            enabled = bool((self._tide_cfg or {}).get("enabled", False))
+        return bool(enabled)
+
+    def _current_phase_state(self, shard: _LanlanShard | None = None):
+        params = self._cycle_params(shard)
+        today = self._today_str()
+        return compute_phase_state(today=today, **params)
+
+    async def _load_state(self) -> None:
+        settings_res = await self.store.get(_STORE_SETTINGS)
+        if isinstance(settings_res, Ok) and isinstance(settings_res.value, dict):
+            self._settings_override = dict(settings_res.value)
+        index_res = await self.store.get(_STORE_LANLAN_INDEX)
+        if isinstance(index_res, Ok) and isinstance(index_res.value, list):
+            self._lanlan_index = [str(n) for n in index_res.value if str(n)]
+        proactive_res = await self.store.get(_STORE_PROACTIVE)
+        if isinstance(proactive_res, Ok) and isinstance(proactive_res.value, dict):
+            raw = proactive_res.value
+            prev = raw.get("prev")
+            self._proactive_state = {
+                "prev": dict(prev) if isinstance(prev, dict) else None,
+                "paused_by": [str(n) for n in raw.get("paused_by") or [] if str(n)],
+            }
+        await self._migrate_legacy_state_if_needed()
+        # 载入所有已知角色的 shard：主动搭话引用计数要看全量生效情绪，
+        # 只载当前角色会把"别的角色还在冷战"漏算
+        for lanlan in list(self._lanlan_index):
+            await self._ensure_shard(lanlan)
+        current = await self._resolve_current_lanlan()
+        await self._ensure_shard(current)
+
+    async def _migrate_legacy_state_if_needed(self) -> None:
+        """0.4.0 单角色数据 → 0.5.0 分片：归属"当前角色"，一次性、幂等。
+
+        判定：Store 里没有 lanlan_index 且存在旧 cycle_state。
+        cycle_state.settings 抽进全局 settings；旧 mood_state.proactive_prev
+        （暂停水位）搬进 proactive_state——升级瞬间若正处于暂停中，水位不跟着走
+        会导致主动搭话永远卡死。旧 key 全部保留作备份，不再写入。
+        """
+        index_res = await self.store.get(_STORE_LANLAN_INDEX)
+        if isinstance(index_res, Ok) and index_res.value is not None:
+            return  # 已迁移过（或全新安装已写过索引）：幂等跳过
+        legacy_res = await self.store.get(_STORE_CYCLE)
+        legacy = legacy_res.value if isinstance(legacy_res, Ok) else None
+        if not isinstance(legacy, dict):
+            return  # 无旧数据：全新安装，索引随首个 shard 创建落盘
+        lanlan = await self._resolve_current_lanlan()
+        shard = self._get_shard(lanlan)
+        params = legacy.get("params")
+        shard.cycle = {
+            "enabled": legacy.get("enabled"),
+            "anchor_date": legacy.get("anchor_date"),
+            "advance_days": legacy.get("advance_days") or 0,
+            "phase_seen": legacy.get("phase_seen") or "",
+            "params": dict(params) if isinstance(params, dict) else {},
+        }
+        mood_res = await self.store.get(_STORE_MOOD)
+        if isinstance(mood_res, Ok) and isinstance(mood_res.value, dict):
+            raw_mood = mood_res.value
+            shard.mood = _MoodState.from_mapping(raw_mood)
+            prev = raw_mood.get("proactive_prev")
+            if isinstance(prev, dict):
+                self._proactive_state["prev"] = dict(prev)
+                if shard.mood.is_active():
+                    self._proactive_state["paused_by"] = [lanlan]
+        diary_res = await self.store.get(_STORE_DIARY)
+        if isinstance(diary_res, Ok) and isinstance(diary_res.value, list):
+            shard.diary = [dict(item) for item in diary_res.value if isinstance(item, dict)]
+        shard.loaded = True
+        settings = legacy.get("settings")
+        if isinstance(settings, dict):
+            self._settings_override = dict(settings)
+            await self._save_settings()
+        self._lanlan_index = [lanlan]
+        await self._save_lanlan_index()
+        await self._save_shard_cycle(lanlan, shard)
+        await self._save_shard_mood(lanlan, shard)
+        await self._save_shard_diary(lanlan, shard)
+        await self._save_proactive_state()
+        self.logger.info("legacy single-character state migrated to shard {}", lanlan)
+
+    async def _save_shard_cycle(self, lanlan: str, shard: _LanlanShard) -> Result[None]:
+        res = await self.store.set(_cycle_key(lanlan), dict(shard.cycle))
+        if isinstance(res, Err):
+            self.logger.warning("persist cycle failed for {}: {}", lanlan, res.error)
+        return res
+
+    async def _save_shard_mood(self, lanlan: str, shard: _LanlanShard) -> None:
+        res = await self.store.set(_mood_key(lanlan), shard.mood.to_mapping())
+        if isinstance(res, Err):
+            self.logger.warning("persist mood failed for {}: {}", lanlan, res.error)
+
+    async def _save_shard_diary(self, lanlan: str, shard: _LanlanShard) -> None:
+        # 内存与落盘保持同一截断语义：都只保留最近 _DIARY_MAX_ENTRIES 条，
+        # 避免本次会话 total 与重启后 total 不一致
+        shard.diary = list(shard.diary[-_DIARY_MAX_ENTRIES:])
+        res = await self.store.set(_diary_key(lanlan), list(shard.diary))
+        if isinstance(res, Err):
+            self.logger.warning("persist diary failed for {}: {}", lanlan, res.error)
+
+    async def _save_diary(self) -> None:
+        """兼容包装：保存"当前"shard 的手记（无 lanlan 上下文的旧调用点/测试用）。"""
+        name = self._current_shard_name()
+        await self._save_shard_diary(name, self._get_shard(name))
+
+    async def _save_shard_journal(self, lanlan: str, shard: _LanlanShard) -> None:
+        # 与手记同一截断语义：内存与落盘都只保留最近 _JOURNAL_MAX_PAGES 页
+        shard.journal = list(shard.journal[-_JOURNAL_MAX_PAGES:])
+        res = await self.store.set(_journal_key(lanlan), list(shard.journal))
+        if isinstance(res, Err):
+            self.logger.warning("persist journal failed for {}: {}", lanlan, res.error)
+
+    async def _save_shard_review(self, lanlan: str, shard: _LanlanShard) -> None:
+        """我的日记落盘：成文篇目与素材统计合并写进一个 key（stats 随篇目一起走，
+        成文时原子清零——两个独立 key 反而会在中途崩溃时出现篇目已加而 stats
+        未清的错位；加载侧对旧独立 stats key 只读迁移）。"""
+        res = await self.store.set(
+            _review_key(lanlan), {"entries": list(shard.review), "stats": dict(shard.review_stats)}
+        )
+        if isinstance(res, Err):
+            self.logger.warning("persist review failed for {}: {}", lanlan, res.error)
+
+    async def _save_shard_stats(self, lanlan: str, shard: _LanlanShard) -> None:
+        """相处统计落盘（stats@<角色>；只增不清零，纯本地）。"""
+        res = await self.store.set(_stats_key(lanlan), dict(shard.stats))
+        if isinstance(res, Err):
+            self.logger.warning("persist stats failed for {}: {}", lanlan, res.error)
+

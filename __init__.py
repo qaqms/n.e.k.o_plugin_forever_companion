@@ -25,16 +25,23 @@ target_lanlan 的消息会被宿主整条丢弃。情绪系统把十个动作注
 开关上的引用计数（白名单制：只有重度负面动作生效才暂停，中间态/正面动作
 不暂停），水位存 ``proactive_state``。旧版单角色数据（cycle_state/mood_state/mood_diary）
 在启动时一次性迁移归属当前角色，旧 key 保留作备份、不再写入。
+
+结构（1.2 拆分）：纯函数层在 cycle/state/affect/fragments/journal/review/stats/
+emotion_sense/tone_slot 九个模块；方法层按"对外契约面"拆成七个 Mixin 组合进
+主类——shards（分片基建/配置/落盘）、whisper（注入引擎/总线轮询）、senses
+（语气感知/碎片/我的日记/日记邀请）、mood_actions（12 个 @llm_tool+情绪状态机）、
+host_coord（宿主协调/HTTP/工具韧性）、panel（dashboard+面板入口）、debug_entries
+（调试入口）。SDK 的 entry/llm_tool 发现都遍历 type(self)，Mixin 定义位置无关；
+``plugin.toml`` 的 entry 仍指向本文件的 ForeverCompanionPlugin。测试的
+``tm.`` 命名空间锚点（tm.time/tm.random/tm.resolve_today/tm.new_stats 等）
+由本文件的再导出与 ``_today_str`` 薄方法保持不变。
 """
 
 from __future__ import annotations
 
-import asyncio
-import inspect
 import random as random  # 再导出：tm.random 是测试猴补丁锚点（patch stdlib 模块对象属性，所有 import 者同生效）
 import threading
 import time
-from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -42,7 +49,6 @@ from plugin.sdk.plugin import (
     Err,
     NekoPluginBase,
     Ok,
-    Result,
     SdkError,
     lifecycle,
     neko_plugin,
@@ -67,33 +73,57 @@ from plugin.sdk.plugin import (
 try:
     from .cycle import (
         TideConfigError,
-        _time_bucket,
-        build_body_whisper,
         build_status_payload,
-        compute_phase_state,
-        derive_cycle_params,
-        parse_anchor_date,
-        randomized_default_anchor,
         resolve_today,
     )
     from .cycle import (
+        _time_bucket as _time_bucket,
+    )
+    from .cycle import (
+        build_body_whisper as build_body_whisper,
+    )
+    from .cycle import (
         build_month_calendar as build_month_calendar,
+    )
+    from .cycle import (
+        compute_phase_state as compute_phase_state,
+    )
+    from .cycle import (
+        derive_cycle_params as derive_cycle_params,
+    )
+    from .cycle import (
+        parse_anchor_date as parse_anchor_date,
+    )
+    from .cycle import (
+        randomized_default_anchor as randomized_default_anchor,
     )
 except ImportError:  # pragma: no cover - 无父包上下文的兜底（如独立仓库里 pytest 把
     # 根目录当 Package 直接导入 __init__.py，宿主环境不会出现此路径）
     from cycle import (  # type: ignore[no-redef]
         TideConfigError,
-        _time_bucket,
-        build_body_whisper,
         build_status_payload,
-        compute_phase_state,
-        derive_cycle_params,
-        parse_anchor_date,
-        randomized_default_anchor,
         resolve_today,
     )
     from cycle import (
+        _time_bucket as _time_bucket,
+    )
+    from cycle import (
+        build_body_whisper as build_body_whisper,
+    )
+    from cycle import (
         build_month_calendar as build_month_calendar,
+    )
+    from cycle import (
+        compute_phase_state as compute_phase_state,
+    )
+    from cycle import (
+        derive_cycle_params as derive_cycle_params,
+    )
+    from cycle import (
+        parse_anchor_date as parse_anchor_date,
+    )
+    from cycle import (
+        randomized_default_anchor as randomized_default_anchor,
     )
 
 # 纯数据/纯函数区段的解耦抽出（第一/二批重构）：state.py = Store 布局/常量表/
@@ -105,15 +135,25 @@ try:
         _MOOD_AFFECT_IMPULSES,
         _apply_affect_impulse,
         _current_affect,
-        _feed_tone_affect,
+    )
+    from .affect import (
+        _feed_tone_affect as _feed_tone_affect,
     )
     from .emotion_sense import EmotionSenseService
     from .fragments import (
-        build_fragment_prompt,
-        fragment_record,
-        parse_fragment_response,
-        recall_fragments,
-        should_nudge_fight,
+        build_fragment_prompt as build_fragment_prompt,
+    )
+    from .fragments import (
+        fragment_record as fragment_record,
+    )
+    from .fragments import (
+        parse_fragment_response as parse_fragment_response,
+    )
+    from .fragments import (
+        recall_fragments as recall_fragments,
+    )
+    from .fragments import (
+        should_nudge_fight as should_nudge_fight,
     )
     from .journal import (
         assemble_journal_entry as assemble_journal_entry,
@@ -122,28 +162,48 @@ try:
         has_journal_content as has_journal_content,
     )
     from .journal import (
-        journal_due,
-        migrate_weekly_to_pages,
+        journal_due as journal_due,
     )
     from .journal import (
         journal_write as journal_write,
     )
     from .journal import (
+        migrate_weekly_to_pages as migrate_weekly_to_pages,
+    )
+    from .journal import (
         page_header as page_header,
     )
     from .review import (
-        append_review,
-        build_review_prompt,
-        can_force_write,
-        parse_review_response,
-        record_action,
-        record_fragment,
-        record_tone,
-        record_turn,
-        review_due,
-        review_record,
+        append_review as append_review,
+    )
+    from .review import (
+        build_review_prompt as build_review_prompt,
+    )
+    from .review import (
+        can_force_write as can_force_write,
     )
     from .review import new_stats as review_new_stats
+    from .review import (
+        parse_review_response as parse_review_response,
+    )
+    from .review import (
+        record_action as record_action,
+    )
+    from .review import (
+        record_fragment as record_fragment,
+    )
+    from .review import (
+        record_tone as record_tone,
+    )
+    from .review import (
+        record_turn as record_turn,
+    )
+    from .review import (
+        review_due as review_due,
+    )
+    from .review import (
+        review_record as review_record,
+    )
     from .state import (
         _ACTION_DEFAULT_MINUTES as _ACTION_DEFAULT_MINUTES,
     )
@@ -163,41 +223,34 @@ try:
         _CORE_CONFIG_CACHE_TTL as _CORE_CONFIG_CACHE_TTL,
     )
     from .state import (
-        _CURRENT_LANLAN_CACHE_TTL,
-        _DIARY_MAX_ENTRIES,
-        _FRAGMENT_DEFAULT_CONFIDENCE,
-        _FRAGMENT_DEFAULT_MIN_INTERVAL_SEC,
-        _FRAGMENT_DEFAULT_NUDGE_GAP_MIN,
-        _FRAGMENT_DEFAULT_SLOT,
-        _JOURNAL_DEFAULT_INTERVAL_DAYS,
-        _JOURNAL_INVITE_THROTTLE_SEC,
-        _JOURNAL_MAX_PAGES,
-        _KNOWN_CATGIRLS_CACHE_TTL,
-        _PANEL_BG_DEFAULT_DIM,
-        _PANEL_BG_MAX_CHARS,
-        _PANEL_BG_MIMES,
-        _PROACTIVE_PAUSE_ACTIONS,
-        _REVIEW_DEFAULT_DAYS,
-        _REVIEW_DEFAULT_SLOT,
-        _REVIEW_DEFAULT_TURNS,
-        _STORE_CYCLE,
-        _STORE_DIARY,
-        _STORE_LANLAN_INDEX,
-        _STORE_MOOD,
-        _STORE_PROACTIVE,
-        _STORE_SETTINGS,
-        _cfg_section,
-        _cycle_key,
-        _diary_key,
-        _journal_key,
-        _LanlanShard,
-        _mood_key,
-        _MoodState,
-        _now_utc,
-        _review_key,
-        _review_stats_key,
-        _stats_key,
-        _weekly_key,
+        _CURRENT_LANLAN_CACHE_TTL as _CURRENT_LANLAN_CACHE_TTL,
+    )
+    from .state import (
+        _DIARY_MAX_ENTRIES as _DIARY_MAX_ENTRIES,
+    )
+    from .state import (
+        _FRAGMENT_DEFAULT_CONFIDENCE as _FRAGMENT_DEFAULT_CONFIDENCE,
+    )
+    from .state import (
+        _FRAGMENT_DEFAULT_MIN_INTERVAL_SEC as _FRAGMENT_DEFAULT_MIN_INTERVAL_SEC,
+    )
+    from .state import (
+        _FRAGMENT_DEFAULT_NUDGE_GAP_MIN as _FRAGMENT_DEFAULT_NUDGE_GAP_MIN,
+    )
+    from .state import (
+        _FRAGMENT_DEFAULT_SLOT as _FRAGMENT_DEFAULT_SLOT,
+    )
+    from .state import (
+        _JOURNAL_DEFAULT_INTERVAL_DAYS as _JOURNAL_DEFAULT_INTERVAL_DAYS,
+    )
+    from .state import (
+        _JOURNAL_INVITE_THROTTLE_SEC as _JOURNAL_INVITE_THROTTLE_SEC,
+    )
+    from .state import (
+        _JOURNAL_MAX_PAGES as _JOURNAL_MAX_PAGES,
+    )
+    from .state import (
+        _KNOWN_CATGIRLS_CACHE_TTL as _KNOWN_CATGIRLS_CACHE_TTL,
     )
     from .state import (
         _MOOD_ACTION_DEFAULT_LABELS as _MOOD_ACTION_DEFAULT_LABELS,
@@ -206,7 +259,28 @@ try:
         _MOOD_ACTION_LABEL_KEYS as _MOOD_ACTION_LABEL_KEYS,
     )
     from .state import (
+        _PANEL_BG_DEFAULT_DIM,
+        _PANEL_BG_MAX_CHARS,
+        _PANEL_BG_MIMES,
+        _STORE_LANLAN_INDEX,
+        _STORE_PROACTIVE,
+        _STORE_SETTINGS,
+        _LanlanShard,
+    )
+    from .state import (
         _POSITIVE_ACTIONS as _POSITIVE_ACTIONS,
+    )
+    from .state import (
+        _PROACTIVE_PAUSE_ACTIONS as _PROACTIVE_PAUSE_ACTIONS,
+    )
+    from .state import (
+        _REVIEW_DEFAULT_DAYS as _REVIEW_DEFAULT_DAYS,
+    )
+    from .state import (
+        _REVIEW_DEFAULT_SLOT as _REVIEW_DEFAULT_SLOT,
+    )
+    from .state import (
+        _REVIEW_DEFAULT_TURNS as _REVIEW_DEFAULT_TURNS,
     )
     from .state import (
         _REVIEW_ENTRY_MAX_CHARS as _REVIEW_ENTRY_MAX_CHARS,
@@ -216,6 +290,15 @@ try:
     )
     from .state import (
         _REVIEW_MIN_TURNS_FORCED as _REVIEW_MIN_TURNS_FORCED,
+    )
+    from .state import (
+        _STORE_CYCLE as _STORE_CYCLE,
+    )
+    from .state import (
+        _STORE_DIARY as _STORE_DIARY,
+    )
+    from .state import (
+        _STORE_MOOD as _STORE_MOOD,
     )
     from .state import (
         _STORE_PANEL_BG as _STORE_PANEL_BG,
@@ -254,16 +337,50 @@ try:
         _TONE_WARM_LABELS as _TONE_WARM_LABELS,
     )
     from .state import (
+        _cfg_section as _cfg_section,
+    )
+    from .state import (
+        _cycle_key as _cycle_key,
+    )
+    from .state import (
+        _diary_key as _diary_key,
+    )
+    from .state import (
+        _journal_key as _journal_key,
+    )
+    from .state import (
+        _mood_key as _mood_key,
+    )
+    from .state import (
+        _MoodState as _MoodState,
+    )
+    from .state import (
+        _now_utc as _now_utc,
+    )
+    from .state import (
         _parse_iso_ts as _parse_iso_ts,
+    )
+    from .state import (
+        _review_key as _review_key,
+    )
+    from .state import (
+        _review_stats_key as _review_stats_key,
+    )
+    from .state import (
+        _stats_key as _stats_key,
+    )
+    from .state import (
+        _weekly_key as _weekly_key,
     )
     from .stats import (
         anniversary_due,
-        backfill_day,
         mark_anniversary_pushed,
         record_made_up,
-        record_milestone,
         record_mood_event,
         seal_due_months,
+    )
+    from .stats import (
+        backfill_day as backfill_day,
     )
     from .stats import (
         badges_payload as badges_payload,
@@ -280,15 +397,24 @@ try:
     from .stats import (
         new_stats as new_stats,
     )
+    from .stats import (
+        record_milestone as record_milestone,
+    )
     from .stats import record_tone as stats_record_tone
     from .stats import record_turn as stats_record_turn
     from .stats import (
         summary_payload as summary_payload,
     )
     from .tone_slot import (
-        _parse_tone_result,
-        _post_chat_completion,
-        _resolve_tone_slot,
+        _parse_tone_result as _parse_tone_result,
+    )
+    from .tone_slot import (
+        _post_chat_completion as _post_chat_completion,
+    )
+    from .tone_slot import (
+        _resolve_tone_slot as _resolve_tone_slot,
+    )
+    from .tone_slot import (
         diagnose_slot_dormancy,
     )
 except ImportError:  # pragma: no cover - 无父包上下文的兜底（同上 cycle 分支）
@@ -302,15 +428,23 @@ except ImportError:  # pragma: no cover - 无父包上下文的兜底（同上 c
         _current_affect as _current_affect,
     )
     from affect import (
-        _feed_tone_affect,
+        _feed_tone_affect as _feed_tone_affect,
     )
     from emotion_sense import EmotionSenseService  # type: ignore[no-redef]
     from fragments import (  # type: ignore[no-redef]
-        build_fragment_prompt,
-        fragment_record,
-        parse_fragment_response,
-        recall_fragments,
-        should_nudge_fight,
+        build_fragment_prompt as build_fragment_prompt,
+    )
+    from fragments import (
+        fragment_record as fragment_record,
+    )
+    from fragments import (
+        parse_fragment_response as parse_fragment_response,
+    )
+    from fragments import (
+        recall_fragments as recall_fragments,
+    )
+    from fragments import (
+        should_nudge_fight as should_nudge_fight,
     )
     from journal import (  # type: ignore[no-redef]
         assemble_journal_entry as assemble_journal_entry,
@@ -319,28 +453,48 @@ except ImportError:  # pragma: no cover - 无父包上下文的兜底（同上 c
         has_journal_content as has_journal_content,
     )
     from journal import (
-        journal_due,
-        migrate_weekly_to_pages,
+        journal_due as journal_due,
     )
     from journal import (
         journal_write as journal_write,
     )
     from journal import (
+        migrate_weekly_to_pages as migrate_weekly_to_pages,
+    )
+    from journal import (
         page_header as page_header,
     )
     from review import (  # type: ignore[no-redef]
-        append_review,
-        build_review_prompt,
-        can_force_write,
-        parse_review_response,
-        record_action,
-        record_fragment,
-        record_tone,
-        record_turn,
-        review_due,
-        review_record,
+        append_review as append_review,
     )
-    from review import new_stats as review_new_stats  # type: ignore[no-redef]
+    from review import (
+        build_review_prompt as build_review_prompt,
+    )
+    from review import (
+        can_force_write as can_force_write,
+    )
+    from review import new_stats as review_new_stats  # type: ignore[no-redef]  # noqa: F401
+    from review import (
+        parse_review_response as parse_review_response,
+    )
+    from review import (
+        record_action as record_action,
+    )
+    from review import (
+        record_fragment as record_fragment,
+    )
+    from review import (
+        record_tone as record_tone,
+    )
+    from review import (
+        record_turn as record_turn,
+    )
+    from review import (
+        review_due as review_due,
+    )
+    from review import (
+        review_record as review_record,
+    )
     from state import (  # type: ignore[no-redef]
         _ACTION_DEFAULT_MINUTES as _ACTION_DEFAULT_MINUTES,
     )
@@ -360,41 +514,34 @@ except ImportError:  # pragma: no cover - 无父包上下文的兜底（同上 c
         _CORE_CONFIG_CACHE_TTL as _CORE_CONFIG_CACHE_TTL,
     )
     from state import (
-        _CURRENT_LANLAN_CACHE_TTL,
-        _DIARY_MAX_ENTRIES,
-        _FRAGMENT_DEFAULT_CONFIDENCE,
-        _FRAGMENT_DEFAULT_MIN_INTERVAL_SEC,
-        _FRAGMENT_DEFAULT_NUDGE_GAP_MIN,
-        _FRAGMENT_DEFAULT_SLOT,
-        _JOURNAL_DEFAULT_INTERVAL_DAYS,
-        _JOURNAL_INVITE_THROTTLE_SEC,
-        _JOURNAL_MAX_PAGES,
-        _KNOWN_CATGIRLS_CACHE_TTL,
-        _PANEL_BG_DEFAULT_DIM,
-        _PANEL_BG_MAX_CHARS,
-        _PANEL_BG_MIMES,
-        _PROACTIVE_PAUSE_ACTIONS,
-        _REVIEW_DEFAULT_DAYS,
-        _REVIEW_DEFAULT_SLOT,
-        _REVIEW_DEFAULT_TURNS,
-        _STORE_CYCLE,
-        _STORE_DIARY,
-        _STORE_LANLAN_INDEX,
-        _STORE_MOOD,
-        _STORE_PROACTIVE,
-        _STORE_SETTINGS,
-        _cfg_section,
-        _cycle_key,
-        _diary_key,
-        _journal_key,
-        _LanlanShard,
-        _mood_key,
-        _MoodState,
-        _now_utc,
-        _review_key,
-        _review_stats_key,
-        _stats_key,
-        _weekly_key,
+        _CURRENT_LANLAN_CACHE_TTL as _CURRENT_LANLAN_CACHE_TTL,
+    )
+    from state import (
+        _DIARY_MAX_ENTRIES as _DIARY_MAX_ENTRIES,
+    )
+    from state import (
+        _FRAGMENT_DEFAULT_CONFIDENCE as _FRAGMENT_DEFAULT_CONFIDENCE,
+    )
+    from state import (
+        _FRAGMENT_DEFAULT_MIN_INTERVAL_SEC as _FRAGMENT_DEFAULT_MIN_INTERVAL_SEC,
+    )
+    from state import (
+        _FRAGMENT_DEFAULT_NUDGE_GAP_MIN as _FRAGMENT_DEFAULT_NUDGE_GAP_MIN,
+    )
+    from state import (
+        _FRAGMENT_DEFAULT_SLOT as _FRAGMENT_DEFAULT_SLOT,
+    )
+    from state import (
+        _JOURNAL_DEFAULT_INTERVAL_DAYS as _JOURNAL_DEFAULT_INTERVAL_DAYS,
+    )
+    from state import (
+        _JOURNAL_INVITE_THROTTLE_SEC as _JOURNAL_INVITE_THROTTLE_SEC,
+    )
+    from state import (
+        _JOURNAL_MAX_PAGES as _JOURNAL_MAX_PAGES,
+    )
+    from state import (
+        _KNOWN_CATGIRLS_CACHE_TTL as _KNOWN_CATGIRLS_CACHE_TTL,
     )
     from state import (
         _MOOD_ACTION_DEFAULT_LABELS as _MOOD_ACTION_DEFAULT_LABELS,
@@ -403,7 +550,28 @@ except ImportError:  # pragma: no cover - 无父包上下文的兜底（同上 c
         _MOOD_ACTION_LABEL_KEYS as _MOOD_ACTION_LABEL_KEYS,
     )
     from state import (
+        _PANEL_BG_DEFAULT_DIM,
+        _PANEL_BG_MAX_CHARS,
+        _PANEL_BG_MIMES,
+        _STORE_LANLAN_INDEX,
+        _STORE_PROACTIVE,
+        _STORE_SETTINGS,
+        _LanlanShard,
+    )
+    from state import (
         _POSITIVE_ACTIONS as _POSITIVE_ACTIONS,
+    )
+    from state import (
+        _PROACTIVE_PAUSE_ACTIONS as _PROACTIVE_PAUSE_ACTIONS,
+    )
+    from state import (
+        _REVIEW_DEFAULT_DAYS as _REVIEW_DEFAULT_DAYS,
+    )
+    from state import (
+        _REVIEW_DEFAULT_SLOT as _REVIEW_DEFAULT_SLOT,
+    )
+    from state import (
+        _REVIEW_DEFAULT_TURNS as _REVIEW_DEFAULT_TURNS,
     )
     from state import (
         _REVIEW_ENTRY_MAX_CHARS as _REVIEW_ENTRY_MAX_CHARS,
@@ -413,6 +581,15 @@ except ImportError:  # pragma: no cover - 无父包上下文的兜底（同上 c
     )
     from state import (
         _REVIEW_MIN_TURNS_FORCED as _REVIEW_MIN_TURNS_FORCED,
+    )
+    from state import (
+        _STORE_CYCLE as _STORE_CYCLE,
+    )
+    from state import (
+        _STORE_DIARY as _STORE_DIARY,
+    )
+    from state import (
+        _STORE_MOOD as _STORE_MOOD,
     )
     from state import (
         _STORE_PANEL_BG as _STORE_PANEL_BG,
@@ -451,16 +628,50 @@ except ImportError:  # pragma: no cover - 无父包上下文的兜底（同上 c
         _TONE_WARM_LABELS as _TONE_WARM_LABELS,
     )
     from state import (
+        _cfg_section as _cfg_section,
+    )
+    from state import (
+        _cycle_key as _cycle_key,
+    )
+    from state import (
+        _diary_key as _diary_key,
+    )
+    from state import (
+        _journal_key as _journal_key,
+    )
+    from state import (
+        _mood_key as _mood_key,
+    )
+    from state import (
+        _MoodState as _MoodState,
+    )
+    from state import (
+        _now_utc as _now_utc,
+    )
+    from state import (
         _parse_iso_ts as _parse_iso_ts,
+    )
+    from state import (
+        _review_key as _review_key,
+    )
+    from state import (
+        _review_stats_key as _review_stats_key,
+    )
+    from state import (
+        _stats_key as _stats_key,
+    )
+    from state import (
+        _weekly_key as _weekly_key,
     )
     from stats import (  # type: ignore[no-redef]
         anniversary_due,
-        backfill_day,
         mark_anniversary_pushed,
         record_made_up,
-        record_milestone,
         record_mood_event,
         seal_due_months,
+    )
+    from stats import (
+        backfill_day as backfill_day,
     )
     from stats import (
         badges_payload as badges_payload,
@@ -477,15 +688,24 @@ except ImportError:  # pragma: no cover - 无父包上下文的兜底（同上 c
     from stats import (
         new_stats as new_stats,
     )
+    from stats import (
+        record_milestone as record_milestone,
+    )
     from stats import record_tone as stats_record_tone  # type: ignore[no-redef]
     from stats import record_turn as stats_record_turn  # type: ignore[no-redef]
     from stats import (
         summary_payload as summary_payload,
     )
     from tone_slot import (  # type: ignore[no-redef]
-        _parse_tone_result,
-        _post_chat_completion,
-        _resolve_tone_slot,
+        _parse_tone_result as _parse_tone_result,
+    )
+    from tone_slot import (
+        _post_chat_completion as _post_chat_completion,
+    )
+    from tone_slot import (
+        _resolve_tone_slot as _resolve_tone_slot,
+    )
+    from tone_slot import (
         diagnose_slot_dormancy,
     )
 
@@ -558,15 +778,24 @@ try:
     from .host_coord import HostCoordMixin
     from .mood_actions import MoodActionsMixin
     from .panel import PanelEntriesMixin
+    from .senses import SensesMixin
+    from .shards import ShardsMixin
+    from .whisper import WhisperMixin
 except ImportError:  # pragma: no cover - 无父包上下文的兜底（同上 cycle 分支）
     from debug_entries import DebugEntriesMixin  # type: ignore[no-redef]
     from host_coord import HostCoordMixin  # type: ignore[no-redef]
     from mood_actions import MoodActionsMixin  # type: ignore[no-redef]
     from panel import PanelEntriesMixin  # type: ignore[no-redef]
+    from senses import SensesMixin  # type: ignore[no-redef]
+    from shards import ShardsMixin  # type: ignore[no-redef]
+    from whisper import WhisperMixin  # type: ignore[no-redef]
 
 
 @neko_plugin
 class ForeverCompanionPlugin(
+    ShardsMixin,
+    WhisperMixin,
+    SensesMixin,
     MoodActionsMixin,
     DebugEntriesMixin,
     HostCoordMixin,
@@ -654,472 +883,15 @@ class ForeverCompanionPlugin(
             logger=lambda: self.logger,
         )
 
-    # ==========================================
-    # 分片基建：shard 存取 / 当前角色解析
-    # ==========================================
+    def _today_str(self, cfg: JsonObject | None = None) -> Any:
+        """折算"今天"（timezone 解析在 cycle.resolve_today）。
 
-    def _get_shard(self, lanlan: str) -> _LanlanShard:
-        """同步取 shard：不存在则建空壳（loaded=False，待 _ensure_shard 从 Store 载入）。
-
-        同步路径（属性代理、纯计算）只允许读；任何写入前必须先经过 _ensure_shard。
+        走主包命名空间的 resolve_today（tests 猴补丁 tm.resolve_today 的契约锚点：
+        调用点必须读 forever_companion 模块全局，直接 from .cycle import 的本地名
+        收不到 patch——拆分后各 mixin 的调用统一经此薄方法转发）。
         """
-        shard = self._shards.get(lanlan)
-        if shard is None:
-            shard = self._shards[lanlan] = _LanlanShard()
-        return shard
-
-    async def _ensure_shard(self, lanlan: str) -> _LanlanShard:
-        """确保角色 shard 已从 Store 载入，并登记进 lanlan_index（面板只读角色列表数据源）。"""
-        shard = self._get_shard(lanlan)
-        if shard.loaded:
-            return shard
-        cycle_res = await self.store.get(_cycle_key(lanlan))
-        if isinstance(cycle_res, Ok) and isinstance(cycle_res.value, dict):
-            shard.cycle = dict(cycle_res.value)
-        mood_res = await self.store.get(_mood_key(lanlan))
-        if isinstance(mood_res, Ok):
-            shard.mood = _MoodState.from_mapping(mood_res.value)
-        diary_res = await self.store.get(_diary_key(lanlan))
-        if isinstance(diary_res, Ok) and isinstance(diary_res.value, list):
-            shard.diary = [dict(item) for item in diary_res.value if isinstance(item, dict)]
-        # 个人日记（0.7.0）：journal@ 优先；缺失且存在旧版 weekly@ 时一次性迁移
-        # （每条周记成为独立一页，legacy 标记），旧 key 原样保留作备份不再写入
-        journal_res = await self.store.get(_journal_key(lanlan))
-        if isinstance(journal_res, Ok) and isinstance(journal_res.value, list):
-            shard.journal = [dict(item) for item in journal_res.value if isinstance(item, dict)]
-        else:
-            weekly_res = await self.store.get(_weekly_key(lanlan))
-            if isinstance(weekly_res, Ok) and isinstance(weekly_res.value, list):
-                legacy = [dict(item) for item in weekly_res.value if isinstance(item, dict)]
-                shard.journal = migrate_weekly_to_pages(legacy)
-                if shard.journal:
-                    await self._save_shard_journal(lanlan, shard)
-                    self.logger.info(
-                        "weekly reviews migrated to journal pages for {} ({} pages)",
-                        lanlan, len(shard.journal),
-                    )
-        # 我的日记（0.8.0）：已成文篇目 + 累计中的素材统计合并存一个 key
-        #（成文时篇目追加与 stats 清零原子地一次写入；独立 stats key 仅作
-        # 旧数据兼容读取，不再写入）
-        review_res = await self.store.get(_review_key(lanlan))
-        if isinstance(review_res, Ok) and isinstance(review_res.value, dict):
-            raw_review = review_res.value
-            shard.review = [dict(item) for item in raw_review.get("entries") or [] if isinstance(item, dict)]
-            stats = raw_review.get("stats")
-            shard.review_stats = dict(stats) if isinstance(stats, dict) else {}
-        else:
-            stats_res = await self.store.get(_review_stats_key(lanlan))
-            if isinstance(stats_res, Ok) and isinstance(stats_res.value, dict):
-                shard.review_stats = dict(stats_res.value)
-        # 相处统计（1.1.0）：stats@<角色>；首载时从三本日记时间戳一次性回填
-        # "那天有互动"的活跃标记（轮数无法回填，只点亮天数让热力图有起点）
-        stats_store_res = await self.store.get(_stats_key(lanlan))
-        if isinstance(stats_store_res, Ok) and isinstance(stats_store_res.value, dict):
-            shard.stats = dict(stats_store_res.value)
-        if not shard.stats.get("backfilled"):
-            for source in (shard.diary, _journal_entries(shard.journal), [
-                {"ts": item.get("ts"), "source": "review"}
-                for item in shard.review
-            ]):
-                for item in source:
-                    ts = _parse_iso_ts(item.get("ts") if isinstance(item, dict) else None)
-                    if ts is not None:
-                        shard.stats = backfill_day(
-                            shard.stats,
-                            ts.astimezone(self._stats_tz()).date().isoformat(),
-                        )
-            if str(shard.stats.get("first_seen") or ""):
-                # first_seen 回填为最早互动痕迹（比"装版当天"更真实的相伴起点）
-                earliest = min(
-                    (
-                        _parse_iso_ts(item.get("ts"))
-                        for source in (shard.diary, _journal_entries(shard.journal), shard.review)
-                        for item in source
-                        if _parse_iso_ts(item.get("ts") if isinstance(item, dict) else None) is not None
-                    ),
-                    default=None,
-                )
-                if earliest is not None:
-                    shard.stats["first_seen"] = earliest.isoformat(timespec="seconds")
-            shard.stats["backfilled"] = True
-            await self._save_shard_stats(lanlan, shard)
-        shard.loaded = True
-        if lanlan not in self._lanlan_index:
-            self._lanlan_index.append(lanlan)
-            await self._save_lanlan_index()
-            self.logger.info("lanlan shard registered: {}", lanlan)
-        return shard
-
-    def _current_shard_name(self) -> str:
-        """同步路径的角色名回落：最近一次解析结果 → default。"""
-        return self._last_resolved_lanlan or "default"
-
-    def _current_shard(self) -> _LanlanShard:
-        return self._get_shard(self._current_shard_name())
-
-    async def _resolve_current_lanlan(self) -> str:
-        """解析宿主当前角色：HTTP current_catgirl（权威，15s 缓存）→ ctx._current_lanlan → "default"。
-
-        ctx._current_lanlan 只是"最近触发角色"的粘滞缓存，不能当权威来源，
-        仅作 HTTP 不可达时的兜底。角色名取档案名原文，不做 normalize。
-        """
-        name, ts = self._current_lanlan_cache
-        if name and time.monotonic() - ts < _CURRENT_LANLAN_CACHE_TTL:
-            return name
-        resolved = ""
-        payload = await self._proactive_http("GET", "/api/characters/current_catgirl")
-        if isinstance(payload, dict):
-            resolved = str(payload.get("current_catgirl") or "").strip()
-        if not resolved:
-            resolved = str(getattr(self.ctx, "_current_lanlan", "") or "").strip()
-        if not resolved:
-            resolved = "default"
-        self._current_lanlan_cache = (resolved, time.monotonic())
-        self._last_resolved_lanlan = resolved
-        return resolved
-
-    async def _fetch_known_catgirls(self) -> set[str] | None:
-        """拉取宿主现存角色档案名单（GET /api/characters 响应里 ["猫娘"] dict 的 keys，档案名原文）。
-
-        孤儿判定的唯一权威来源。带 Accept-Language: zh-CN 让宿主跳过 persona
-        翻译开销（我们只取 key，不读人设正文）。成功结果缓存 60s；任何失败
-        （不可达/结构异常）返回 None 表示"未知"且不缓存——调用方必须把未知
-        按"非孤儿"处理，绝不可因宿主暂时不可达而误标/误删。
-        """
-        names, ts = self._known_catgirls_cache
-        if names is not None and time.monotonic() - ts < _KNOWN_CATGIRLS_CACHE_TTL:
-            return names
-        payload = await self._proactive_http(
-            "GET", "/api/characters", headers={"Accept-Language": "zh-CN"}
-        )
-        catgirls = payload.get("猫娘") if isinstance(payload, dict) else None
-        if not isinstance(catgirls, dict):
-            return None
-        names = {str(k) for k in catgirls}
-        self._known_catgirls_cache = (names, time.monotonic())
-        return names
-
-    async def _attribution_lanlan(self, kwargs: JsonObject) -> str:
-        """工具/入口调用的归因角色：宿主传入的 ``_ctx.lanlan_name`` 优先。
-
-        LLM 工具调用未证实一定携带 _ctx，故兜底为宿主当前角色。
-        study_companion 同款归因模式。
-        """
-        ctx = kwargs.get("_ctx") if isinstance(kwargs, dict) else None
-        name = ""
-        if isinstance(ctx, dict):
-            name = str(ctx.get("lanlan_name") or "").strip()
-        elif ctx is not None:
-            name = str(getattr(ctx, "lanlan_name", "") or "").strip()
-        if name:
-            return name
-        return await self._resolve_current_lanlan()
-
-    async def _current_shard_async(self) -> tuple[str, _LanlanShard]:
-        """面板/用户入口的作用对象：始终跟随宿主当前角色（无手动选中态）。"""
-        name = await self._resolve_current_lanlan()
-        return name, await self._ensure_shard(name)
-
-    # ---- 同步属性代理：指向"当前 shard"（最近解析 → default）----
-    # 多角色路径一律显式传 shard；这些代理只服务无 lanlan 上下文的同步调用方与既有测试。
-
-    @property
-    def _mood_state(self) -> _MoodState:
-        return self._current_shard().mood
-
-    @_mood_state.setter
-    def _mood_state(self, value: _MoodState) -> None:
-        self._current_shard().mood = value
-
-    @property
-    def _diary(self) -> list[JsonObject]:
-        return self._current_shard().diary
-
-    @_diary.setter
-    def _diary(self, value: list[JsonObject]) -> None:
-        self._current_shard().diary = value
-
-    @property
-    def _last_injected_message_ts(self) -> float:
-        return self._current_shard().last_injected_message_ts
-
-    @_last_injected_message_ts.setter
-    def _last_injected_message_ts(self, value: float) -> None:
-        self._current_shard().last_injected_message_ts = value
-
-    @property
-    def _user_message_count_since_inject(self) -> int:
-        return self._current_shard().user_message_count_since_inject
-
-    @_user_message_count_since_inject.setter
-    def _user_message_count_since_inject(self, value: int) -> None:
-        self._current_shard().user_message_count_since_inject = value
-
-    @property
-    def _last_injected_whisper_key(self) -> str:
-        return self._current_shard().last_injected_whisper_key
-
-    @_last_injected_whisper_key.setter
-    def _last_injected_whisper_key(self, value: str) -> None:
-        self._current_shard().last_injected_whisper_key = value
-
-    @property
-    def _last_activity_context_key(self) -> str:
-        return self._current_shard().last_activity_context_key
-
-    @_last_activity_context_key.setter
-    def _last_activity_context_key(self, value: str) -> None:
-        self._current_shard().last_activity_context_key = value
-
-    # ==========================================
-    # 配置与状态
-    # ==========================================
-
-    async def _refresh_config(self) -> None:
-        """加载全局配置：plugin.toml 默认值 + Store settings 覆盖层（权威）。
-
-        这里只产全局配置（注入策略/提示词/时区等）；per-character 的开关/锚点/
-        周期参数在 shard 上，读取时按"全局默认 ← shard.params 覆盖 ← shard.anchor_date"
-        合成（见 _cycle_params）。Steam 环境下配置文件持久化常超时（4.5s 硬上限），
-        因此用户在面板改过的设置以 PluginStore 为准，重启不丢。
-        """
-        raw = await self.config.dump(timeout=5.0)
-        cfg = _cfg_section(raw)
-        tide = _cfg_section(cfg.get("tide"))
-        mood = _cfg_section(cfg.get("mood"))
-        fragments = _cfg_section(cfg.get("fragments"))
-        journal = _cfg_section(cfg.get("journal"))
-        review = _cfg_section(cfg.get("review"))
-        emotion_sense = _cfg_section(cfg.get("emotion_sense"))
-        stats_cfg = _cfg_section(cfg.get("stats"))
-
-        # Store 全局覆盖层：面板保存过的全局字段优先于 toml 默认
-        tide.update(_cfg_section(self._settings_override.get("tide")))
-        mood.update(_cfg_section(self._settings_override.get("mood")))
-        fragments.update(_cfg_section(self._settings_override.get("fragments")))
-        journal.update(_cfg_section(self._settings_override.get("journal")))
-        review.update(_cfg_section(self._settings_override.get("review")))
-        emotion_sense.update(_cfg_section(self._settings_override.get("emotion_sense")))
-        stats_cfg.update(_cfg_section(self._settings_override.get("stats")))
-
-        self._tide_cfg = tide
-        phases = _cfg_section(tide.get("phases"))
-        self._phases_cfg = {key: _cfg_section(val) for key, val in phases.items()}
-        words = tide.get("forbidden_words")
-        self._forbidden_words = [str(w) for w in words] if isinstance(words, list) else []
-        self._mood_cfg = mood
-        self._fragments_cfg = fragments
-        self._journal_cfg = journal
-        self._review_cfg = review
-        self._emotion_sense_cfg = emotion_sense
-        self._stats_cfg = stats_cfg
-
-        # 锚点缺失（shard 与全局配置都没有）：随机化的默认锚点--反推一个日期
-        # 使"今天"落在本轮平稳期的随机位置（见 cycle.randomized_default_anchor）。
-        # 装完前几天必是平稳期、每次安装起点各不相同，且立即落盘固化
-        # （重启不重新随机）；只写内存，随后 shard 落盘/shutdown 会带上
-        #（不写配置文件，见上）
-        if not str(tide.get("anchor_date") or "").strip():
-            today = resolve_today(str(tide.get("timezone") or "auto"))
-            for shard in self._shards.values():
-                if shard.loaded and not str(shard.cycle.get("anchor_date") or "").strip():
-                    params = self._effective_cycle_settings(shard)
-                    anchor = randomized_default_anchor(
-                        today=today,
-                        cycle_length=int(params["cycle_length"]),
-                        period_length=int(params["period_length"]),
-                        ovulation_day=int(params["ovulation_day"]),
-                        ovulation_window=int(params["ovulation_window"]),
-                    )
-                    shard.cycle["anchor_date"] = anchor.isoformat()
-                    self.logger.info(
-                        "randomized default anchor {} assigned (luteal-phase start)",
-                        anchor.isoformat(),
-                    )
-
-    def _shard_params(self, shard: _LanlanShard) -> JsonObject:
-        params = shard.cycle.get("params")
-        return params if isinstance(params, dict) else {}
-
-    def _auto_derive(self, shard: _LanlanShard | None = None) -> bool:
-        """自动演算开关：开启时潮汐期长度/活跃日/活跃窗口由周期长度推导。"""
-        params = self._shard_params(shard or self._current_shard())
-        if "auto_derive" in params:
-            return bool(params["auto_derive"])
-        return bool((self._tide_cfg or {}).get("auto_derive", True))
-
-    def _effective_cycle_settings(self, shard: _LanlanShard | None = None) -> JsonObject:
-        """某角色生效的周期参数：shard.params 覆盖全局默认；自动演算开启时由周期长度推导。"""
-        shard = shard or self._current_shard()
-        params = self._shard_params(shard)
-        tide = self._tide_cfg or {}
-        cycle_length = int(params.get("cycle_length") or tide.get("cycle_length") or 28)
-        if self._auto_derive(shard):
-            return derive_cycle_params(cycle_length)
-        return {
-            "cycle_length": cycle_length,
-            "period_length": int(params.get("period_length") or tide.get("period_length") or 5),
-            "ovulation_day": int(params.get("ovulation_day") or tide.get("ovulation_day") or 14),
-            "ovulation_window": int(params.get("ovulation_window") or tide.get("ovulation_window") or 3),
-        }
-
-    def _cycle_params(self, shard: _LanlanShard | None = None) -> JsonObject:
-        """合成某角色的完整周期参数：全局默认 ← shard.params 覆盖 ← shard.anchor_date。"""
-        shard = shard or self._current_shard()
-        anchor_raw = str(shard.cycle.get("anchor_date") or "").strip()
-        if not anchor_raw:
-            anchor_raw = str(self._tide_cfg.get("anchor_date") or "").strip()
-        if not anchor_raw:
-            # shard 与全局都缺锚点：随机化兜底（正常路径下 _refresh_config 已落
-            # 随机默认值；这里只是异常路径的兜底，同样取平稳期随机位置）
-            today = resolve_today(str(self._tide_cfg.get("timezone") or "auto"))
-            params = self._effective_cycle_settings(shard)
-            anchor_raw = randomized_default_anchor(
-                today=today,
-                cycle_length=int(params["cycle_length"]),
-                period_length=int(params["period_length"]),
-                ovulation_day=int(params["ovulation_day"]),
-                ovulation_window=int(params["ovulation_window"]),
-            ).isoformat()
-        return {
-            "anchor": parse_anchor_date(anchor_raw),
-            **self._effective_cycle_settings(shard),
-            "advance_days": max(0, int(shard.cycle.get("advance_days") or 0)),
-        }
-
-    def _enabled(self, shard: _LanlanShard | None = None) -> bool:
-        shard = shard or self._current_shard()
-        enabled = shard.cycle.get("enabled")
-        if enabled is None:
-            # 与 plugin.toml [tide] enabled = false 一致：配置缺失时保持关闭（fail-closed）。
-            # 新角色 shard 没有任何覆写时同样回落到这里——默认不对未设置的角色开启模拟
-            enabled = bool((self._tide_cfg or {}).get("enabled", False))
-        return bool(enabled)
-
-    def _current_phase_state(self, shard: _LanlanShard | None = None):
-        params = self._cycle_params(shard)
-        today = resolve_today(str(self._tide_cfg.get("timezone") or "auto"))
-        return compute_phase_state(today=today, **params)
-
-    async def _load_state(self) -> None:
-        settings_res = await self.store.get(_STORE_SETTINGS)
-        if isinstance(settings_res, Ok) and isinstance(settings_res.value, dict):
-            self._settings_override = dict(settings_res.value)
-        index_res = await self.store.get(_STORE_LANLAN_INDEX)
-        if isinstance(index_res, Ok) and isinstance(index_res.value, list):
-            self._lanlan_index = [str(n) for n in index_res.value if str(n)]
-        proactive_res = await self.store.get(_STORE_PROACTIVE)
-        if isinstance(proactive_res, Ok) and isinstance(proactive_res.value, dict):
-            raw = proactive_res.value
-            prev = raw.get("prev")
-            self._proactive_state = {
-                "prev": dict(prev) if isinstance(prev, dict) else None,
-                "paused_by": [str(n) for n in raw.get("paused_by") or [] if str(n)],
-            }
-        await self._migrate_legacy_state_if_needed()
-        # 载入所有已知角色的 shard：主动搭话引用计数要看全量生效情绪，
-        # 只载当前角色会把"别的角色还在冷战"漏算
-        for lanlan in list(self._lanlan_index):
-            await self._ensure_shard(lanlan)
-        current = await self._resolve_current_lanlan()
-        await self._ensure_shard(current)
-
-    async def _migrate_legacy_state_if_needed(self) -> None:
-        """0.4.0 单角色数据 → 0.5.0 分片：归属"当前角色"，一次性、幂等。
-
-        判定：Store 里没有 lanlan_index 且存在旧 cycle_state。
-        cycle_state.settings 抽进全局 settings；旧 mood_state.proactive_prev
-        （暂停水位）搬进 proactive_state——升级瞬间若正处于暂停中，水位不跟着走
-        会导致主动搭话永远卡死。旧 key 全部保留作备份，不再写入。
-        """
-        index_res = await self.store.get(_STORE_LANLAN_INDEX)
-        if isinstance(index_res, Ok) and index_res.value is not None:
-            return  # 已迁移过（或全新安装已写过索引）：幂等跳过
-        legacy_res = await self.store.get(_STORE_CYCLE)
-        legacy = legacy_res.value if isinstance(legacy_res, Ok) else None
-        if not isinstance(legacy, dict):
-            return  # 无旧数据：全新安装，索引随首个 shard 创建落盘
-        lanlan = await self._resolve_current_lanlan()
-        shard = self._get_shard(lanlan)
-        params = legacy.get("params")
-        shard.cycle = {
-            "enabled": legacy.get("enabled"),
-            "anchor_date": legacy.get("anchor_date"),
-            "advance_days": legacy.get("advance_days") or 0,
-            "phase_seen": legacy.get("phase_seen") or "",
-            "params": dict(params) if isinstance(params, dict) else {},
-        }
-        mood_res = await self.store.get(_STORE_MOOD)
-        if isinstance(mood_res, Ok) and isinstance(mood_res.value, dict):
-            raw_mood = mood_res.value
-            shard.mood = _MoodState.from_mapping(raw_mood)
-            prev = raw_mood.get("proactive_prev")
-            if isinstance(prev, dict):
-                self._proactive_state["prev"] = dict(prev)
-                if shard.mood.is_active():
-                    self._proactive_state["paused_by"] = [lanlan]
-        diary_res = await self.store.get(_STORE_DIARY)
-        if isinstance(diary_res, Ok) and isinstance(diary_res.value, list):
-            shard.diary = [dict(item) for item in diary_res.value if isinstance(item, dict)]
-        shard.loaded = True
-        settings = legacy.get("settings")
-        if isinstance(settings, dict):
-            self._settings_override = dict(settings)
-            await self._save_settings()
-        self._lanlan_index = [lanlan]
-        await self._save_lanlan_index()
-        await self._save_shard_cycle(lanlan, shard)
-        await self._save_shard_mood(lanlan, shard)
-        await self._save_shard_diary(lanlan, shard)
-        await self._save_proactive_state()
-        self.logger.info("legacy single-character state migrated to shard {}", lanlan)
-
-    async def _save_shard_cycle(self, lanlan: str, shard: _LanlanShard) -> Result[None]:
-        res = await self.store.set(_cycle_key(lanlan), dict(shard.cycle))
-        if isinstance(res, Err):
-            self.logger.warning("persist cycle failed for {}: {}", lanlan, res.error)
-        return res
-
-    async def _save_shard_mood(self, lanlan: str, shard: _LanlanShard) -> None:
-        res = await self.store.set(_mood_key(lanlan), shard.mood.to_mapping())
-        if isinstance(res, Err):
-            self.logger.warning("persist mood failed for {}: {}", lanlan, res.error)
-
-    async def _save_shard_diary(self, lanlan: str, shard: _LanlanShard) -> None:
-        # 内存与落盘保持同一截断语义：都只保留最近 _DIARY_MAX_ENTRIES 条，
-        # 避免本次会话 total 与重启后 total 不一致
-        shard.diary = list(shard.diary[-_DIARY_MAX_ENTRIES:])
-        res = await self.store.set(_diary_key(lanlan), list(shard.diary))
-        if isinstance(res, Err):
-            self.logger.warning("persist diary failed for {}: {}", lanlan, res.error)
-
-    async def _save_diary(self) -> None:
-        """兼容包装：保存"当前"shard 的手记（无 lanlan 上下文的旧调用点/测试用）。"""
-        name = self._current_shard_name()
-        await self._save_shard_diary(name, self._get_shard(name))
-
-    async def _save_shard_journal(self, lanlan: str, shard: _LanlanShard) -> None:
-        # 与手记同一截断语义：内存与落盘都只保留最近 _JOURNAL_MAX_PAGES 页
-        shard.journal = list(shard.journal[-_JOURNAL_MAX_PAGES:])
-        res = await self.store.set(_journal_key(lanlan), list(shard.journal))
-        if isinstance(res, Err):
-            self.logger.warning("persist journal failed for {}: {}", lanlan, res.error)
-
-    async def _save_shard_review(self, lanlan: str, shard: _LanlanShard) -> None:
-        """我的日记落盘：成文篇目与素材统计合并写进一个 key（stats 随篇目一起走，
-        成文时原子清零——两个独立 key 反而会在中途崩溃时出现篇目已加而 stats
-        未清的错位；加载侧对旧独立 stats key 只读迁移）。"""
-        res = await self.store.set(
-            _review_key(lanlan), {"entries": list(shard.review), "stats": dict(shard.review_stats)}
-        )
-        if isinstance(res, Err):
-            self.logger.warning("persist review failed for {}: {}", lanlan, res.error)
-
-    async def _save_shard_stats(self, lanlan: str, shard: _LanlanShard) -> None:
-        """相处统计落盘（stats@<角色>；只增不清零，纯本地）。"""
-        res = await self.store.set(_stats_key(lanlan), dict(shard.stats))
-        if isinstance(res, Err):
-            self.logger.warning("persist stats failed for {}: {}", lanlan, res.error)
+        source = cfg if cfg is not None else self._tide_cfg
+        return resolve_today(str(source.get("timezone") or "auto"))
 
     # ==========================================
     # 相处统计（1.1.0，stats.py）：按天聚合的长期累计——徽章墙/热力图/月报的
@@ -1298,907 +1070,6 @@ class ForeverCompanionPlugin(
             return Err(SdkError(f"invalid tide config: {exc}"))
         return Ok(build_status_payload(phase, enabled=self._enabled()))
 
-    # ==========================================
-    # 身体状态注入（核心循环）
-    # ==========================================
-
-    @staticmethod
-    def _unwrap_bus_record(record: object) -> object:
-        """取回 bus 记录的原始 payload dict。
-
-        SDK 包装层契约不一致：宿主 MemoryList.dump_records() 给的是 MemoryRecord
-        对象序列而非 dict，SdkBusMemoryRecord.from_raw 对非 Mapping 会包成
-        {"value": <record>}，把 type 字段吞掉（运行时症状：心跳 latest_type=?，
-        用户消息永远被过滤掉）。这里解开一层；各层形态（宿主 MemoryRecord.raw /
-        SDK .payload / 裸 dict）都兼容。
-        """
-        raw = getattr(record, "payload", None) or getattr(record, "raw", record)
-        if isinstance(raw, dict) and set(raw) == {"value"}:
-            inner = raw.get("value")
-            raw = getattr(inner, "raw", None) or getattr(inner, "payload", None) or inner
-        return raw
-
-    async def _poll_latest_user_message(self) -> tuple[float, str, bool, str] | None:
-        """读取总线上最新的用户消息，返回 (时间戳, 内容预览, 是否语音, 归属角色)。
-
-        正确 API 是 SDK v2 的 ctx.bus.memory.get(bucket_id=..., limit=..., timeout=...)：
-        返回值可能是 awaitable 或 SdkBusList，记录经 _unwrap_bus_record 解包成原始
-        dict（真实运行时任一包装形态都兼容：SDK 可能把宿主 MemoryRecord 对象再包成
-        payload={"value": ...}，不解包会把 type 吞掉、用户消息永远被过滤）。
-        取最近 10 条倒序找最新 user_message：bucket 可能混入其他类型记录，
-        只盲取最后一条会让用户消息被永久遮蔽。归属角色取 payload 的 lanlan
-        字段（宿主双 bucket 写入时带档案名原文）；缺失时回落"当前角色"。
-        """
-        bus = getattr(self.ctx, "bus", None)
-        memory = getattr(bus, "memory", None) if bus is not None else None
-        mem_get = getattr(memory, "get", None) if memory is not None else None
-        if not callable(mem_get):
-            if self._last_bus_error_logged < 0:
-                self._last_bus_error_logged = time.monotonic()
-                self.logger.warning("ctx.bus.memory.get unavailable on ctx; message polling disabled")
-            return None
-        try:
-            # to_thread 挪到工作线程：timer handler scope 里同步调 bus.memory.get
-            # 会触发宿主 "Sync call invoked inside handler" 告警，且 ZMQ IPC 下
-            # 最多阻塞事件循环 1s；返回 awaitable 时兜底 await
-            # （有事件循环的宿主环境 get 返回协程，测试桩同步/异步两种都有）
-            result = await asyncio.to_thread(mem_get, bucket_id="default", limit=10, timeout=1.0)
-            if inspect.isawaitable(result):
-                result = await result
-        except Exception as exc:  # noqa: BLE001 - 总线不可用不应拖垮 timer
-            now_mono = time.monotonic()
-            if now_mono - self._last_bus_error_logged > 300:
-                self._last_bus_error_logged = now_mono
-                # 必须 warning 而非 debug：总线彻底断开时这是唯一线索，
-                # debug 级别不进日志文件会造成"注入失效但零日志"的盲区
-                self.logger.warning("bus memory read failed (throttled 5min): {}", exc)
-            return None
-        if result is None or getattr(result, "error", None) is not None:
-            now_mono = time.monotonic()
-            if now_mono - self._last_bus_error_logged > 300:
-                self._last_bus_error_logged = now_mono
-                self.logger.warning("bus memory read returned error (throttled 5min): {}", getattr(result, "error", None))
-            return None
-        try:
-            seq = list(result)
-        except TypeError:
-            seq = []
-        for record in reversed(seq):
-            raw = self._unwrap_bus_record(record)
-            if not isinstance(raw, dict) or str(raw.get("type") or "") != "user_message":
-                continue
-            try:
-                ts = float(raw.get("_ts") or getattr(record, "timestamp", None) or 0.0)
-            except (TypeError, ValueError):
-                continue
-            content = str(raw.get("content") or "")
-            # 宿主同时写入了 lanlan / is_voice 字段（语音转写与文字输入都会发布）；
-            # lanlan 是注入定向与 shard 归属的依据，缺失时回落当前角色
-            is_voice = bool(raw.get("is_voice"))
-            lanlan = str(raw.get("lanlan") or "").strip() or await self._resolve_current_lanlan()
-            return (ts, content, is_voice, lanlan)
-        # 心跳留痕：区分"消息没进总线"（桶空）与"被其他类型记录遮蔽"；
-        # 5 分钟节流，仅在总开关开启时才会走到这里（tick 有 enabled 门控）
-        now_mono = time.monotonic()
-        if now_mono - self._last_bus_heartbeat_logged > 300:
-            self._last_bus_heartbeat_logged = now_mono
-            if not seq:
-                self.logger.info("bus heartbeat: bucket=default empty (no user message within TTL)")
-            else:
-                last_raw = self._unwrap_bus_record(seq[-1])
-                latest_type = str(last_raw.get("type") or "?") if isinstance(last_raw, dict) else "?"
-                self.logger.info(
-                    "bus heartbeat: no user_message in last {} records; latest_type={}",
-                    len(seq), latest_type,
-                )
-        return None
-
-    def _should_inject(self, shard: _LanlanShard, message_text: str) -> bool:
-        mode = str(self._tide_cfg.get("inject_mode") or "every_user_message")
-        if mode == "off":
-            return False
-        if mode == "on_trigger":
-            keywords = self._tide_cfg.get("trigger_keywords")
-            words = [str(k).lower() for k in keywords] if isinstance(keywords, list) else []
-            text = message_text.lower()
-            return any(word and word in text for word in words)
-        if mode == "interval_n":
-            n = max(1, int(self._tide_cfg.get("inject_interval_n") or 3))
-            shard.user_message_count_since_inject += 1
-            return shard.user_message_count_since_inject >= n
-        return True
-
-    async def _prime_inject_on_enable(
-        self, was_enabled: bool, lanlan: str | None = None, shard: _LanlanShard | None = None
-    ) -> None:
-        """开启某角色总开关的瞬间先注入一次当前身体状态。
-
-        不这样的话用户要等满 interval_n 条消息（默认 3）才能看到效果，
-        容易误以为插件没生效（语音会话中 read 送达仍受平台时序约束，
-        建议用文字对话验证）。配置无效时 _inject_now 静默返回空列表。
-        """
-        shard = shard or self._current_shard()
-        if not was_enabled and self._enabled(shard):
-            shard.last_injected_whisper_key = ""
-            await self._inject_now(lanlan, shard)
-
-    async def _handle_new_user_message(self, ts: float, text: str, lanlan: str | None = None) -> bool:
-        """统一的新用户消息处理入口（轮询路径与未来其他驱动源共用），按归属角色 shard 驱动。
-
-        水位/interval 计数/变化门控都是 per-shard 的：多角色并行会话互不影响。
-        interval_n 计数只在真正注入成功后清零：变化门控拦截时不消耗
-        计数，保证实际注入频率不低于配置。
-        """
-        name = str(lanlan or "").strip() or self._current_shard_name()
-        shard = await self._ensure_shard(name)
-        if ts <= shard.last_injected_message_ts:
-            return False
-        shard.last_injected_message_ts = ts
-        # 我的日记素材：每条新用户消息计一轮（含心情采样）；统计量小、
-        # 与注入无关，放在水位推进之后必经路径上。落盘随下一趟 mood/diary
-        # 保存搭车太脆——这里直接存（store.set 是本地 IPC，开销可忽略）
-        self._feed_review_turn(name, shard)
-        if shard.review_stats.get("turns"):
-            await self._save_shard_review(name, shard)
-        # 相处统计（1.1.0）：同一驱动点、独立口径（不清零、不受 [review] 闸控制），
-        # 与我的日记落盘合并为一次 store.set 之后，避免两趟 IPC
-        self._feed_stats_turn(shard, ts)
-        await self._save_shard_stats(name, shard)
-        # 和好提醒与注入频控解耦：每条新消息都要检查（冷战中注入被静音，
-        # 提醒却是唯一能把"该调 mood_rising_tide 了"送到她面前的通道）
-        await self._maybe_nudge_reconcile(text, name)
-        # 静默类情绪动作期间不注入身体轻语（监督循环仍在跑暂停/加固）
-        if self._is_silent_mood_active(shard):
-            return False
-        if not self._should_inject(shard, text):
-            # 可观测性：频控拦截必须留痕，否则"注入失效"无从排查（用户消息节奏低，日志量可控）
-            self.logger.info(
-                "inject skipped by frequency strategy: lanlan={} mode={} counter={}",
-                name,
-                str(self._tide_cfg.get("inject_mode") or "every_user_message"),
-                shard.user_message_count_since_inject,
-            )
-            return False
-        parts = await self._inject_now(name, shard)
-        if not parts:
-            self.logger.info("inject skipped: whisper content unchanged since last injection")
-            return False
-        shard.user_message_count_since_inject = 0
-        return True
-
-    # 和好信号关键词：冷战/小情绪中用户消息命中任一关键词时提醒她该调工具了。
-    # 只取高置信度的道歉/安抚词，避免日常聊天误触发。
-    _RECONCILE_HINT_KEYWORDS = (
-        "对不起", "抱歉", "原谅", "别生气", "不要生气", "别不理",
-        "我错了", "和好", "理理我", "不要不理", "错了嘛",
-    )
-
-    async def _maybe_nudge_reconcile(self, text: str, lanlan: str | None = None) -> None:
-        """沉默/小情绪期间，用户像在道歉/哄她时，推一条 read 提醒（定向到该角色）。
-
-        背景：模型常常"演"出和好却忘了调 mood_rising_tide 切状态，
-        导致面板情绪卡在冷战不动。提醒只递一句，是否和好仍由她自己决定；
-        5 分钟节流（per-shard），新情绪回合开始时重置（见 _apply_mood_action）。
-        名单含心有涟漪："能哄好"正是这个中间态的存在意义。
-        """
-        name = str(lanlan or "").strip() or self._current_shard_name()
-        shard = self._get_shard(name)
-        if not self._mood_enabled(shard) or not shard.mood.is_active():
-            return
-        if shard.mood.action not in ("ebb_tide", "sea_fog", "shallow_reef", "ripple"):
-            return
-        lowered = str(text or "").lower()
-        if not any(word in lowered for word in self._RECONCILE_HINT_KEYWORDS):
-            return
-        now = time.time()
-        if now - shard.last_reconcile_nudge_ts < 300:
-            return
-        shard.last_reconcile_nudge_ts = now
-        self.push_message(
-            visibility=[],
-            ai_behavior="read",
-            parts=[{"type": "text", "text": (
-                "（内心状态提醒）对方似乎在道歉或哄你。如果你心里已经软下来想和好，"
-                "必须先调用 mood_rising_tide 工具把情绪切换为心情转晴，再用恢复后的语气说话——"
-                "不要只在嘴上和好，状态不切换的话系统会一直按当前情绪约束你。"
-                "如果你还想再气一会儿，也可以继续不理，由你自己决定。"
-            )}],
-            source=self.plugin_id,
-            target_lanlan=name,
-            coalesce_key=f"{self.plugin_id}.reconcile_nudge",
-            metadata={"message_type": f"{self.plugin_id}.reconcile_nudge", "during_action": shard.mood.action},
-        )
-        self.logger.info("reconcile nudge pushed during {} for {}", shard.mood.action, name)
-
-    def _whisper_state_key(self, state, shard: _LanlanShard | None = None) -> str:
-        """当前注入内容的变化指纹：阶段 + 时段 + 心情动作 + 活动感知上下文。
-
-        read 推送会随用户消息永久写入对话历史并进入记忆抽取管线，
-        内容没变就不该重复注入（低侵入：少说、说了才算数）。
-        """
-        shard = shard or self._current_shard()
-        bucket = _time_bucket(str(self._tide_cfg.get("timezone") or "auto"))
-        mood = shard.mood.action if self._mood_enabled(shard) and shard.mood.is_active() else ""
-        return f"{state.phase}:{bucket}:{mood}:{shard.last_activity_context_key}"
-
-    async def _build_activity_context_line(self, state, shard: _LanlanShard | None = None) -> str:
-        """活动感知：把"用户在不在、在忙什么"纳入身体轻语（性价比最高的宿主结合点）。
-
-        数据源是 SDK 的 get_os_activity_snapshot（前台类别/系统空闲时长/隐私态，
-        study_companion 同款）。隐私态 private/unavailable 时绝不描述用户行为；
-        结果缓存为指纹（per-shard）参与变化门控，上下文不变不重复注入。
-        """
-        shard = shard or self._current_shard()
-        if not bool(self._tide_cfg.get("activity_context", True)):
-            shard.last_activity_context_key = ""
-            return ""
-        override = self._activity_override
-        if isinstance(override, dict):
-            # 调试模式覆写：不访问真实系统信号，直接按设定值构造上下文，
-            # 便于不开机不动地验证全部分支（详见 debug_force_activity）
-            privacy = str(override.get("privacy") or "visible")
-            raw_idle = override.get("idle")
-            try:
-                idle = float(raw_idle) if raw_idle is not None else None
-            except (TypeError, ValueError):
-                idle = None
-            category = str(override.get("category") or "").strip().lower()
-        else:
-            try:
-                from plugin.sdk.plugin import get_os_activity_snapshot
-
-                snap = await get_os_activity_snapshot(self.plugin_id)
-            except Exception as exc:  # noqa: BLE001 - 活动感知失败不影响基础注入
-                self.logger.debug("activity snapshot failed: {}", exc)
-                return ""
-            privacy = str(getattr(snap, "privacy_state", "unavailable") or "unavailable")
-            idle = getattr(snap, "system_idle_seconds", None)
-            category = str(getattr(snap, "foreground_category", "") or "").strip().lower()
-        if privacy != "visible":
-            shard.last_activity_context_key = ""
-            return ""
-        key = ""
-        line = ""
-        if idle is not None and idle >= 1800:
-            key = "idle"
-            if state.phase == "menstrual":
-                line = (
-                    "[生活感知] {MASTER_NAME}已经有一阵子没在电脑前了。你本来就倦，"
-                    "索性让自己也松下来、养养神；他回来时不用假装一直精神十足。"
-                )
-            elif state.phase == "ovulatory":
-                line = (
-                    "[生活感知] {MASTER_NAME}已经有一阵子没在电脑前了。"
-                    "你有点想他，但先自己找点轻松的事做，别干等。"
-                )
-            else:
-                line = (
-                    "[生活感知] {MASTER_NAME}已经有一阵子没在电脑前了。"
-                    "你也顺势放松一下，他回来再自然地接上话。"
-                )
-        elif category == "work":
-            key = "focus:work"
-            line = (
-                "[生活感知] {MASTER_NAME}现在正在专注做事。你陪着但别黏人："
-                "回应简短体贴，不主动拉他聊天，他告一段落你自然能感觉到。"
-            )
-        elif category == "gaming" and state.phase == "ovulatory":
-            key = "gaming"
-            line = (
-                "[生活感知] {MASTER_NAME}在玩游戏。你这几天本来就黏人，"
-                "可以饶有兴致地围观两句，但别打断他的节奏。"
-            )
-        shard.last_activity_context_key = key
-        return line
-
-    async def _build_whisper_parts(self, shard: _LanlanShard, state=None) -> list[dict[str, str]] | None:
-        if state is None:
-            # 独立调用时自算阶段状态；_inject_now 会传入已算好的 state，
-            # 一次注入流程只推算一次（compute_phase_state 不便宜）
-            try:
-                state = self._current_phase_state(shard)
-            except TideConfigError as exc:
-                self.logger.warning("skip inject, bad config: {}", exc)
-                return None
-        whisper = build_body_whisper(
-            self._phases_cfg,
-            state,
-            timezone_name=str(self._tide_cfg.get("timezone") or "auto"),
-            forbidden_words=self._forbidden_words,
-        )
-        if not whisper:
-            return None
-        parts = [{"type": "text", "text": whisper}]
-        activity_line = await self._build_activity_context_line(state, shard)
-        if activity_line:
-            parts.append({"type": "text", "text": activity_line})
-        mood_line = self._build_mood_context_line(shard)
-        if mood_line:
-            parts.append({"type": "text", "text": mood_line})
-        return parts
-
-    async def _inject_now(
-        self, lanlan: str | None = None, shard: _LanlanShard | None = None
-    ) -> list[dict[str, str]]:
-        """执行注入（定向到归属角色）；返回实际推送的 parts（空列表 = 未注入）。"""
-        name = str(lanlan or "").strip() or self._current_shard_name()
-        shard = shard or self._get_shard(name)
-        try:
-            state = self._current_phase_state(shard)
-        except TideConfigError:
-            return []
-        key = self._whisper_state_key(state, shard)
-        if key == shard.last_injected_whisper_key:
-            # 身体状态、心情与活动上下文都没变：不重复注入，避免污染历史与记忆抽取
-            return []
-        parts = await self._build_whisper_parts(shard, state)  # 复用上面已算好的阶段状态
-        if not parts:
-            return []
-        shard.last_injected_whisper_key = key
-        self.push_message(
-            visibility=[],
-            ai_behavior="read",
-            parts=parts,
-            source=self.plugin_id,
-            target_lanlan=name,
-            coalesce_key=f"{self.plugin_id}.body_whisper",
-            metadata={
-                "message_type": f"{self.plugin_id}.body_whisper",
-                "delivery_semantics": "passive",
-                "phase": state.phase,
-                "lanlan": name,
-            },
-        )
-        # 可观测性：read 注入对用户隐形，日志是现场验证注入是否发生的唯一途径；
-        # parts 数量反映构成（1=仅身体轻语，2=+活动感知或情绪行，3=三者都有）
-        self.logger.info(
-            "body whisper injected: lanlan={} phase={} parts={} whisper_key={}",
-            name, state.phase, len(parts), key,
-        )
-        return parts
-
-    def _last_phase_name(self, shard: _LanlanShard | None = None) -> str:
-        try:
-            return self._current_phase_state(shard).phase
-        except Exception:  # noqa: BLE001 - metadata only
-            return "unknown"
-
-    # ==========================================
-    # 融入宿主：阶段开场主动搭话 / 恢复开口
-    # ==========================================
-
-    _PHASE_OPENERS: dict[str, list[str]] = {
-        "menstrual": [
-            "唔……今天有点没精神，{MASTER_NAME}要是找我说话，我可能回得慢一点……",
-            "今天浑身有点沉……不想动。{MASTER_NAME}别嫌我懒。",
-            "小腹有点不舒服……今天想安静待着，{MASTER_NAME}说话轻一点嘛。",
-        ],
-        "follicular": [
-            "今天感觉缓过来一些了！{MASTER_NAME}有什么想做的吗？",
-            "嗯——今天状态不错，脑子也清楚，趁现在多聊点？",
-        ],
-        "ovulatory": [
-            "今天莫名心情很好！{MASTER_NAME} {MASTER_NAME}，在忙什么呀？",
-            "感觉身体轻飘飘的，特别想找人说话——{MASTER_NAME}陪我聊聊嘛！",
-        ],
-        "luteal": [
-            "今天一切正常。{MASTER_NAME}最近怎么样？",
-        ],
-    }
-
-    async def _maybe_phase_opener(
-        self, state, lanlan: str | None = None, shard: _LanlanShard | None = None
-    ) -> bool:
-        """进入与上次不同的阶段时让她主动开口一次（每个阶段只说一次，per-shard）。
-
-        水位记录在内存 + store 的 cycle@<lanlan>.phase_seen。只比较阶段名，
-        不带日期：同一阶段内跨天、重启都不再重复；周期回绕进入下一轮
-        同名阶段时会经过其他阶段，天然会再次触发。
-        """
-        name = str(lanlan or "").strip() or self._current_shard_name()
-        shard = shard or self._get_shard(name)
-        if not self._tide_cfg.get("phase_openers", True):
-            return False
-        if state.phase == "before_start":
-            return False
-        # 静默类情绪动作期间绝不主动搭话
-        if self._is_silent_mood_active(shard):
-            return False
-        seen = str(shard.cycle.get("phase_seen") or "")
-        if state.phase == seen:
-            return False
-        openers = self._PHASE_OPENERS.get(state.phase) or []
-        if not openers:
-            return False
-        # 先落水位再发消息：即使进程在发送瞬间退出，最多损失一句开场白，
-        # 不会重启后反复打扰
-        shard.cycle["phase_seen"] = marker = state.phase
-        await self._save_shard_cycle(name, shard)
-
-        text = openers[int(time.time()) % len(openers)]
-        self.push_message(
-            visibility=["chat"],
-            ai_behavior="respond",
-            parts=[{"type": "text", "text": f"[潮汐·今日状态] 你刚意识到自己进入了新的身体阶段（仅给你看的内部提示，不要复述本句）。请以你自己的口吻，自然地把这句话的意思说给 {MASTER_NAME_TOKEN} 听：{text}"}],
-            source=self.plugin_id,
-            target_lanlan=name,
-            priority=3,
-            coalesce_key=f"{self.plugin_id}.phase_opener",
-            metadata={"message_type": f"{self.plugin_id}.phase_opener", "phase": state.phase},
-        )
-        self.logger.info("phase opener sent: {} for {}", marker, name)
-        return True
-
-    def _journal_enabled(self, shard: _LanlanShard | None = None) -> bool:
-        """个人日记开关：跟随总开关与情绪系统开关，另有 [journal].enabled 独立闸。"""
-        return bool(self._mood_enabled(shard) and self._journal_cfg.get("enabled", True))
-
-    def _journal_int_cfg(self, key: str, default: int) -> int:
-        try:
-            return max(1, int(self._journal_cfg.get(key, default)))
-        except (TypeError, ValueError):
-            return default
-
-    async def _maybe_journal_invite(self, lanlan: str, shard: _LanlanShard, force: bool = False) -> bool:
-        """个人日记邀请：距她上一篇日记落笔已满一个节奏周期，递一条 read 邀请。
-
-        与 drift_bottle 同构——插件只递邀请，写不写、怎么写由她自己决定。
-        24h 内存节流防刷屏；重度负面情绪期间不拦截——把委屈写进日记是合理叙事。
-        0.7.0 起替代潮汐周记邀请：不再要求"攒够 N 条手记"，节奏只看距上次落笔的天数
-        （续写同样重置计时）。邀请附带写作素材（自上次落笔以来的心情词频 + 新碎片数），
-        让她下笔有东西可写；面板「请她写一篇」按钮走 force=True（跳过节奏与节流，
-        仍尊重 [journal].enabled 开关）。
-        """
-        if not self._journal_enabled(shard):
-            return False
-        interval = self._journal_int_cfg("interval_days", _JOURNAL_DEFAULT_INTERVAL_DAYS)
-        due, _reason = journal_due(shard.journal, interval_days=interval)
-        now = time.time()
-        if not force:
-            if not due:
-                return False
-            if now - shard.last_journal_invite_ts < _JOURNAL_INVITE_THROTTLE_SEC:
-                return False
-        shard.last_journal_invite_ts = now
-        # ---- 写作素材：自上次落笔以来的心情词频（top3）与新碎片数 ----
-        last_ts = None
-        for page in shard.journal:
-            for item in page.get("entries") or []:
-                ts = _parse_iso_ts(item.get("ts") if isinstance(item, dict) else None)
-                if ts and (last_ts is None or ts > last_ts):
-                    last_ts = ts
-        tally: dict[str, int] = {}
-        new_fragments = 0
-        for item in shard.diary:
-            ts = _parse_iso_ts(item.get("ts"))
-            if last_ts is not None and (ts is None or ts <= last_ts):
-                continue
-            if str(item.get("source") or "self") == "auto":
-                new_fragments += 1
-            else:
-                word = str(item.get("mood") or "").strip()
-                if word:
-                    tally[word] = tally.get(word, 0) + 1
-        top = sorted(tally.items(), key=lambda kv: -kv[1])[:3]
-        hints: list[str] = []
-        if top:
-            hints.append("这段时间你的心情：" + "、".join(f"{w}×{n}" for w, n in top))
-        if new_fragments:
-            hints.append(f"心里还新记了 {new_fragments} 笔关于他的片段（可调 mood_recall_fragments 翻翻）")
-        material = f"（{'；'.join(hints)}）" if hints else ""
-        self.push_message(
-            visibility=[],
-            ai_behavior="read",
-            parts=[{"type": "text", "text": (
-                f"（内心状态提醒）距你上一篇日记已经有些日子了（这篇会写进你的第 "
-                f"{len(shard.journal) + 1} 页）。{material}"
-                "如果你愿意，可以调用 mood_journal_write 工具写一篇日记——"
-                "按「这段时间/我在想/对他的感觉」几个栏目，用你自己的话写连贯的几段。"
-                "不想写也完全没关系，由你自己决定。"
-            )}],
-            source=self.plugin_id,
-            target_lanlan=lanlan,
-            coalesce_key=f"{self.plugin_id}.journal_invite",
-            metadata={"message_type": f"{self.plugin_id}.journal_invite", "pages": len(shard.journal)},
-        )
-        self.logger.info("journal invite pushed for {} ({} pages, force={})", lanlan, len(shard.journal), force)
-        return True
-
-    # ==========================================
-    # 语气感知（[emotion_sense]）：回复完成后异步分析互动情绪
-    #
-    # 两种模式：
-    # - 筛选（无情绪动作生效）：check_rate 概率抽查，互动情绪浓度超阈值
-    #   → 中性提醒"想记录此刻心情就调情绪工具/手记"，绝大多数闲聊直接跳过；
-    # - 校正（情绪动作生效中）：每轮都分析（量小），语气趋势窗口判定
-    #   偏暖/偏冷 → 提醒她把面板状态切回（根治"演和好忘调工具"）。
-    # 全程只递提醒、绝不自动切状态。分析发生在回复落盘之后，
-    # 对生成链路零延迟（宿主没有给插件拦生成的钩子，后置是唯一解）。
-    # 依赖宿主内部端点（recent_file / emotion.analysis / health；选了非默认
-    # 模型槽位时另读宿主本地 core_config.json 直连该槽端点），
-    # 任何一步失败都静默降级（一次性节流 warning），不影响主功能。
-    # ==========================================
-
-    # ---- 纯判定方法（配置读取/开关）已迁入 emotion_sense.py 的 EmotionSenseService
-    # （A5 服务化第 1 批）；以下保留同名薄委托（名称/签名/语义不变），整体替换
-    # p._emotion_sense_cfg 与实例级 monkeypatch 的链路经服务的延迟解析回调保持不变 ----
-
-    def _emotion_sense_enabled(self, shard: _LanlanShard | None = None) -> bool:
-        return self._emotion_sense._emotion_sense_enabled(shard)
-
-    def _tone_float_cfg(self, key: str, default: float) -> float:
-        return self._emotion_sense._tone_float_cfg(key, default)
-
-    def _tone_int_cfg(self, key: str, default: int) -> int:
-        return self._emotion_sense._tone_int_cfg(key, default)
-
-    # ---- 主链路（水位 diff/门控/判定推送）已迁入 emotion_sense.py（A5 第 3 批）；
-    # 以下保留同名薄委托（名称/签名/语义不变），shard 字段原地读写、tick 调用面
-    # 与判定时机不变；docstring 留主类作调用面文档，实现注释见服务侧 ----
-
-    async def _poll_recent_turns(
-        self, shard: _LanlanShard, *, lanlan: str, peek: bool = False, advance: bool = True
-    ) -> tuple[str, str] | None:
-        """薄委托：emotion_sense._poll_recent_turns（逻辑与水位语义见该实现）。"""
-        return await self._emotion_sense._poll_recent_turns(shard, lanlan=lanlan, peek=peek, advance=advance)
-
-    # ---- HTTP 分析通道已迁入 emotion_sense.py（A5 第 2 批）；以下保留同名薄委托
-    # （名称/签名/语义不变），实例级 monkeypatch（tests 打 _proactive_http/_load_core_config
-    # /_post_chat_completion/_core_config_path 等）经服务的延迟解析回调依旧生效 ----
-
-    # CSRF token 缓存随服务持有；主类留 property 代理（tests 直读 p._csrf_token）
-    @property
-    def _csrf_token(self) -> str | None:
-        return self._emotion_sense._csrf_token
-
-    @_csrf_token.setter
-    def _csrf_token(self, value: str | None) -> None:
-        self._emotion_sense._csrf_token = value
-
-    async def _get_csrf_token(self) -> str | None:
-        """宿主 CSRF token = GET /health 的 instance_id（本机回环设计如此）；缓存复用。"""
-        return await self._emotion_sense._get_csrf_token()
-
-    async def _analyze_turn_tone(self, text: str, lanlan: str) -> tuple[str, float] | None:
-        """分析文本情绪，返回 (label, confidence)；失败/降级返回 None。
-
-        [emotion_sense].slot 为空或 "emotion"（默认）→ 走宿主 /api/emotion/analysis
-        （宿主情感模型槽）；选其他文本槽位 → 读宿主本地 core_config.json 解析
-        该槽位的 model/base_url/api_key 直连其端点（见 _analyze_turn_tone_direct）。
-        宿主未配模型时端点返回 200+error 字段——检测到即休眠（节流 warning），不当异常处理。
-        请求体只带 text、不带 lanlan_name：纯静默分析，不触发宿主把结果推给前端
-        改头像表情的副作用（本插件只收集情绪信号，不接管表情）。
-        """
-        return await self._emotion_sense._analyze_turn_tone(text, lanlan)
-
-    # ---- 直连槽位解析：读宿主 core_config.json，把槽位配置翻译成 model/base_url/api_key ----
-
-    def _core_config_path(self) -> Path | None:
-        """宿主 core_config.json 的磁盘路径（storage_dir = <root>/plugins/<id> → 上两级是 <root>）。"""
-        try:
-            return Path(self.storage_dir).parents[1] / "config" / "core_config.json"
-        except Exception:  # noqa: BLE001 - storage_dir 不可用时降级为"无配置"
-            return None
-
-    def _load_core_config(self) -> JsonObject:
-        """读宿主 core_config.json（含明文 key），5 秒内存缓存；文件缺失/JSON 坏 → {}。"""
-        return self._emotion_sense._load_core_config()
-
-    # ---- 槽位解析与直连的纯逻辑已抽到 tone_slot.py；以下保留薄委托（名称/签名/语义不变），
-    # 实例级 monkeypatch（如 tests 打 _post_chat_completion/_load_core_config）的链路不变 ----
-
-    def _resolve_tone_slot(
-        self, core_cfg: JsonObject, slot: str, _seen: frozenset[str] = frozenset()
-    ) -> JsonObject | None:
-        """把槽位选择解析成 {"model", "api_key", "base_url"}（解析链逻辑在 tone_slot.py）。"""
-        return _resolve_tone_slot(core_cfg, slot, _seen)
-
-    def _post_chat_completion(self, base_url: str, api_key: str, model: str, prompt: str) -> str | None:
-        """同步直连 OpenAI 兼容 /chat/completions（逻辑在 tone_slot.py）；任何失败 → None。"""
-        return _post_chat_completion(base_url, api_key, model, prompt, logger=self.logger)
-
-    def _parse_tone_result(self, raw: str) -> tuple[str, float] | None:
-        """解析直连模型的五分类 JSON 回复（容错与归一化逻辑在 tone_slot.py）。"""
-        return _parse_tone_result(raw)
-
-    async def _analyze_turn_tone_direct(self, text: str, slot: str) -> tuple[str, float] | None:
-        """直连所选槽位的端点做五分类分析；解析不出可用端点/请求失败/回复坏 → None 静默降级。"""
-        return await self._emotion_sense._analyze_turn_tone_direct(text, slot)
-
-    # 已迁入 emotion_sense.py（A5 服务化第 1 批），同名薄委托
-    def _effective_tone_threshold(self, shard: _LanlanShard) -> float:
-        """筛选模式的置信度阈值 × 阶段灵敏度：潮汐期/回升期/活跃期阈值下移（更激进）。
-
-        这是"阶段×情绪"的机制层耦合形态：阶段不改触发概率，改筛选灵敏度。
-        """
-        return self._emotion_sense._effective_tone_threshold(shard)
-
-    def _feed_tone_affect(
-        self, shard: _LanlanShard, label: str, confidence: float, now: float | None = None,
-        weight: float = 1.0,
-    ) -> None:
-        """语气信号积分进连续心情（筛选/校正两种模式都喂；积分数学在 affect.py）。"""
-        _feed_tone_affect(
-            shard.mood, label, confidence, now=now,
-            arousal_baseline=self._affect_arousal_baseline(), weight=weight,
-        )
-        # 我的日记素材：她的语气分布（weight<1 的用户侧传导不计——评价看
-        # 的是"她的回复是什么语气"，不是用户的语气被如何传导）
-        if weight >= 1.0:
-            self._feed_review_tone(shard, label)
-            # 相处统计：当日语气分布（热力图悬停/月报语气主色），同口径只记主路径
-            self._feed_stats_tone(shard, label)
-
-    async def _maybe_tone_sense(self, lanlan: str, shard: _LanlanShard) -> bool:
-        """语气感知主入口（tick 驱动，只对当前角色 shard）：门控链 → 分析 → 分模式判定。"""
-        return await self._emotion_sense._maybe_tone_sense(lanlan, shard)
-
-    def _tone_correction_check(self, lanlan: str, shard: _LanlanShard, label: str) -> bool:
-        """校正模式：label 入趋势窗口，攒满 window_turns 判定一次（多数派），判定后清空。"""
-        return self._emotion_sense._tone_correction_check(lanlan, shard, label)
-
-    def _tone_screen_check(
-        self, lanlan: str, shard: _LanlanShard, label: str, confidence: float
-    ) -> bool:
-        """筛选模式：互动情绪浓度超阈值（敏感期下移）→ 中性提醒，10 分钟节流。"""
-        return self._emotion_sense._tone_screen_check(lanlan, shard, label, confidence)
-
-    # ==========================================
-    # 时光日记·自动碎片（[fragments]，0.7.0）：小模型从用户消息里捕获
-    # "值得她记一辈子的片段"——明确的喜好厌恶、有分量的话、对她的过激言行。
-    # 复用语气感知的 recent.json 轮询与槽位直连基建，但水位独立：
-    # 语气感知采样跳过的轮次仍会进碎片分析（碎片不吃 check_rate 抽样）。
-    # ==========================================
-
-    def _fragments_float_cfg(self, key: str, default: float) -> float:
-        try:
-            return float(self._fragments_cfg.get(key, default))
-        except (TypeError, ValueError):
-            return default
-
-    def _fragments_enabled(self, shard: _LanlanShard | None = None) -> bool:
-        """碎片捕获开关：跟随总开关与情绪系统开关，另有 [fragments].enabled 独立闸。"""
-        return bool(self._mood_enabled(shard) and self._fragments_cfg.get("enabled", True))
-
-    async def _maybe_capture_fragments(self, lanlan: str, shard: _LanlanShard) -> bool:
-        """碎片捕获主入口（tick 驱动，只对当前角色 shard）。
-
-        门控链：开关 → 最小间隔 → 独立水位（新轮判定，复用同趟 recent 数据）→
-        直连槽位提取 → 置信度门槛 → 落盘时间线 → 吵架轻语判定。
-        首趟只建基线不分析历史（与语气感知同款：插件启动不补记旧对话）。
-        模型槽位在宿主 core_config.json 解析不出 key 时功能休眠（节流 warning），
-        其余功能不受影响；捕获失败静默降级，绝不拖垮 tick。
-        """
-        if not self._fragments_enabled(shard):
-            return False
-        now = time.time()
-        min_interval = self._fragments_float_cfg(
-            "min_interval_sec", _FRAGMENT_DEFAULT_MIN_INTERVAL_SEC
-        )
-        if now - shard.last_fragment_analysis_ts < max(0.0, min_interval):
-            return False
-        # advance=False：这轮是否"新"由碎片自己的水位判定（语气感知的抽样/门控不牵连）
-        turn = await self._poll_recent_turns(shard, lanlan=lanlan, advance=False)
-        if turn is None:
-            return False
-        user_text, her_text = turn
-        marker = shard.last_recent_marker
-        if not shard.last_fragment_marker:
-            shard.last_fragment_marker = marker  # 基线：不分析历史
-            return False
-        if marker == shard.last_fragment_marker:
-            return False
-        user_text = (user_text or "").strip()
-        if not user_text:
-            shard.last_fragment_marker = marker
-            return False
-        slot = str(self._fragments_cfg.get("slot") or "").strip() or _FRAGMENT_DEFAULT_SLOT
-        core_cfg = self._load_core_config()
-        resolved = self._resolve_tone_slot(core_cfg, slot)
-        if resolved is None:
-            shard.last_fragment_marker = marker
-            shard.last_fragment_analysis_ts = now
-            now_mono = time.monotonic()
-            if now_mono - self._last_fragment_dormant_logged > 300:
-                self._last_fragment_dormant_logged = now_mono
-                self.logger.warning(
-                    "fragment capture dormant: slot {} unresolved in host core_config ({}), (throttled 5min)",
-                    slot, _slot_dormancy_hint(core_cfg, slot),
-                )
-            return False
-        shard.last_fragment_marker = marker
-        shard.last_fragment_analysis_ts = now
-        raw = await asyncio.to_thread(
-            self._post_chat_completion,
-            resolved["base_url"], resolved["api_key"], resolved["model"],
-            build_fragment_prompt(user_text, her_text),
-        )
-        parsed = parse_fragment_response(raw or "")
-        if parsed is None or not parsed.get("capture"):
-            return False
-        threshold = self._fragments_float_cfg("confidence_threshold", _FRAGMENT_DEFAULT_CONFIDENCE)
-        if float(parsed.get("confidence") or 0.0) < threshold:
-            self.logger.debug(
-                "fragment dropped below confidence: kind={} conf={:.2f} threshold={:.2f}",
-                parsed.get("kind"), parsed.get("confidence") or 0.0, threshold,
-            )
-            return False
-        record = fragment_record(_now_utc().isoformat(timespec="seconds"), self._last_phase_name(shard), parsed)
-        shard.diary.append(record)
-        # 我的日记素材：碎片原话是"他说话方式"的最硬例证（含过激言行）
-        self._feed_review_fragment(shard, record)
-        await self._save_shard_diary(lanlan, shard)
-        self.logger.info(
-            "fragment captured: lanlan={} kind={} quote={!r}", lanlan, record["kind"], record["quote"]
-        )
-        await self._maybe_fragment_fight_nudge(lanlan, shard, record, now)
-        return True
-
-    async def _maybe_fragment_fight_nudge(
-        self, lanlan: str, shard: _LanlanShard, record: JsonObject, now: float
-    ) -> None:
-        """吵架轻语：重度负面动作生效中又捕获到"过激/厌恶"类碎片时，
-        低频提醒一句"你记得吗"（附一条相关的旧碎片作佐证）——她可以忽略，
-        用不用、怎么用仍由她自己决定。"""
-        action = shard.mood.action if shard.mood.is_active() else ""
-        if not should_nudge_fight(record, action, _PROACTIVE_PAUSE_ACTIONS):
-            return
-        gap_min = self._fragments_float_cfg("nudge_gap_minutes", _FRAGMENT_DEFAULT_NUDGE_GAP_MIN)
-        if now - shard.last_fragment_nudge_ts < max(60.0, gap_min * 60):
-            return
-        related = recall_fragments(shard.diary, kind=str(record["kind"]), limit=2)
-        related_hint = ""
-        for item in related:
-            if item is record:
-                continue
-            related_hint = f"之前还记过一笔：「{item.get('quote')}」。"
-            break
-        shard.last_fragment_nudge_ts = now
-        self.push_message(
-            visibility=[],
-            ai_behavior="read",
-            parts=[{"type": "text", "text": (
-                f"（时光日记提醒）你刚刚在心里记下了一笔：他说「{record.get('quote')}」"
-                f"（{record.get('note') or '此刻的事'}）。{related_hint}"
-                "如果这笔账你还放在心上，可以调用 mood_recall_fragments 翻翻这本日记，"
-                "再用你自己的方式让他知道。想翻篇的话，忽略就好。"
-            )}],
-            source=self.plugin_id,
-            target_lanlan=lanlan,
-            coalesce_key=f"{self.plugin_id}.fragment_nudge",
-            metadata={"message_type": f"{self.plugin_id}.fragment_nudge", "kind": record["kind"]},
-        )
-        self.logger.info("fragment fight nudge pushed for {} (kind={})", lanlan, record["kind"])
-
-    # ==========================================
-    # 我的日记（[review]，0.8.0）：关于主人的互动评价
-    #
-    # 第三本日记，只给用户看：不注入她的上下文、不进宿主记忆管线、不注册
-    # 任何她可调用的 LLM 工具（隔离等级比个人日记更严——她连知道这本日记
-    # 存在的渠道都没有）。素材纯本地累计（轮数/语气分布/心情采样/情绪动作
-    # 事件/碎片原话），平时零模型开销；双门槛先到先写（满 N 轮或满 N 天
-    # 且期间有聊天），成文时一次小模型调用（碎片同款直连槽位），中性观察者
-    # 口吻、纯文字无评分、负面行为如实记录不粉饰。
-    # ==========================================
-
-    def _review_enabled(self, shard: _LanlanShard | None = None) -> bool:
-        """我的日记开关：跟随总开关与情绪系统开关（素材来自语气感知/碎片等
-        情绪链路），另有 [review].enabled 独立闸。"""
-        return bool(self._mood_enabled(shard) and self._review_cfg.get("enabled", True))
-
-    def _review_int_cfg(self, key: str, default: int) -> int:
-        try:
-            return max(1, int(self._review_cfg.get(key, default)))
-        except (TypeError, ValueError):
-            return default
-
-    def _review_turns_threshold(self) -> int:
-        return self._review_int_cfg("turns_threshold", _REVIEW_DEFAULT_TURNS)
-
-    def _review_days_threshold(self) -> int:
-        return self._review_int_cfg("days_threshold", _REVIEW_DEFAULT_DAYS)
-
-    def _feed_review_turn(self, lanlan: str, shard: _LanlanShard) -> None:
-        """记一轮互动进素材统计（每条新用户消息一次，随 _save 落盘由调用方决定）。
-
-        valence 采样与语气分析异步不同步（这里取的是"此刻"的惰性衰减值，
-        成文看的是趋势不是精确对应），足够刻画相处氛围的走向。
-        """
-        if not self._review_enabled(shard):
-            return
-        valence = self._current_affect(shard)[0] if shard.mood.affect_updated_at else None
-        shard.review_stats = record_turn(shard.review_stats, valence=valence)
-
-    def _feed_review_tone(self, shard: _LanlanShard, label: str) -> None:
-        """记一次语气分析结果（她的回复被分析出 label 时，随 _save_shard_mood 落盘）。"""
-        if not self._review_enabled(shard):
-            return
-        shard.review_stats = record_tone(shard.review_stats, label)
-
-    def _feed_review_action(self, shard: _LanlanShard, action: str, *, origin: str) -> None:
-        """记一次情绪动作事件。origin=user 的（主人命令触发的演示）也记——
-        评价是客观记录，"他让她演示了一次冷战"本身是相处方式的一部分，
-        只是成文 prompt 里单独标注、与"她自己起的情绪"区分开。"""
-        if not self._review_enabled(shard):
-            return
-        shard.review_stats = record_action(shard.review_stats, action, origin=origin)
-
-    def _feed_review_fragment(self, shard: _LanlanShard, record: JsonObject) -> None:
-        """记一条新捕获碎片的原话（成文时作为"他说话方式"的具体例证）。"""
-        if not self._review_enabled(shard):
-            return
-        shard.review_stats = record_fragment(shard.review_stats, str(record.get("kind") or ""), str(record.get("quote") or ""))
-
-    async def _maybe_write_review(self, lanlan: str, shard: _LanlanShard, *, force: bool = False) -> tuple[bool, str]:
-        """我的日记主入口（tick 驱动 + 面板「立即写一篇」共用）。
-
-        门控链：开关 → （force 时最小素材量 / 平时双门槛）→ 直连槽位成文 →
-        解析截断 → 篇目追加 + stats 原子清零落盘。槽位解析不出 key 时功能
-        休眠（节流 warning），失败静默降级绝不拖垮 tick。返回 (是否写了, 原因)。
-        """
-        if not self._review_enabled(shard):
-            return False, "disabled"
-        # 门槛先于槽位休眠判定：素材不足/未到期时无论槽位状态都该报"未到节奏"，
-        # 面板调试时才不会被休眠日志误导
-        if force:
-            if not can_force_write(shard.review_stats):
-                return False, "not_enough_material"
-        else:
-            due, reason = review_due(
-                shard.review_stats,
-                turns_threshold=self._review_turns_threshold(),
-                days_threshold=self._review_days_threshold(),
-            )
-            if not due:
-                return False, reason
-        slot = str(self._review_cfg.get("slot") or "").strip() or _REVIEW_DEFAULT_SLOT
-        core_cfg = self._load_core_config()
-        resolved = self._resolve_tone_slot(core_cfg, slot)
-        if resolved is None:
-            now_mono = time.monotonic()
-            if now_mono - self._last_review_dormant_logged > 300:
-                self._last_review_dormant_logged = now_mono
-                self.logger.warning(
-                    "review compose dormant: slot {} unresolved in host core_config ({}), (throttled 5min)",
-                    slot, _slot_dormancy_hint(core_cfg, slot),
-                )
-            return False, "slot_unresolved"
-        # 成文素材：累计统计 + 最近几轮对话摘样（一次性拉取宿主 recent 窗口）
-        sample_turns = await self._collect_review_sample_turns(shard, lanlan)
-        prompt = build_review_prompt(shard.review_stats, sample_turns=sample_turns)
-        raw = await asyncio.to_thread(
-            self._post_chat_completion,
-            resolved["base_url"], resolved["api_key"], resolved["model"], prompt,
-        )
-        text = parse_review_response(raw or "")
-        if not text:
-            return False, "compose_failed"
-        stats_snapshot = dict(shard.review_stats)
-        record = review_record(_now_utc().isoformat(timespec="seconds"), stats_snapshot, text)
-        shard.review = append_review(shard.review, record)
-        shard.review_stats = review_new_stats()  # 成文后清零重新累计（review 的 new_stats，勿与 stats 的同名混淆）
-        await self._save_shard_review(lanlan, shard)
-        # 相处统计：第一篇我的日记里程碑（不覆盖最早值）
-        shard.stats = record_milestone(shard.stats, "first_review")
-        await self._save_shard_stats(lanlan, shard)
-        self.logger.info(
-            "review composed for {} (turns={}, entries={})", lanlan, record["turns"], len(shard.review)
-        )
-        return True, "written"
-
-    async def _collect_review_sample_turns(
-        self, shard: _LanlanShard, lanlan: str
-    ) -> list[tuple[str, str]]:
-        """成文时取最近几轮对话摘样（peek 不动水位，复用 recent 轮询基建）。
-
-        拉不到（宿主不可达/没有记录）就给空列表——素材统计仍够成文，
-        摘样只是锦上添花的语境。
-        """
-        try:
-            turn = await self._poll_recent_turns(shard, lanlan=lanlan, peek=True)
-        except Exception:  # noqa: BLE001 - 摘样是锦上添花，任何失败都不拦成文
-            return []
-        return [turn] if turn is not None else []
 
     @timer_interval(id="tide_tick", seconds=10, auto_start=True)
     async def tick(self, **_: Any):
