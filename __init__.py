@@ -182,7 +182,6 @@ try:
     from .review import (
         can_force_write as can_force_write,
     )
-    from .review import new_stats as review_new_stats
     from .review import (
         parse_review_response as parse_review_response,
     )
@@ -473,7 +472,6 @@ except ImportError:  # pragma: no cover - 无父包上下文的兜底（同上 c
     from review import (
         can_force_write as can_force_write,
     )
-    from review import new_stats as review_new_stats  # type: ignore[no-redef]  # noqa: F401
     from review import (
         parse_review_response as parse_review_response,
     )
