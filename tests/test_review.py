@@ -243,15 +243,28 @@ def test_get_and_clear_review_entries(plugin_factory, tm) -> None:
 
 
 def test_review_not_exposed_to_llm_tools(tm) -> None:
-    """隔离性：我的日记不注册任何 @llm_tool--她没有读取渠道。"""
+    """隔离性：我的日记不注册任何 @llm_tool--她没有读取渠道。
+
+    扫描范围是主包源码 + 同包全部 .py（拆分后 @llm_tool 分布在多个模块），
+    断言语义不变：收集到的工具方法名里不得含 "review"。
+    """
     import inspect
     import re
+    from pathlib import Path
 
-    src = inspect.getsource(tm)
+    root = Path(tm.__file__).parent
+    sources = [inspect.getsource(tm)]
+    sources += [
+        f.read_text(encoding="utf-8")
+        for f in sorted(root.glob("*.py"))
+        if f.name != "__init__.py"
+    ]
     # @llm_tool(...) 与 async def 之间隔任意行（参数多行），用宽松正则配对收集
     tool_methods = set()
-    for match in re.finditer(r'@llm_tool\((.*?)\)\s*\n\s*async def (\w+)', src, re.DOTALL):
-        tool_methods.add(match.group(2))
+    pattern = re.compile(r'@llm_tool\((.*?)\)\s*\n\s*async def (\w+)', re.DOTALL)
+    for src in sources:
+        for match in pattern.finditer(src):
+            tool_methods.add(match.group(2))
     assert tool_methods, "llm_tool 方法应当非空（正则失效则测试本身要修）"
     assert not any("review" in name for name in tool_methods), tool_methods
 
