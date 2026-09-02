@@ -17,88 +17,46 @@ import time
 from pathlib import Path
 from typing import Any
 
-try:
-    from .affect import _feed_tone_affect
-    from .fragments import (
-        build_fragment_prompt,
-        fragment_record,
-        parse_fragment_response,
-        recall_fragments,
-        should_nudge_fight,
-    )
-    from .review import (
-        append_review,
-        build_review_prompt,
-        can_force_write,
-        parse_review_response,
-        record_action,
-        record_fragment,
-        record_tone,
-        record_turn,
-        review_due,
-        review_record,
-    )
-    from .review import new_stats as review_new_stats
-    from .state import (
-        _FRAGMENT_DEFAULT_CONFIDENCE,
-        _FRAGMENT_DEFAULT_MIN_INTERVAL_SEC,
-        _FRAGMENT_DEFAULT_NUDGE_GAP_MIN,
-        _FRAGMENT_DEFAULT_SLOT,
-        _PROACTIVE_PAUSE_ACTIONS,
-        _REVIEW_DEFAULT_DAYS,
-        _REVIEW_DEFAULT_SLOT,
-        _REVIEW_DEFAULT_TURNS,
-        _LanlanShard,
-        _now_utc,
-    )
-    from .stats import record_milestone
-    from .tone_slot import (
-        _parse_tone_result,
-        _post_chat_completion,
-        _resolve_tone_slot,
-        diagnose_slot_dormancy,
-    )
-except ImportError:  # pragma: no cover - 无父包上下文的兜底（同 __init__.py 惯例）
-    from affect import _feed_tone_affect  # type: ignore[no-redef]
-    from fragments import (  # type: ignore[no-redef]
-        build_fragment_prompt,
-        fragment_record,
-        parse_fragment_response,
-        recall_fragments,
-        should_nudge_fight,
-    )
-    from review import (  # type: ignore[no-redef]
-        append_review,
-        build_review_prompt,
-        can_force_write,
-        parse_review_response,
-        record_action,
-        record_fragment,
-        record_tone,
-        record_turn,
-        review_due,
-        review_record,
-    )
-    from review import new_stats as review_new_stats  # type: ignore[no-redef]
-    from state import (  # type: ignore[no-redef]
-        _FRAGMENT_DEFAULT_CONFIDENCE,
-        _FRAGMENT_DEFAULT_MIN_INTERVAL_SEC,
-        _FRAGMENT_DEFAULT_NUDGE_GAP_MIN,
-        _FRAGMENT_DEFAULT_SLOT,
-        _PROACTIVE_PAUSE_ACTIONS,
-        _REVIEW_DEFAULT_DAYS,
-        _REVIEW_DEFAULT_SLOT,
-        _REVIEW_DEFAULT_TURNS,
-        _LanlanShard,
-        _now_utc,
-    )
-    from stats import record_milestone  # type: ignore[no-redef]
-    from tone_slot import (  # type: ignore[no-redef]
-        _parse_tone_result,
-        _post_chat_completion,
-        _resolve_tone_slot,
-        diagnose_slot_dormancy,
-    )
+from ..core.affect import _feed_tone_affect
+from ..core.fragments import (
+    build_fragment_prompt,
+    fragment_record,
+    parse_fragment_response,
+    recall_fragments,
+    should_nudge_fight,
+)
+from ..core.review import (
+    append_review,
+    build_review_prompt,
+    can_force_write,
+    parse_review_response,
+    record_action,
+    record_fragment,
+    record_tone,
+    record_turn,
+    review_due,
+    review_record,
+)
+from ..core.review import new_stats as review_new_stats
+from ..core.state import (
+    _FRAGMENT_DEFAULT_CONFIDENCE,
+    _FRAGMENT_DEFAULT_MIN_INTERVAL_SEC,
+    _FRAGMENT_DEFAULT_NUDGE_GAP_MIN,
+    _FRAGMENT_DEFAULT_SLOT,
+    _PROACTIVE_PAUSE_ACTIONS,
+    _REVIEW_DEFAULT_DAYS,
+    _REVIEW_DEFAULT_SLOT,
+    _REVIEW_DEFAULT_TURNS,
+    _LanlanShard,
+    _now_utc,
+)
+from ..core.stats import record_milestone
+from ..services.tone_slot import (
+    _parse_tone_result,
+    _post_chat_completion,
+    _resolve_tone_slot,
+    diagnose_slot_dormancy,
+)
 
 JsonObject = dict[str, Any]
 

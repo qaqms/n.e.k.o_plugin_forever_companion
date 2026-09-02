@@ -256,8 +256,9 @@ def test_review_not_exposed_to_llm_tools(tm) -> None:
     sources = [inspect.getsource(tm)]
     sources += [
         f.read_text(encoding="utf-8")
-        for f in sorted(root.glob("*.py"))
-        if f.name != "__init__.py"
+        for f in sorted(root.rglob("*.py"))
+        if f.name != "__init__.py" and ".venv" not in f.parts
+        and "tests" not in f.parts and "__pycache__" not in f.parts
     ]
     # @llm_tool(...) 与 async def 之间隔任意行（参数多行），用宽松正则配对收集
     tool_methods = set()

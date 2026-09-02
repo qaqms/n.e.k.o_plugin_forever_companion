@@ -19,24 +19,14 @@ from __future__ import annotations
 import math
 import time
 
-try:
-    from .state import (
-        _AFFECT_AROUSAL_TAU_SEC,
-        _AFFECT_VALENCE_TAU_SEC,
-        _TONE_AFFECT_AROUSAL_STEP,
-        _TONE_AFFECT_DIRECTIONS,
-        _TONE_AFFECT_VALENCE_STEP,
-        _MoodState,
-    )
-except ImportError:  # pragma: no cover - 无父包上下文的兜底（裸导入，同 cycle.py 先例）
-    from state import (  # type: ignore[no-redef]
-        _AFFECT_AROUSAL_TAU_SEC,
-        _AFFECT_VALENCE_TAU_SEC,
-        _TONE_AFFECT_AROUSAL_STEP,
-        _TONE_AFFECT_DIRECTIONS,
-        _TONE_AFFECT_VALENCE_STEP,
-        _MoodState,
-    )
+from .state import (
+    _AFFECT_AROUSAL_TAU_SEC,
+    _AFFECT_VALENCE_TAU_SEC,
+    _TONE_AFFECT_AROUSAL_STEP,
+    _TONE_AFFECT_DIRECTIONS,
+    _TONE_AFFECT_VALENCE_STEP,
+    _MoodState,
+)
 
 # 动作 → 连续心情冲量 (Δvalence, Δarousal)：动作生效瞬间推一次二维心情，
 # 之后靠惰性衰减自然回落（arousal τ≈30 分钟先平复、valence τ≈4 小时慢释怀）。

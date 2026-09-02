@@ -17,92 +17,48 @@ from zoneinfo import ZoneInfo
 
 from plugin.sdk.plugin import Err, Ok, SdkError, plugin_entry, quick_action, tr, ui
 
-try:
-    from .cycle import (
-        TideConfigError,
-        build_month_calendar,
-        build_status_payload,
-        compute_phase_state,
-        parse_anchor_date,
-    )
-    from .journal import page_header
-    from .review import new_stats as review_new_stats
-    from .review import review_due
-    from .state import (
-        _FRAGMENT_DEFAULT_SLOT,
-        _PANEL_BG_DEFAULT_DIM,
-        _PANEL_BG_MAX_CHARS,
-        _PANEL_BG_MIMES,
-        _REVIEW_DEFAULT_SLOT,
-        _REVIEW_MIN_TURNS_FORCED,
-        _STORE_PANEL_BG,
-        _TIMED_ACTIONS,
-        _TONE_SLOT_OPTIONS_CACHE_TTL,
-        _TONE_SLOT_PREFIXES,
-        _cfg_section,
-        _cycle_key,
-        _diary_key,
-        _journal_key,
-        _LanlanShard,
-        _mood_key,
-        _MoodState,
-        _now_utc,
-        _parse_iso_ts,
-        _review_key,
-        _review_stats_key,
-        _stats_key,
-        _weekly_key,
-    )
-    from .stats import (
-        badges_payload,
-        heatmap_payload,
-        month_view,
-        summary_payload,
-    )
-    from .tone_slot import diagnose_slot_dormancy
-except ImportError:  # pragma: no cover - 无父包上下文的兜底（同 __init__.py 惯例）
-    from cycle import (  # type: ignore[no-redef]
-        TideConfigError,
-        build_month_calendar,
-        build_status_payload,
-        compute_phase_state,
-        parse_anchor_date,
-    )
-    from journal import page_header  # type: ignore[no-redef]
-    from review import new_stats as review_new_stats  # type: ignore[no-redef]
-    from review import review_due
-    from state import (  # type: ignore[no-redef]
-        _FRAGMENT_DEFAULT_SLOT,
-        _PANEL_BG_DEFAULT_DIM,
-        _PANEL_BG_MAX_CHARS,
-        _PANEL_BG_MIMES,
-        _REVIEW_DEFAULT_SLOT,
-        _REVIEW_MIN_TURNS_FORCED,
-        _STORE_PANEL_BG,
-        _TIMED_ACTIONS,
-        _TONE_SLOT_OPTIONS_CACHE_TTL,
-        _TONE_SLOT_PREFIXES,
-        _cfg_section,
-        _cycle_key,
-        _diary_key,
-        _journal_key,
-        _LanlanShard,
-        _mood_key,
-        _MoodState,
-        _now_utc,
-        _parse_iso_ts,
-        _review_key,
-        _review_stats_key,
-        _stats_key,
-        _weekly_key,
-    )
-    from stats import (  # type: ignore[no-redef]
-        badges_payload,
-        heatmap_payload,
-        month_view,
-        summary_payload,
-    )
-    from tone_slot import diagnose_slot_dormancy  # type: ignore[no-redef]
+from ..core.cycle import (
+    TideConfigError,
+    build_month_calendar,
+    build_status_payload,
+    compute_phase_state,
+    parse_anchor_date,
+)
+from ..core.journal import page_header
+from ..core.review import new_stats as review_new_stats
+from ..core.review import review_due
+from ..core.state import (
+    _FRAGMENT_DEFAULT_SLOT,
+    _PANEL_BG_DEFAULT_DIM,
+    _PANEL_BG_MAX_CHARS,
+    _PANEL_BG_MIMES,
+    _REVIEW_DEFAULT_SLOT,
+    _REVIEW_MIN_TURNS_FORCED,
+    _STORE_PANEL_BG,
+    _TIMED_ACTIONS,
+    _TONE_SLOT_OPTIONS_CACHE_TTL,
+    _TONE_SLOT_PREFIXES,
+    _cfg_section,
+    _cycle_key,
+    _diary_key,
+    _journal_key,
+    _LanlanShard,
+    _mood_key,
+    _MoodState,
+    _now_utc,
+    _parse_iso_ts,
+    _review_key,
+    _review_stats_key,
+    _stats_key,
+    _weekly_key,
+)
+from ..core.stats import (
+    badges_payload,
+    heatmap_payload,
+    month_view,
+    summary_payload,
+)
+from ..services.tone_slot import diagnose_slot_dormancy
 
 JsonObject = dict[str, Any]
 

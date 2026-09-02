@@ -26,8 +26,10 @@ target_lanlan 的消息会被宿主整条丢弃。情绪系统把十个动作注
 不暂停），水位存 ``proactive_state``。旧版单角色数据（cycle_state/mood_state/mood_diary）
 在启动时一次性迁移归属当前角色，旧 key 保留作备份、不再写入。
 
-结构（1.2 拆分）：纯函数层在 cycle/state/affect/fragments/journal/review/stats/
-emotion_sense/tone_slot 九个模块；方法层按"对外契约面"拆成七个 Mixin 组合进
+结构（1.2 拆分，三个子包）：``core/`` 纯函数层（cycle 周期计算/state Store 布局/
+affect 连续心情/fragments 碎片/journal 日记页/review 我的日记/stats 相处统计——
+数据进数据出，零 SDK 依赖）；``services/`` 有状态服务（emotion_sense 语气感知/
+tone_slot 槽位直连）；``mixins/`` 方法层按"对外契约面"拆成七个 Mixin 组合进
 主类——shards（分片基建/配置/落盘）、whisper（注入引擎/总线轮询）、senses
 （语气感知/碎片/我的日记/日记邀请）、mood_actions（12 个 @llm_tool+情绪状态机）、
 host_coord（宿主协调/HTTP/工具韧性）、panel（dashboard+面板入口）、debug_entries
@@ -70,642 +72,332 @@ from plugin.sdk.plugin import (
     ui as ui,
 )
 
-try:
-    from .cycle import (
-        TideConfigError,
-        build_status_payload,
-        resolve_today,
-    )
-    from .cycle import (
-        _time_bucket as _time_bucket,
-    )
-    from .cycle import (
-        build_body_whisper as build_body_whisper,
-    )
-    from .cycle import (
-        build_month_calendar as build_month_calendar,
-    )
-    from .cycle import (
-        compute_phase_state as compute_phase_state,
-    )
-    from .cycle import (
-        derive_cycle_params as derive_cycle_params,
-    )
-    from .cycle import (
-        parse_anchor_date as parse_anchor_date,
-    )
-    from .cycle import (
-        randomized_default_anchor as randomized_default_anchor,
-    )
-except ImportError:  # pragma: no cover - 无父包上下文的兜底（如独立仓库里 pytest 把
-    # 根目录当 Package 直接导入 __init__.py，宿主环境不会出现此路径）
-    from cycle import (  # type: ignore[no-redef]
-        TideConfigError,
-        build_status_payload,
-        resolve_today,
-    )
-    from cycle import (
-        _time_bucket as _time_bucket,
-    )
-    from cycle import (
-        build_body_whisper as build_body_whisper,
-    )
-    from cycle import (
-        build_month_calendar as build_month_calendar,
-    )
-    from cycle import (
-        compute_phase_state as compute_phase_state,
-    )
-    from cycle import (
-        derive_cycle_params as derive_cycle_params,
-    )
-    from cycle import (
-        parse_anchor_date as parse_anchor_date,
-    )
-    from cycle import (
-        randomized_default_anchor as randomized_default_anchor,
-    )
-
 # 纯数据/纯函数区段的解耦抽出（第一/二批重构）：state.py = Store 布局/常量表/
 # _MoodState/_LanlanShard 数据类；weekly.py = 周记资格判定；affect.py = 连续心情数学；
 # tone_slot.py = 语气槽位解析与直连。这里导入即再导出——tm._MoodState、
 # tm._STORE_SETTINGS、tm._TONE_* 等既有引用路径全部不变；主类只留薄委托方法。
-try:
-    from .affect import (
-        _MOOD_AFFECT_IMPULSES,
-        _apply_affect_impulse,
-        _current_affect,
-    )
-    from .affect import (
-        _feed_tone_affect as _feed_tone_affect,
-    )
-    from .emotion_sense import EmotionSenseService
-    from .fragments import (
-        build_fragment_prompt as build_fragment_prompt,
-    )
-    from .fragments import (
-        fragment_record as fragment_record,
-    )
-    from .fragments import (
-        parse_fragment_response as parse_fragment_response,
-    )
-    from .fragments import (
-        recall_fragments as recall_fragments,
-    )
-    from .fragments import (
-        should_nudge_fight as should_nudge_fight,
-    )
-    from .journal import (
-        assemble_journal_entry as assemble_journal_entry,
-    )
-    from .journal import (
-        has_journal_content as has_journal_content,
-    )
-    from .journal import (
-        journal_due as journal_due,
-    )
-    from .journal import (
-        journal_write as journal_write,
-    )
-    from .journal import (
-        migrate_weekly_to_pages as migrate_weekly_to_pages,
-    )
-    from .journal import (
-        page_header as page_header,
-    )
-    from .review import (
-        append_review as append_review,
-    )
-    from .review import (
-        build_review_prompt as build_review_prompt,
-    )
-    from .review import (
-        can_force_write as can_force_write,
-    )
-    from .review import (
-        parse_review_response as parse_review_response,
-    )
-    from .review import (
-        record_action as record_action,
-    )
-    from .review import (
-        record_fragment as record_fragment,
-    )
-    from .review import (
-        record_tone as record_tone,
-    )
-    from .review import (
-        record_turn as record_turn,
-    )
-    from .review import (
-        review_due as review_due,
-    )
-    from .review import (
-        review_record as review_record,
-    )
-    from .state import (
-        _ACTION_DEFAULT_MINUTES as _ACTION_DEFAULT_MINUTES,
-    )
-    from .state import (
-        _AFFECT_AROUSAL_TAU_SEC as _AFFECT_AROUSAL_TAU_SEC,
-    )
-    from .state import (
-        _AFFECT_VALENCE_TAU_SEC as _AFFECT_VALENCE_TAU_SEC,
-    )
-    from .state import (
-        _ASSIST_KEY_FIELDS as _ASSIST_KEY_FIELDS,
-    )
-    from .state import (
-        _COLD_ACTIONS as _COLD_ACTIONS,
-    )
-    from .state import (
-        _CORE_CONFIG_CACHE_TTL as _CORE_CONFIG_CACHE_TTL,
-    )
-    from .state import (
-        _CURRENT_LANLAN_CACHE_TTL as _CURRENT_LANLAN_CACHE_TTL,
-    )
-    from .state import (
-        _DIARY_MAX_ENTRIES as _DIARY_MAX_ENTRIES,
-    )
-    from .state import (
-        _FRAGMENT_DEFAULT_CONFIDENCE as _FRAGMENT_DEFAULT_CONFIDENCE,
-    )
-    from .state import (
-        _FRAGMENT_DEFAULT_MIN_INTERVAL_SEC as _FRAGMENT_DEFAULT_MIN_INTERVAL_SEC,
-    )
-    from .state import (
-        _FRAGMENT_DEFAULT_NUDGE_GAP_MIN as _FRAGMENT_DEFAULT_NUDGE_GAP_MIN,
-    )
-    from .state import (
-        _FRAGMENT_DEFAULT_SLOT as _FRAGMENT_DEFAULT_SLOT,
-    )
-    from .state import (
-        _JOURNAL_DEFAULT_INTERVAL_DAYS as _JOURNAL_DEFAULT_INTERVAL_DAYS,
-    )
-    from .state import (
-        _JOURNAL_INVITE_THROTTLE_SEC as _JOURNAL_INVITE_THROTTLE_SEC,
-    )
-    from .state import (
-        _JOURNAL_MAX_PAGES as _JOURNAL_MAX_PAGES,
-    )
-    from .state import (
-        _KNOWN_CATGIRLS_CACHE_TTL as _KNOWN_CATGIRLS_CACHE_TTL,
-    )
-    from .state import (
-        _MOOD_ACTION_DEFAULT_LABELS as _MOOD_ACTION_DEFAULT_LABELS,
-    )
-    from .state import (
-        _MOOD_ACTION_LABEL_KEYS as _MOOD_ACTION_LABEL_KEYS,
-    )
-    from .state import (
-        _PANEL_BG_DEFAULT_DIM,
-        _PANEL_BG_MAX_CHARS,
-        _PANEL_BG_MIMES,
-        _STORE_LANLAN_INDEX,
-        _STORE_PROACTIVE,
-        _STORE_SETTINGS,
-        _LanlanShard,
-    )
-    from .state import (
-        _POSITIVE_ACTIONS as _POSITIVE_ACTIONS,
-    )
-    from .state import (
-        _PROACTIVE_PAUSE_ACTIONS as _PROACTIVE_PAUSE_ACTIONS,
-    )
-    from .state import (
-        _REVIEW_DEFAULT_DAYS as _REVIEW_DEFAULT_DAYS,
-    )
-    from .state import (
-        _REVIEW_DEFAULT_SLOT as _REVIEW_DEFAULT_SLOT,
-    )
-    from .state import (
-        _REVIEW_DEFAULT_TURNS as _REVIEW_DEFAULT_TURNS,
-    )
-    from .state import (
-        _REVIEW_ENTRY_MAX_CHARS as _REVIEW_ENTRY_MAX_CHARS,
-    )
-    from .state import (
-        _REVIEW_MAX_ENTRIES as _REVIEW_MAX_ENTRIES,
-    )
-    from .state import (
-        _REVIEW_MIN_TURNS_FORCED as _REVIEW_MIN_TURNS_FORCED,
-    )
-    from .state import (
-        _STORE_CYCLE as _STORE_CYCLE,
-    )
-    from .state import (
-        _STORE_DIARY as _STORE_DIARY,
-    )
-    from .state import (
-        _STORE_MOOD as _STORE_MOOD,
-    )
-    from .state import (
-        _STORE_PANEL_BG as _STORE_PANEL_BG,
-    )
-    from .state import (
-        _TIMED_ACTIONS as _TIMED_ACTIONS,
-    )
-    from .state import (
-        _TONE_AFFECT_AROUSAL_STEP as _TONE_AFFECT_AROUSAL_STEP,
-    )
-    from .state import (
-        _TONE_AFFECT_DIRECTIONS as _TONE_AFFECT_DIRECTIONS,
-    )
-    from .state import (
-        _TONE_AFFECT_VALENCE_STEP as _TONE_AFFECT_VALENCE_STEP,
-    )
-    from .state import (
-        _TONE_COLD_LABELS as _TONE_COLD_LABELS,
-    )
-    from .state import (
-        _TONE_DIRECT_PROMPT as _TONE_DIRECT_PROMPT,
-    )
-    from .state import (
-        _TONE_EMOTION_ALIASES as _TONE_EMOTION_ALIASES,
-    )
-    from .state import (
-        _TONE_SCREEN_NUDGE_SEC as _TONE_SCREEN_NUDGE_SEC,
-    )
-    from .state import (
-        _TONE_SLOT_OPTIONS_CACHE_TTL as _TONE_SLOT_OPTIONS_CACHE_TTL,
-    )
-    from .state import (
-        _TONE_SLOT_PREFIXES as _TONE_SLOT_PREFIXES,
-    )
-    from .state import (
-        _TONE_WARM_LABELS as _TONE_WARM_LABELS,
-    )
-    from .state import (
-        _cfg_section as _cfg_section,
-    )
-    from .state import (
-        _cycle_key as _cycle_key,
-    )
-    from .state import (
-        _diary_key as _diary_key,
-    )
-    from .state import (
-        _journal_key as _journal_key,
-    )
-    from .state import (
-        _mood_key as _mood_key,
-    )
-    from .state import (
-        _MoodState as _MoodState,
-    )
-    from .state import (
-        _now_utc as _now_utc,
-    )
-    from .state import (
-        _parse_iso_ts as _parse_iso_ts,
-    )
-    from .state import (
-        _review_key as _review_key,
-    )
-    from .state import (
-        _review_stats_key as _review_stats_key,
-    )
-    from .state import (
-        _stats_key as _stats_key,
-    )
-    from .state import (
-        _weekly_key as _weekly_key,
-    )
-    from .stats import (
-        anniversary_due,
-        mark_anniversary_pushed,
-        record_made_up,
-        record_mood_event,
-        seal_due_months,
-    )
-    from .stats import (
-        backfill_day as backfill_day,
-    )
-    from .stats import (
-        badges_payload as badges_payload,
-    )
-    from .stats import (
-        fabricate_demo_stats as fabricate_demo_stats,
-    )
-    from .stats import (
-        heatmap_payload as heatmap_payload,
-    )
-    from .stats import (
-        month_view as month_view,
-    )
-    from .stats import (
-        new_stats as new_stats,
-    )
-    from .stats import (
-        record_milestone as record_milestone,
-    )
-    from .stats import record_tone as stats_record_tone
-    from .stats import record_turn as stats_record_turn
-    from .stats import (
-        summary_payload as summary_payload,
-    )
-    from .tone_slot import (
-        _parse_tone_result as _parse_tone_result,
-    )
-    from .tone_slot import (
-        _post_chat_completion as _post_chat_completion,
-    )
-    from .tone_slot import (
-        _resolve_tone_slot as _resolve_tone_slot,
-    )
-    from .tone_slot import (
-        diagnose_slot_dormancy,
-    )
-except ImportError:  # pragma: no cover - 无父包上下文的兜底（同上 cycle 分支）
-    from affect import (  # type: ignore[no-redef]
-        _MOOD_AFFECT_IMPULSES as _MOOD_AFFECT_IMPULSES,
-    )
-    from affect import (
-        _apply_affect_impulse as _apply_affect_impulse,
-    )
-    from affect import (
-        _current_affect as _current_affect,
-    )
-    from affect import (
-        _feed_tone_affect as _feed_tone_affect,
-    )
-    from emotion_sense import EmotionSenseService  # type: ignore[no-redef]
-    from fragments import (  # type: ignore[no-redef]
-        build_fragment_prompt as build_fragment_prompt,
-    )
-    from fragments import (
-        fragment_record as fragment_record,
-    )
-    from fragments import (
-        parse_fragment_response as parse_fragment_response,
-    )
-    from fragments import (
-        recall_fragments as recall_fragments,
-    )
-    from fragments import (
-        should_nudge_fight as should_nudge_fight,
-    )
-    from journal import (  # type: ignore[no-redef]
-        assemble_journal_entry as assemble_journal_entry,
-    )
-    from journal import (
-        has_journal_content as has_journal_content,
-    )
-    from journal import (
-        journal_due as journal_due,
-    )
-    from journal import (
-        journal_write as journal_write,
-    )
-    from journal import (
-        migrate_weekly_to_pages as migrate_weekly_to_pages,
-    )
-    from journal import (
-        page_header as page_header,
-    )
-    from review import (  # type: ignore[no-redef]
-        append_review as append_review,
-    )
-    from review import (
-        build_review_prompt as build_review_prompt,
-    )
-    from review import (
-        can_force_write as can_force_write,
-    )
-    from review import (
-        parse_review_response as parse_review_response,
-    )
-    from review import (
-        record_action as record_action,
-    )
-    from review import (
-        record_fragment as record_fragment,
-    )
-    from review import (
-        record_tone as record_tone,
-    )
-    from review import (
-        record_turn as record_turn,
-    )
-    from review import (
-        review_due as review_due,
-    )
-    from review import (
-        review_record as review_record,
-    )
-    from state import (  # type: ignore[no-redef]
-        _ACTION_DEFAULT_MINUTES as _ACTION_DEFAULT_MINUTES,
-    )
-    from state import (
-        _AFFECT_AROUSAL_TAU_SEC as _AFFECT_AROUSAL_TAU_SEC,
-    )
-    from state import (
-        _AFFECT_VALENCE_TAU_SEC as _AFFECT_VALENCE_TAU_SEC,
-    )
-    from state import (
-        _ASSIST_KEY_FIELDS as _ASSIST_KEY_FIELDS,
-    )
-    from state import (
-        _COLD_ACTIONS as _COLD_ACTIONS,
-    )
-    from state import (
-        _CORE_CONFIG_CACHE_TTL as _CORE_CONFIG_CACHE_TTL,
-    )
-    from state import (
-        _CURRENT_LANLAN_CACHE_TTL as _CURRENT_LANLAN_CACHE_TTL,
-    )
-    from state import (
-        _DIARY_MAX_ENTRIES as _DIARY_MAX_ENTRIES,
-    )
-    from state import (
-        _FRAGMENT_DEFAULT_CONFIDENCE as _FRAGMENT_DEFAULT_CONFIDENCE,
-    )
-    from state import (
-        _FRAGMENT_DEFAULT_MIN_INTERVAL_SEC as _FRAGMENT_DEFAULT_MIN_INTERVAL_SEC,
-    )
-    from state import (
-        _FRAGMENT_DEFAULT_NUDGE_GAP_MIN as _FRAGMENT_DEFAULT_NUDGE_GAP_MIN,
-    )
-    from state import (
-        _FRAGMENT_DEFAULT_SLOT as _FRAGMENT_DEFAULT_SLOT,
-    )
-    from state import (
-        _JOURNAL_DEFAULT_INTERVAL_DAYS as _JOURNAL_DEFAULT_INTERVAL_DAYS,
-    )
-    from state import (
-        _JOURNAL_INVITE_THROTTLE_SEC as _JOURNAL_INVITE_THROTTLE_SEC,
-    )
-    from state import (
-        _JOURNAL_MAX_PAGES as _JOURNAL_MAX_PAGES,
-    )
-    from state import (
-        _KNOWN_CATGIRLS_CACHE_TTL as _KNOWN_CATGIRLS_CACHE_TTL,
-    )
-    from state import (
-        _MOOD_ACTION_DEFAULT_LABELS as _MOOD_ACTION_DEFAULT_LABELS,
-    )
-    from state import (
-        _MOOD_ACTION_LABEL_KEYS as _MOOD_ACTION_LABEL_KEYS,
-    )
-    from state import (
-        _PANEL_BG_DEFAULT_DIM,
-        _PANEL_BG_MAX_CHARS,
-        _PANEL_BG_MIMES,
-        _STORE_LANLAN_INDEX,
-        _STORE_PROACTIVE,
-        _STORE_SETTINGS,
-        _LanlanShard,
-    )
-    from state import (
-        _POSITIVE_ACTIONS as _POSITIVE_ACTIONS,
-    )
-    from state import (
-        _PROACTIVE_PAUSE_ACTIONS as _PROACTIVE_PAUSE_ACTIONS,
-    )
-    from state import (
-        _REVIEW_DEFAULT_DAYS as _REVIEW_DEFAULT_DAYS,
-    )
-    from state import (
-        _REVIEW_DEFAULT_SLOT as _REVIEW_DEFAULT_SLOT,
-    )
-    from state import (
-        _REVIEW_DEFAULT_TURNS as _REVIEW_DEFAULT_TURNS,
-    )
-    from state import (
-        _REVIEW_ENTRY_MAX_CHARS as _REVIEW_ENTRY_MAX_CHARS,
-    )
-    from state import (
-        _REVIEW_MAX_ENTRIES as _REVIEW_MAX_ENTRIES,
-    )
-    from state import (
-        _REVIEW_MIN_TURNS_FORCED as _REVIEW_MIN_TURNS_FORCED,
-    )
-    from state import (
-        _STORE_CYCLE as _STORE_CYCLE,
-    )
-    from state import (
-        _STORE_DIARY as _STORE_DIARY,
-    )
-    from state import (
-        _STORE_MOOD as _STORE_MOOD,
-    )
-    from state import (
-        _STORE_PANEL_BG as _STORE_PANEL_BG,
-    )
-    from state import (
-        _TIMED_ACTIONS as _TIMED_ACTIONS,
-    )
-    from state import (
-        _TONE_AFFECT_AROUSAL_STEP as _TONE_AFFECT_AROUSAL_STEP,
-    )
-    from state import (
-        _TONE_AFFECT_DIRECTIONS as _TONE_AFFECT_DIRECTIONS,
-    )
-    from state import (
-        _TONE_AFFECT_VALENCE_STEP as _TONE_AFFECT_VALENCE_STEP,
-    )
-    from state import (
-        _TONE_COLD_LABELS as _TONE_COLD_LABELS,
-    )
-    from state import (
-        _TONE_DIRECT_PROMPT as _TONE_DIRECT_PROMPT,
-    )
-    from state import (
-        _TONE_EMOTION_ALIASES as _TONE_EMOTION_ALIASES,
-    )
-    from state import (
-        _TONE_SCREEN_NUDGE_SEC as _TONE_SCREEN_NUDGE_SEC,
-    )
-    from state import (
-        _TONE_SLOT_OPTIONS_CACHE_TTL as _TONE_SLOT_OPTIONS_CACHE_TTL,
-    )
-    from state import (
-        _TONE_SLOT_PREFIXES as _TONE_SLOT_PREFIXES,
-    )
-    from state import (
-        _TONE_WARM_LABELS as _TONE_WARM_LABELS,
-    )
-    from state import (
-        _cfg_section as _cfg_section,
-    )
-    from state import (
-        _cycle_key as _cycle_key,
-    )
-    from state import (
-        _diary_key as _diary_key,
-    )
-    from state import (
-        _journal_key as _journal_key,
-    )
-    from state import (
-        _mood_key as _mood_key,
-    )
-    from state import (
-        _MoodState as _MoodState,
-    )
-    from state import (
-        _now_utc as _now_utc,
-    )
-    from state import (
-        _parse_iso_ts as _parse_iso_ts,
-    )
-    from state import (
-        _review_key as _review_key,
-    )
-    from state import (
-        _review_stats_key as _review_stats_key,
-    )
-    from state import (
-        _stats_key as _stats_key,
-    )
-    from state import (
-        _weekly_key as _weekly_key,
-    )
-    from stats import (  # type: ignore[no-redef]
-        anniversary_due,
-        mark_anniversary_pushed,
-        record_made_up,
-        record_mood_event,
-        seal_due_months,
-    )
-    from stats import (
-        backfill_day as backfill_day,
-    )
-    from stats import (
-        badges_payload as badges_payload,
-    )
-    from stats import (
-        fabricate_demo_stats as fabricate_demo_stats,
-    )
-    from stats import (
-        heatmap_payload as heatmap_payload,
-    )
-    from stats import (
-        month_view as month_view,
-    )
-    from stats import (
-        new_stats as new_stats,
-    )
-    from stats import (
-        record_milestone as record_milestone,
-    )
-    from stats import record_tone as stats_record_tone  # type: ignore[no-redef]
-    from stats import record_turn as stats_record_turn  # type: ignore[no-redef]
-    from stats import (
-        summary_payload as summary_payload,
-    )
-    from tone_slot import (  # type: ignore[no-redef]
-        _parse_tone_result as _parse_tone_result,
-    )
-    from tone_slot import (
-        _post_chat_completion as _post_chat_completion,
-    )
-    from tone_slot import (
-        _resolve_tone_slot as _resolve_tone_slot,
-    )
-    from tone_slot import (
-        diagnose_slot_dormancy,
-    )
+from .core.affect import (
+    _MOOD_AFFECT_IMPULSES as _MOOD_AFFECT_IMPULSES,
+)
+from .core.affect import (
+    _apply_affect_impulse as _apply_affect_impulse,
+)
+from .core.affect import (
+    _current_affect as _current_affect,
+)
+from .core.affect import (
+    _feed_tone_affect as _feed_tone_affect,
+)
+from .core.cycle import (
+    TideConfigError,
+    build_status_payload,
+    resolve_today,
+)
+from .core.cycle import (
+    _time_bucket as _time_bucket,
+)
+from .core.cycle import (
+    build_body_whisper as build_body_whisper,
+)
+from .core.cycle import (
+    build_month_calendar as build_month_calendar,
+)
+from .core.cycle import (
+    compute_phase_state as compute_phase_state,
+)
+from .core.cycle import (
+    derive_cycle_params as derive_cycle_params,
+)
+from .core.cycle import (
+    parse_anchor_date as parse_anchor_date,
+)
+from .core.cycle import (
+    randomized_default_anchor as randomized_default_anchor,
+)
+from .core.fragments import (
+    build_fragment_prompt as build_fragment_prompt,
+)
+from .core.fragments import (
+    fragment_record as fragment_record,
+)
+from .core.fragments import (
+    parse_fragment_response as parse_fragment_response,
+)
+from .core.fragments import (
+    recall_fragments as recall_fragments,
+)
+from .core.fragments import (
+    should_nudge_fight as should_nudge_fight,
+)
+from .core.journal import (
+    assemble_journal_entry as assemble_journal_entry,
+)
+from .core.journal import (
+    has_journal_content as has_journal_content,
+)
+from .core.journal import (
+    journal_due as journal_due,
+)
+from .core.journal import (
+    journal_write as journal_write,
+)
+from .core.journal import (
+    migrate_weekly_to_pages as migrate_weekly_to_pages,
+)
+from .core.journal import (
+    page_header as page_header,
+)
+from .core.review import (
+    append_review as append_review,
+)
+from .core.review import (
+    build_review_prompt as build_review_prompt,
+)
+from .core.review import (
+    can_force_write as can_force_write,
+)
+from .core.review import (
+    parse_review_response as parse_review_response,
+)
+from .core.review import (
+    record_action as record_action,
+)
+from .core.review import (
+    record_fragment as record_fragment,
+)
+from .core.review import (
+    record_tone as record_tone,
+)
+from .core.review import (
+    record_turn as record_turn,
+)
+from .core.review import (
+    review_due as review_due,
+)
+from .core.review import (
+    review_record as review_record,
+)
+from .core.state import (
+    _ACTION_DEFAULT_MINUTES as _ACTION_DEFAULT_MINUTES,
+)
+from .core.state import (
+    _AFFECT_AROUSAL_TAU_SEC as _AFFECT_AROUSAL_TAU_SEC,
+)
+from .core.state import (
+    _AFFECT_VALENCE_TAU_SEC as _AFFECT_VALENCE_TAU_SEC,
+)
+from .core.state import (
+    _ASSIST_KEY_FIELDS as _ASSIST_KEY_FIELDS,
+)
+from .core.state import (
+    _COLD_ACTIONS as _COLD_ACTIONS,
+)
+from .core.state import (
+    _CORE_CONFIG_CACHE_TTL as _CORE_CONFIG_CACHE_TTL,
+)
+from .core.state import (
+    _CURRENT_LANLAN_CACHE_TTL as _CURRENT_LANLAN_CACHE_TTL,
+)
+from .core.state import (
+    _DIARY_MAX_ENTRIES as _DIARY_MAX_ENTRIES,
+)
+from .core.state import (
+    _FRAGMENT_DEFAULT_CONFIDENCE as _FRAGMENT_DEFAULT_CONFIDENCE,
+)
+from .core.state import (
+    _FRAGMENT_DEFAULT_MIN_INTERVAL_SEC as _FRAGMENT_DEFAULT_MIN_INTERVAL_SEC,
+)
+from .core.state import (
+    _FRAGMENT_DEFAULT_NUDGE_GAP_MIN as _FRAGMENT_DEFAULT_NUDGE_GAP_MIN,
+)
+from .core.state import (
+    _FRAGMENT_DEFAULT_SLOT as _FRAGMENT_DEFAULT_SLOT,
+)
+from .core.state import (
+    _JOURNAL_DEFAULT_INTERVAL_DAYS as _JOURNAL_DEFAULT_INTERVAL_DAYS,
+)
+from .core.state import (
+    _JOURNAL_INVITE_THROTTLE_SEC as _JOURNAL_INVITE_THROTTLE_SEC,
+)
+from .core.state import (
+    _JOURNAL_MAX_PAGES as _JOURNAL_MAX_PAGES,
+)
+from .core.state import (
+    _KNOWN_CATGIRLS_CACHE_TTL as _KNOWN_CATGIRLS_CACHE_TTL,
+)
+from .core.state import (
+    _MOOD_ACTION_DEFAULT_LABELS as _MOOD_ACTION_DEFAULT_LABELS,
+)
+from .core.state import (
+    _MOOD_ACTION_LABEL_KEYS as _MOOD_ACTION_LABEL_KEYS,
+)
+from .core.state import (
+    _PANEL_BG_DEFAULT_DIM,
+    _PANEL_BG_MAX_CHARS,
+    _PANEL_BG_MIMES,
+    _STORE_LANLAN_INDEX,
+    _STORE_PROACTIVE,
+    _STORE_SETTINGS,
+    _LanlanShard,
+)
+from .core.state import (
+    _POSITIVE_ACTIONS as _POSITIVE_ACTIONS,
+)
+from .core.state import (
+    _PROACTIVE_PAUSE_ACTIONS as _PROACTIVE_PAUSE_ACTIONS,
+)
+from .core.state import (
+    _REVIEW_DEFAULT_DAYS as _REVIEW_DEFAULT_DAYS,
+)
+from .core.state import (
+    _REVIEW_DEFAULT_SLOT as _REVIEW_DEFAULT_SLOT,
+)
+from .core.state import (
+    _REVIEW_DEFAULT_TURNS as _REVIEW_DEFAULT_TURNS,
+)
+from .core.state import (
+    _REVIEW_ENTRY_MAX_CHARS as _REVIEW_ENTRY_MAX_CHARS,
+)
+from .core.state import (
+    _REVIEW_MAX_ENTRIES as _REVIEW_MAX_ENTRIES,
+)
+from .core.state import (
+    _REVIEW_MIN_TURNS_FORCED as _REVIEW_MIN_TURNS_FORCED,
+)
+from .core.state import (
+    _STORE_CYCLE as _STORE_CYCLE,
+)
+from .core.state import (
+    _STORE_DIARY as _STORE_DIARY,
+)
+from .core.state import (
+    _STORE_MOOD as _STORE_MOOD,
+)
+from .core.state import (
+    _STORE_PANEL_BG as _STORE_PANEL_BG,
+)
+from .core.state import (
+    _TIMED_ACTIONS as _TIMED_ACTIONS,
+)
+from .core.state import (
+    _TONE_AFFECT_AROUSAL_STEP as _TONE_AFFECT_AROUSAL_STEP,
+)
+from .core.state import (
+    _TONE_AFFECT_DIRECTIONS as _TONE_AFFECT_DIRECTIONS,
+)
+from .core.state import (
+    _TONE_AFFECT_VALENCE_STEP as _TONE_AFFECT_VALENCE_STEP,
+)
+from .core.state import (
+    _TONE_COLD_LABELS as _TONE_COLD_LABELS,
+)
+from .core.state import (
+    _TONE_DIRECT_PROMPT as _TONE_DIRECT_PROMPT,
+)
+from .core.state import (
+    _TONE_EMOTION_ALIASES as _TONE_EMOTION_ALIASES,
+)
+from .core.state import (
+    _TONE_SCREEN_NUDGE_SEC as _TONE_SCREEN_NUDGE_SEC,
+)
+from .core.state import (
+    _TONE_SLOT_OPTIONS_CACHE_TTL as _TONE_SLOT_OPTIONS_CACHE_TTL,
+)
+from .core.state import (
+    _TONE_SLOT_PREFIXES as _TONE_SLOT_PREFIXES,
+)
+from .core.state import (
+    _TONE_WARM_LABELS as _TONE_WARM_LABELS,
+)
+from .core.state import (
+    _cfg_section as _cfg_section,
+)
+from .core.state import (
+    _cycle_key as _cycle_key,
+)
+from .core.state import (
+    _diary_key as _diary_key,
+)
+from .core.state import (
+    _journal_key as _journal_key,
+)
+from .core.state import (
+    _mood_key as _mood_key,
+)
+from .core.state import (
+    _MoodState as _MoodState,
+)
+from .core.state import (
+    _now_utc as _now_utc,
+)
+from .core.state import (
+    _parse_iso_ts as _parse_iso_ts,
+)
+from .core.state import (
+    _review_key as _review_key,
+)
+from .core.state import (
+    _review_stats_key as _review_stats_key,
+)
+from .core.state import (
+    _stats_key as _stats_key,
+)
+from .core.state import (
+    _weekly_key as _weekly_key,
+)
+from .core.stats import (
+    anniversary_due,
+    mark_anniversary_pushed,
+    record_made_up,
+    record_mood_event,
+    seal_due_months,
+)
+from .core.stats import (
+    backfill_day as backfill_day,
+)
+from .core.stats import (
+    badges_payload as badges_payload,
+)
+from .core.stats import (
+    fabricate_demo_stats as fabricate_demo_stats,
+)
+from .core.stats import (
+    heatmap_payload as heatmap_payload,
+)
+from .core.stats import (
+    month_view as month_view,
+)
+from .core.stats import (
+    new_stats as new_stats,
+)
+from .core.stats import (
+    record_milestone as record_milestone,
+)
+from .core.stats import record_tone as stats_record_tone
+from .core.stats import record_turn as stats_record_turn
+from .core.stats import (
+    summary_payload as summary_payload,
+)
+from .mixins.debug_entries import DebugEntriesMixin
+from .mixins.host_coord import HostCoordMixin
+from .mixins.mood_actions import MoodActionsMixin
+from .mixins.panel import PanelEntriesMixin
+from .mixins.senses import SensesMixin
+from .mixins.shards import ShardsMixin
+from .mixins.whisper import WhisperMixin
+from .services.emotion_sense import EmotionSenseService
+from .services.tone_slot import (
+    _parse_tone_result as _parse_tone_result,
+)
+from .services.tone_slot import (
+    _post_chat_completion as _post_chat_completion,
+)
+from .services.tone_slot import (
+    _resolve_tone_slot as _resolve_tone_slot,
+)
+from .services.tone_slot import (
+    diagnose_slot_dormancy,
+)
 
 JsonObject = dict[str, Any]
 
@@ -770,23 +462,6 @@ def _clamp_panel_bg_dim(value: Any) -> float:
 # Store 布局 / key 函数 / 常量表 / 纯工具函数 / _MoodState / _LanlanShard
 # 已抽出到 state.py（碎片提取在 fragments.py、个人日记页逻辑在 journal.py），
 # 见顶部导入块的再导出
-
-try:
-    from .debug_entries import DebugEntriesMixin
-    from .host_coord import HostCoordMixin
-    from .mood_actions import MoodActionsMixin
-    from .panel import PanelEntriesMixin
-    from .senses import SensesMixin
-    from .shards import ShardsMixin
-    from .whisper import WhisperMixin
-except ImportError:  # pragma: no cover - 无父包上下文的兜底（同上 cycle 分支）
-    from debug_entries import DebugEntriesMixin  # type: ignore[no-redef]
-    from host_coord import HostCoordMixin  # type: ignore[no-redef]
-    from mood_actions import MoodActionsMixin  # type: ignore[no-redef]
-    from panel import PanelEntriesMixin  # type: ignore[no-redef]
-    from senses import SensesMixin  # type: ignore[no-redef]
-    from shards import ShardsMixin  # type: ignore[no-redef]
-    from whisper import WhisperMixin  # type: ignore[no-redef]
 
 
 @neko_plugin
@@ -885,7 +560,7 @@ class ForeverCompanionPlugin(
         """折算"今天"（timezone 解析在 cycle.resolve_today）。
 
         走主包命名空间的 resolve_today（tests 猴补丁 tm.resolve_today 的契约锚点：
-        调用点必须读 forever_companion 模块全局，直接 from .cycle import 的本地名
+        调用点必须读 forever_companion 模块全局，直接 from .core.cycle import 的本地名
         收不到 patch——拆分后各 mixin 的调用统一经此薄方法转发）。
         """
         source = cfg if cfg is not None else self._tide_cfg

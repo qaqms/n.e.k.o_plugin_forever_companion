@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from cycle import (  # noqa: E402
+from forever_companion.core.cycle import (  # noqa: E402
     TideConfigError,
     build_body_whisper,
     build_status_payload,
@@ -171,13 +171,13 @@ def test_resolve_today_auto_uses_system_local() -> None:
 
 
 def test_time_bucket_auto_no_crash() -> None:
-    from cycle import _time_bucket
+    from forever_companion.core.cycle import _time_bucket
     bucket = _time_bucket("auto")
     assert bucket in ("morning", "afternoon", "night")
 
 
 def test_month_calendar_marks_tide_days() -> None:
-    from cycle import build_month_calendar
+    from forever_companion.core.cycle import build_month_calendar
     months = build_month_calendar(
         today=date(2026, 8, 23),
         anchor=date(2026, 8, 1),
@@ -269,7 +269,7 @@ def test_derive_always_passes_validation() -> None:
 
 def test_before_start_displayed_as_luteal_label() -> None:
     """锚点前的日子：数据层 phase=before_start（注入短路），展示层标签=平稳期。"""
-    from cycle import _PHASE_LABELS_ZH, CALENDAR_PHASE_LABELS_ZH, build_status_payload
+    from forever_companion.core.cycle import _PHASE_LABELS_ZH, CALENDAR_PHASE_LABELS_ZH, build_status_payload
 
     state = _state(today=date(2026, 7, 30), anchor=date(2026, 8, 1))
     assert state.phase == "before_start"

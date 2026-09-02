@@ -15,7 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from fragments import (  # noqa: E402
+from forever_companion.core.fragments import (  # noqa: E402
     build_fragment_prompt,
     fragment_record,
     parse_fragment_response,

@@ -16,44 +16,22 @@ from typing import Any
 
 from plugin.sdk.plugin import Err, Ok, SdkError, llm_tool
 
-try:
-    from .affect import _MOOD_AFFECT_IMPULSES, _apply_affect_impulse, _current_affect
-    from .fragments import recall_fragments
-    from .journal import assemble_journal_entry, has_journal_content, journal_write
-    from .state import (
-        _ACTION_DEFAULT_MINUTES,
-        _COLD_ACTIONS,
-        _MOOD_ACTION_DEFAULT_LABELS,
-        _MOOD_ACTION_LABEL_KEYS,
-        _POSITIVE_ACTIONS,
-        _PROACTIVE_PAUSE_ACTIONS,
-        _TIMED_ACTIONS,
-        _LanlanShard,
-        _MoodState,
-        _now_utc,
-    )
-    from .stats import record_milestone
-except ImportError:  # pragma: no cover - 无父包上下文的兜底（同 __init__.py 惯例）
-    from affect import _MOOD_AFFECT_IMPULSES, _apply_affect_impulse, _current_affect  # type: ignore[no-redef]
-    from fragments import recall_fragments  # type: ignore[no-redef]
-    from journal import (  # type: ignore[no-redef]
-        assemble_journal_entry,
-        has_journal_content,
-        journal_write,
-    )
-    from state import (  # type: ignore[no-redef]
-        _ACTION_DEFAULT_MINUTES,
-        _COLD_ACTIONS,
-        _MOOD_ACTION_DEFAULT_LABELS,
-        _MOOD_ACTION_LABEL_KEYS,
-        _POSITIVE_ACTIONS,
-        _PROACTIVE_PAUSE_ACTIONS,
-        _TIMED_ACTIONS,
-        _LanlanShard,
-        _MoodState,
-        _now_utc,
-    )
-    from stats import record_milestone  # type: ignore[no-redef]
+from ..core.affect import _MOOD_AFFECT_IMPULSES, _apply_affect_impulse, _current_affect
+from ..core.fragments import recall_fragments
+from ..core.journal import assemble_journal_entry, has_journal_content, journal_write
+from ..core.state import (
+    _ACTION_DEFAULT_MINUTES,
+    _COLD_ACTIONS,
+    _MOOD_ACTION_DEFAULT_LABELS,
+    _MOOD_ACTION_LABEL_KEYS,
+    _POSITIVE_ACTIONS,
+    _PROACTIVE_PAUSE_ACTIONS,
+    _TIMED_ACTIONS,
+    _LanlanShard,
+    _MoodState,
+    _now_utc,
+)
+from ..core.stats import record_milestone
 
 # 宿主在 LLM 注入边界展开为当前会话的角色名；插件侧不得自行替换
 MASTER_NAME_TOKEN = "{MASTER_NAME}"

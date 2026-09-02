@@ -34,28 +34,16 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-try:
-    from .state import (
-        _CORE_CONFIG_CACHE_TTL,
-        _POSITIVE_ACTIONS,
-        _PROACTIVE_PAUSE_ACTIONS,
-        _TONE_COLD_LABELS,
-        _TONE_DIRECT_PROMPT,
-        _TONE_SCREEN_NUDGE_SEC,
-        _TONE_WARM_LABELS,
-        _LanlanShard,
-    )
-except ImportError:  # pragma: no cover - 无父包上下文的兜底（裸导入，同 cycle.py 先例）
-    from state import (  # type: ignore[no-redef]
-        _CORE_CONFIG_CACHE_TTL,
-        _POSITIVE_ACTIONS,
-        _PROACTIVE_PAUSE_ACTIONS,
-        _TONE_COLD_LABELS,
-        _TONE_DIRECT_PROMPT,
-        _TONE_SCREEN_NUDGE_SEC,
-        _TONE_WARM_LABELS,
-        _LanlanShard,
-    )
+from ..core.state import (
+    _CORE_CONFIG_CACHE_TTL,
+    _POSITIVE_ACTIONS,
+    _PROACTIVE_PAUSE_ACTIONS,
+    _TONE_COLD_LABELS,
+    _TONE_DIRECT_PROMPT,
+    _TONE_SCREEN_NUDGE_SEC,
+    _TONE_WARM_LABELS,
+    _LanlanShard,
+)
 
 JsonObject = dict[str, Any]
 

@@ -31,26 +31,15 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Any
 
-try:
-    from .state import (
-        _COLD_ACTIONS,
-        _POSITIVE_ACTIONS,
-        _STATS_DAYS_MAX,
-        _STATS_HEATMAP_MONTHS,
-        _STATS_MONTHS_MAX,
-        _now_utc,
-        _parse_iso_ts,
-    )
-except ImportError:  # pragma: no cover - 无父包上下文的兜底（裸导入，同 cycle.py 先例）
-    from state import (  # type: ignore[no-redef]
-        _COLD_ACTIONS,
-        _POSITIVE_ACTIONS,
-        _STATS_DAYS_MAX,
-        _STATS_HEATMAP_MONTHS,
-        _STATS_MONTHS_MAX,
-        _now_utc,
-        _parse_iso_ts,
-    )
+from .state import (
+    _COLD_ACTIONS,
+    _POSITIVE_ACTIONS,
+    _STATS_DAYS_MAX,
+    _STATS_HEATMAP_MONTHS,
+    _STATS_MONTHS_MAX,
+    _now_utc,
+    _parse_iso_ts,
+)
 
 JsonObject = dict[str, Any]
 

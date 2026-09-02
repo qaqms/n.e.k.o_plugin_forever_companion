@@ -200,7 +200,17 @@ def _load_package() -> types.ModuleType:
         submodule_search_locations=[str(ROOT)],
     )
     module = importlib.util.module_from_spec(spec)
+    # 显式补 __path__/__package__：spec_from_file_location 的包模块在部分
+    # importlib 路径下缺这两个属性会导致"attempted relative import with no
+    # known parent package"（子包 core/services/mixins 的相对导入需要它们）
+    module.__path__ = [str(ROOT)]  # type: ignore[attr-defined]
+    module.__package__ = "forever_companion"  # type: ignore[attr-defined]
     sys.modules["forever_companion"] = module
+    # pytest 的 importlib 模式会把插件根当 Package 节点，收集/ setup 时以
+    # 模块名 "__init__" 导入 ROOT/__init__.py（目录名含点、无父包 spec，
+    # 顶层相对导入会崩）。预注册同名模块指到已加载的包对象，import_path
+    # 命中 sys.modules 缓存直接返回，不再二次执行 __init__.py。
+    sys.modules.setdefault("__init__", module)
     spec.loader.exec_module(module)
     return module
 

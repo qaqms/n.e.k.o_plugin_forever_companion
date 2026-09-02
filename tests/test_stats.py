@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 
-from forever_companion import stats as st
+from forever_companion.core import stats as st
 
 
 def run(coro):

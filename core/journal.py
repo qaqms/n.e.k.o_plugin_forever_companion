@@ -14,22 +14,13 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
-try:
-    from .state import (
-        _JOURNAL_ENTRY_MAX_CHARS,
-        _JOURNAL_MAX_PAGES,
-        _JOURNAL_PAGE_MAX_ENTRIES,
-        _now_utc,
-        _parse_iso_ts,
-    )
-except ImportError:  # pragma: no cover - 无父包上下文的兜底（裸导入，同 cycle.py 先例）
-    from state import (  # type: ignore[no-redef]
-        _JOURNAL_ENTRY_MAX_CHARS,
-        _JOURNAL_MAX_PAGES,
-        _JOURNAL_PAGE_MAX_ENTRIES,
-        _now_utc,
-        _parse_iso_ts,
-    )
+from .state import (
+    _JOURNAL_ENTRY_MAX_CHARS,
+    _JOURNAL_MAX_PAGES,
+    _JOURNAL_PAGE_MAX_ENTRIES,
+    _now_utc,
+    _parse_iso_ts,
+)
 
 JsonObject = dict[str, Any]
 

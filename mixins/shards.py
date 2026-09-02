@@ -15,74 +15,38 @@ from typing import Any
 
 from plugin.sdk.plugin import Err, Ok, Result
 
-try:
-    from .affect import _MOOD_AFFECT_IMPULSES
-    from .cycle import (
-        compute_phase_state,
-        derive_cycle_params,
-        parse_anchor_date,
-        randomized_default_anchor,
-    )
-    from .journal import migrate_weekly_to_pages
-    from .state import (
-        _CURRENT_LANLAN_CACHE_TTL,
-        _DIARY_MAX_ENTRIES,
-        _JOURNAL_MAX_PAGES,
-        _KNOWN_CATGIRLS_CACHE_TTL,
-        _STORE_CYCLE,
-        _STORE_DIARY,
-        _STORE_LANLAN_INDEX,
-        _STORE_MOOD,
-        _STORE_PROACTIVE,
-        _STORE_SETTINGS,
-        _cfg_section,
-        _cycle_key,
-        _diary_key,
-        _journal_key,
-        _LanlanShard,
-        _mood_key,
-        _MoodState,
-        _parse_iso_ts,
-        _review_key,
-        _review_stats_key,
-        _stats_key,
-        _weekly_key,
-    )
-    from .stats import backfill_day
-except ImportError:  # pragma: no cover - 无父包上下文的兜底（同 __init__.py 惯例）
-    from affect import _MOOD_AFFECT_IMPULSES as _MOOD_AFFECT_IMPULSES  # type: ignore[no-redef]
-    from cycle import (  # type: ignore[no-redef]
-        compute_phase_state,
-        derive_cycle_params,
-        parse_anchor_date,
-        randomized_default_anchor,
-    )
-    from journal import migrate_weekly_to_pages  # type: ignore[no-redef]
-    from state import (  # type: ignore[no-redef]
-        _CURRENT_LANLAN_CACHE_TTL,
-        _DIARY_MAX_ENTRIES,
-        _JOURNAL_MAX_PAGES,
-        _KNOWN_CATGIRLS_CACHE_TTL,
-        _STORE_CYCLE,
-        _STORE_DIARY,
-        _STORE_LANLAN_INDEX,
-        _STORE_MOOD,
-        _STORE_PROACTIVE,
-        _STORE_SETTINGS,
-        _cfg_section,
-        _cycle_key,
-        _diary_key,
-        _journal_key,
-        _LanlanShard,
-        _mood_key,
-        _MoodState,
-        _parse_iso_ts,
-        _review_key,
-        _review_stats_key,
-        _stats_key,
-        _weekly_key,
-    )
-    from stats import backfill_day  # type: ignore[no-redef]
+from ..core.cycle import (
+    compute_phase_state,
+    derive_cycle_params,
+    parse_anchor_date,
+    randomized_default_anchor,
+)
+from ..core.journal import migrate_weekly_to_pages
+from ..core.state import (
+    _CURRENT_LANLAN_CACHE_TTL,
+    _DIARY_MAX_ENTRIES,
+    _JOURNAL_MAX_PAGES,
+    _KNOWN_CATGIRLS_CACHE_TTL,
+    _STORE_CYCLE,
+    _STORE_DIARY,
+    _STORE_LANLAN_INDEX,
+    _STORE_MOOD,
+    _STORE_PROACTIVE,
+    _STORE_SETTINGS,
+    _cfg_section,
+    _cycle_key,
+    _diary_key,
+    _journal_key,
+    _LanlanShard,
+    _mood_key,
+    _MoodState,
+    _parse_iso_ts,
+    _review_key,
+    _review_stats_key,
+    _stats_key,
+    _weekly_key,
+)
+from ..core.stats import backfill_day
 
 JsonObject = dict[str, Any]
 

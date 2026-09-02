@@ -12,18 +12,11 @@ from __future__ import annotations
 
 from typing import Any
 
-try:
-    from .state import (
-        _ASSIST_KEY_FIELDS,
-        _TONE_EMOTION_ALIASES,
-        _TONE_SLOT_PREFIXES,
-    )
-except ImportError:  # pragma: no cover - 无父包上下文的兜底（裸导入，同 cycle.py 先例）
-    from state import (  # type: ignore[no-redef]
-        _ASSIST_KEY_FIELDS,
-        _TONE_EMOTION_ALIASES,
-        _TONE_SLOT_PREFIXES,
-    )
+from ..core.state import (
+    _ASSIST_KEY_FIELDS,
+    _TONE_EMOTION_ALIASES,
+    _TONE_SLOT_PREFIXES,
+)
 
 JsonObject = dict[str, Any]
 

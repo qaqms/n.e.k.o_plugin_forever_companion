@@ -14,28 +14,14 @@ import inspect
 import time
 from typing import Any
 
-try:
-    from .cycle import TideConfigError, _time_bucket, build_body_whisper
-    from .journal import journal_due
-    from .state import (
-        _JOURNAL_DEFAULT_INTERVAL_DAYS,
-        _JOURNAL_INVITE_THROTTLE_SEC,
-        _LanlanShard,
-        _parse_iso_ts,
-    )
-except ImportError:  # pragma: no cover - 无父包上下文的兜底（同 __init__.py 惯例）
-    from cycle import (  # type: ignore[no-redef]
-        TideConfigError,
-        _time_bucket,
-        build_body_whisper,
-    )
-    from journal import journal_due  # type: ignore[no-redef]
-    from state import (  # type: ignore[no-redef]
-        _JOURNAL_DEFAULT_INTERVAL_DAYS,
-        _JOURNAL_INVITE_THROTTLE_SEC,
-        _LanlanShard,
-        _parse_iso_ts,
-    )
+from ..core.cycle import TideConfigError, _time_bucket, build_body_whisper
+from ..core.journal import journal_due
+from ..core.state import (
+    _JOURNAL_DEFAULT_INTERVAL_DAYS,
+    _JOURNAL_INVITE_THROTTLE_SEC,
+    _LanlanShard,
+    _parse_iso_ts,
+)
 
 # 宿主在 LLM 注入边界展开为当前会话的角色名；插件侧不得自行替换
 MASTER_NAME_TOKEN = "{MASTER_NAME}"

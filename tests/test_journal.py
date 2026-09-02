@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from journal import (  # noqa: E402
+from forever_companion.core.journal import (  # noqa: E402
     assemble_journal_entry,
     has_journal_content,
     journal_due,

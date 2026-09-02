@@ -20,10 +20,7 @@ from typing import Any
 
 from plugin.sdk.plugin import Ok
 
-try:
-    from .state import _PROACTIVE_PAUSE_ACTIONS as _PROACTIVE_PAUSE_ACTIONS
-except ImportError:  # pragma: no cover - 无父包上下文的兜底（同 __init__.py 惯例）
-    from state import _PROACTIVE_PAUSE_ACTIONS as _PROACTIVE_PAUSE_ACTIONS  # type: ignore[no-redef]
+from ..core.state import _PROACTIVE_PAUSE_ACTIONS as _PROACTIVE_PAUSE_ACTIONS
 
 JsonObject = dict[str, Any]
 

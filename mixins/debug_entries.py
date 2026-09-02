@@ -17,46 +17,25 @@ from typing import Any
 
 from plugin.sdk.plugin import Err, Ok, SdkError
 
-try:
-    from .fragments import build_fragment_prompt, parse_fragment_response
-    from .journal import journal_due
-    from .review import review_due
-    from .state import (
-        _FRAGMENT_DEFAULT_CONFIDENCE,
-        _FRAGMENT_DEFAULT_SLOT,
-        _JOURNAL_DEFAULT_INTERVAL_DAYS,
-        _TIMED_ACTIONS,
-        _TONE_COLD_LABELS,
-        _LanlanShard,
-        _stats_key,
-    )
-    from .stats import (
-        fabricate_demo_stats,
-        heatmap_payload,
-        new_stats,
-        summary_payload,
-    )
-    from .tone_slot import diagnose_slot_dormancy
-except ImportError:  # pragma: no cover - 无父包上下文的兜底（同 __init__.py 惯例）
-    from fragments import build_fragment_prompt, parse_fragment_response  # type: ignore[no-redef]
-    from journal import journal_due  # type: ignore[no-redef]
-    from review import review_due  # type: ignore[no-redef]
-    from state import (  # type: ignore[no-redef]
-        _FRAGMENT_DEFAULT_CONFIDENCE,
-        _FRAGMENT_DEFAULT_SLOT,
-        _JOURNAL_DEFAULT_INTERVAL_DAYS,
-        _TIMED_ACTIONS,
-        _TONE_COLD_LABELS,
-        _LanlanShard,
-        _stats_key,
-    )
-    from stats import (  # type: ignore[no-redef]
-        fabricate_demo_stats,
-        heatmap_payload,
-        new_stats,
-        summary_payload,
-    )
-    from tone_slot import diagnose_slot_dormancy  # type: ignore[no-redef]
+from ..core.fragments import build_fragment_prompt, parse_fragment_response
+from ..core.journal import journal_due
+from ..core.review import review_due
+from ..core.state import (
+    _FRAGMENT_DEFAULT_CONFIDENCE,
+    _FRAGMENT_DEFAULT_SLOT,
+    _JOURNAL_DEFAULT_INTERVAL_DAYS,
+    _TIMED_ACTIONS,
+    _TONE_COLD_LABELS,
+    _LanlanShard,
+    _stats_key,
+)
+from ..core.stats import (
+    fabricate_demo_stats,
+    heatmap_payload,
+    new_stats,
+    summary_payload,
+)
+from ..services.tone_slot import diagnose_slot_dormancy
 
 JsonObject = dict[str, Any]
 

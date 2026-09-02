@@ -11,22 +11,13 @@ from __future__ import annotations
 
 from typing import Any
 
-try:
-    from .state import (
-        _FRAGMENT_EXTRACTION_PROMPT,
-        _FRAGMENT_KINDS,
-        _FRAGMENT_NOTE_MAX_CHARS,
-        _FRAGMENT_NUDGE_KINDS,
-        _FRAGMENT_QUOTE_MAX_CHARS,
-    )
-except ImportError:  # pragma: no cover - 无父包上下文的兜底（裸导入，同 cycle.py 先例）
-    from state import (  # type: ignore[no-redef]
-        _FRAGMENT_EXTRACTION_PROMPT,
-        _FRAGMENT_KINDS,
-        _FRAGMENT_NOTE_MAX_CHARS,
-        _FRAGMENT_NUDGE_KINDS,
-        _FRAGMENT_QUOTE_MAX_CHARS,
-    )
+from .state import (
+    _FRAGMENT_EXTRACTION_PROMPT,
+    _FRAGMENT_KINDS,
+    _FRAGMENT_NOTE_MAX_CHARS,
+    _FRAGMENT_NUDGE_KINDS,
+    _FRAGMENT_QUOTE_MAX_CHARS,
+)
 
 JsonObject = dict[str, Any]
 

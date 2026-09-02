@@ -29,30 +29,17 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
-try:
-    from .state import (
-        _MOOD_ACTION_DEFAULT_LABELS,
-        _REVIEW_AFFECT_SAMPLES_MAX,
-        _REVIEW_COMPOSE_PROMPT,
-        _REVIEW_ENTRY_MAX_CHARS,
-        _REVIEW_MAX_ENTRIES,
-        _REVIEW_MIN_TURNS_FORCED,
-        _REVIEW_SAMPLE_TURNS,
-        _now_utc,
-        _parse_iso_ts,
-    )
-except ImportError:  # pragma: no cover - 无父包上下文的兜底（裸导入，同 cycle.py 先例）
-    from state import (  # type: ignore[no-redef]
-        _MOOD_ACTION_DEFAULT_LABELS,
-        _REVIEW_AFFECT_SAMPLES_MAX,
-        _REVIEW_COMPOSE_PROMPT,
-        _REVIEW_ENTRY_MAX_CHARS,
-        _REVIEW_MAX_ENTRIES,
-        _REVIEW_MIN_TURNS_FORCED,
-        _REVIEW_SAMPLE_TURNS,
-        _now_utc,
-        _parse_iso_ts,
-    )
+from .state import (
+    _MOOD_ACTION_DEFAULT_LABELS,
+    _REVIEW_AFFECT_SAMPLES_MAX,
+    _REVIEW_COMPOSE_PROMPT,
+    _REVIEW_ENTRY_MAX_CHARS,
+    _REVIEW_MAX_ENTRIES,
+    _REVIEW_MIN_TURNS_FORCED,
+    _REVIEW_SAMPLE_TURNS,
+    _now_utc,
+    _parse_iso_ts,
+)
 
 JsonObject = dict[str, Any]
 
