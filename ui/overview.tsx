@@ -127,8 +127,7 @@ function MoodChip(props: { t: TFunc; mood: Mood }) {
 
 // 当前心情卡（愉悦/活跃双条 + 大字心情词）——从 moodgauge.tsx 的卡片简化而来，
 // 总览版保留读数语义；两根条都与 0~100 分制同向：从左端填到当前分值位置
-//（愉悦度静息态 50 分 = 半条，与活跃度观感一致），愉悦度条上叠中心刻度
-// 标出"中性 50 分"位置，填充色按正负取暖琥珀/灰蓝
+//（愉悦度静息态 50 分 = 半条，与活跃度观感一致），填充色按正负取暖琥珀/灰蓝
 function MoodSummaryCard(props: { t: TFunc; mood: Mood }) {
   const { t, mood } = props
   const v = Math.max(-1, Math.min(1, Number(mood.affect && mood.affect.valence) || 0))
@@ -147,7 +146,6 @@ function MoodSummaryCard(props: { t: TFunc; mood: Mood }) {
             left="0%"
             width={`${vScore.toFixed(1)}%`}
             background={valenceBarColor(v)}
-            centerZero={true}
           />
           <MiniBar
             label={t("panel.mood.gauge.arousal", { defaultValue: "活跃度" })}
@@ -191,17 +189,17 @@ function CompanionSignalsCard(props: { t: TFunc; weekActivity: number; reviewBri
   )
 }
 
-// 心情卡的小进度条（label + 数值 + 一根条）。centerZero=true 时画中心刻度
-// （愉悦度上标出中性 50 分的位置；填充从左端到当前分值）；填充给最小可见宽度，
-// 零值时也能看到一个色点，不至于整条灰掉
-function MiniBar(props: { label: string; valueText: string; left: string; width: string; background: string; centerZero?: boolean }) {
-  const { label, valueText, left, width, background, centerZero } = props
+// 心情卡的小进度条（label + 数值 + 一根条，填充从左端到当前分值）；填充给最小
+// 可见宽度，零值时也能看到一个色点，不至于整条灰掉。
+// 不画中心刻度线：愉悦度静息态恰好 50 分，填充右端与中心刻度重叠会显出一条
+// 深色竖线，看起来像渲染异常（刻度语义已由右侧读数承担）
+function MiniBar(props: { label: string; valueText: string; left: string; width: string; background: string }) {
+  const { label, valueText, left, width, background } = props
   const minWidth = 3 // px：零值时也能看到一个色点，不至于整条灰掉
   return (
     <div className="tm-ov-minibar">
       <span className="tm-ov-minibar-label">{label}</span>
       <div className="tm-ov-minibar-track">
-        {centerZero ? <div className="tm-ov-minibar-zero" /> : null}
         <div className="tm-ov-minibar-fill" style={{ left, width, minWidth: `${minWidth}px`, background }} />
       </div>
       <span className="tm-ov-minibar-value">{valueText}</span>

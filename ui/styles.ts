@@ -205,14 +205,7 @@ export const PANEL_STYLES = `
   position: relative; height: 8px; border-radius: 999px; overflow: hidden;
   background: rgba(148, 163, 184, 0.22);
 }
-.tm-ov-minibar-fill { position: absolute; top: 0; bottom: 0; border-radius: 999px; transition: left 0.3s ease, width 0.3s ease; }
-/* 双向条的中心零点刻度：愉悦度左负右正，静息态时填充缩成一个点也不失语义 */
-.tm-ov-minibar-zero {
-  position: absolute; left: 50%; top: 0; bottom: 0; z-index: 1;
-  width: 1.5px; margin-left: -0.75px;
-  background: rgba(100, 116, 139, 0.55);
-}
-.tm-ov-minibar-fill { z-index: 2; }
+.tm-ov-minibar-fill { position: absolute; top: 0; bottom: 0; border-radius: 999px; z-index: 2; transition: left 0.3s ease, width 0.3s ease; }
 .tm-ov-diary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .tm-ov-tile {
   display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
