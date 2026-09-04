@@ -35,7 +35,6 @@ from .state import (
     _COLD_ACTIONS,
     _POSITIVE_ACTIONS,
     _STATS_DAYS_MAX,
-    _STATS_HEATMAP_MONTHS,
     _STATS_MONTHS_MAX,
     _now_utc,
     _parse_iso_ts,
@@ -347,33 +346,60 @@ def summary_payload(stats: JsonObject, today: str) -> JsonObject:
     }
 
 
-def heatmap_payload(stats: JsonObject, today: str) -> JsonObject:
-    """热力图数据：最近 _STATS_HEATMAP_MONTHS 个月（含当月）逐日 {date, turns, tone, valence}。
+def _heat_empty() -> JsonObject:
+    """热力图空白视图（无任何互动记录 / today 非法时）：start/end 留空，面板渲染空态。"""
+    return {"months": [], "days": [], "years": [], "year": 0, "start": "", "end": ""}
 
-    tone = 当天主导语气 label（次数最多的；平票按 happy>neutral>surprised>sad>angry 排），
-    valence = 当天心情均值（无采样为 None）。面板按 turns 分档染色、悬停显示明细。
-    只下发窗口内存在的**已完结天**（今天的数据未统计完，明天才亮格；缺失天由面板留白）。
+
+def heatmap_payload(stats: JsonObject, today: str, year: int | str | None = None) -> JsonObject:
+    """热力图数据（GitHub 式**日历年视图**）：默认当年，可指定已度过的年份。
+
+    格子起点 = max(首条互动日 first_seen, 视图年 1 月 1 日)——相识之前的日子
+    不铺格（新装只有几格，随天数生长）；终点 = min(视图年 12 月 31 日, 昨天)
+    （今天的数据未统计完，明天才亮格）。years 从当年降序回退到最早明细所在年
+    （逐日明细只保留 _STATS_DAYS_MAX 天，通常至多跨 3 个自然年）。
+    days 只含窗口内的**已完结天**：tone = 当天主导语气（平票按
+    happy>neutral>surprised>sad>angry），valence = 当天心情均值（无采样 None）。
     """
     try:
         anchor = date.fromisoformat(today)
     except ValueError:
-        return {"months": [], "days": []}
-    # 窗口起点 = 当月往回 _STATS_HEATMAP_MONTHS - 1 个月（含当月共 N 个月）。
-    # 月减法不用 timedelta（31 天近似会跨月漂移）：直接按 (year, month) 整数回退
-    total_months = anchor.year * 12 + (anchor.month - 1) - (_STATS_HEATMAP_MONTHS - 1)
-    start_month = date(total_months // 12, total_months % 12 + 1, 1)
-    month_keys = []
-    cursor = start_month
-    while cursor <= anchor:
-        month_keys.append(cursor.isoformat()[:7])
-        next_month = cursor.month + 1
-        cursor = date(cursor.year + (next_month > 12), (next_month - 1) % 12 + 1, 1)
+        return _heat_empty()
+    # 起点 = first_seen 与最早明细日中的更早者（首装当天还没有已完结天时，
+    # first_seen 就是唯一依据；明细被保留窗口淘汰后以存量最早日为起点）
+    first: date | None = None
+    candidates = [str(stats.get("first_seen") or "")[:10]]
+    day_keys = sorted(day for day, _bucket in _iter_days(stats))
+    if day_keys:
+        candidates.append(day_keys[0])
+    for cand in candidates:
+        try:
+            parsed = date.fromisoformat(cand)
+        except ValueError:
+            continue
+        if first is None or parsed < first:
+            first = parsed
+    if first is None:
+        return _heat_empty()
+    years = list(range(anchor.year, first.year - 1, -1))
+    sel = anchor.year
+    if year is not None and str(year).strip().isdigit() and int(year) in years:
+        sel = int(year)
+    # 视图窗口：自然年整段，再被 first_seen（左）与昨天（右）截断
+    start = max(date(sel, 1, 1), first)
+    end = min(date(sel, 12, 31), anchor - timedelta(days=1))
+    start_s, end_s = start.isoformat(), end.isoformat()
+    month_keys: list[str] = []
+    if start <= end:
+        cursor = date(start.year, start.month, 1)
+        while cursor <= end:
+            month_keys.append(cursor.isoformat()[:7])
+            next_month = cursor.month + 1
+            cursor = date(cursor.year + (next_month > 12), (next_month - 1) % 12 + 1, 1)
     days_out: list[JsonObject] = []
     tone_order = {"happy": 0, "neutral": 1, "surprised": 2, "sad": 3, "angry": 4}
     for day, bucket in sorted(_iter_days(stats)):
-        if day < month_keys[0]:
-            continue
-        if day >= today:  # 今天尚未过完，数据不完整，明天才进热力图
+        if day < start_s or day > end_s:
             continue
         tone = ""
         tone_map = bucket.get("tone") if isinstance(bucket.get("tone"), dict) else {}
@@ -390,7 +416,8 @@ def heatmap_payload(stats: JsonObject, today: str) -> JsonObject:
             "tone": tone,
             "valence": round(valence, 2) if valence is not None else None,
         })
-    return {"months": month_keys, "days": days_out}
+    return {"months": month_keys, "days": days_out, "years": years, "year": sel,
+            "start": start_s, "end": end_s}
 
 
 def month_view(stats: JsonObject, month: str, *, diary: list[JsonObject] | None = None) -> JsonObject:

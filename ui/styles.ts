@@ -1034,6 +1034,12 @@ export const PANEL_STYLES = `
   --tm-gh-gap: 1.5px;
   display: inline-flex; flex-direction: column; gap: 1px;
 }
+/* 窄网格弹性公式换档（热力图改日历年视图后引入）：窗口列数不再固定 49，
+   格子少时（萌新初期 / 去年整年不足 12 个月）沿用 /49 会把格压到 7px 下限、
+   整图缩成左上一窄条。按实际列数换分母：≤12 周走 /12、≤26 周走 /26，
+   使格子放大到 11px 顶格并仍由 49 档兜底整年视图 */
+.tm-gh-w26 { --tm-gh-cell: clamp(7px, calc((100cqw - 121px) / 26), 11px); }
+.tm-gh-w12 { --tm-gh-cell: clamp(7px, calc((100cqw - 121px) / 12), 11px); }
 /* 热力图卡的紧凑间距（第三档·极限）：header 6/0 + body 4/6 —— 上下缓冲压到
    视觉贴边（卡片有圆角边框做天然边界，不需要大 padding 撑呼吸感）。
    月报/徽章卡维持默认 —— 阅读型内容需要呼吸感 */

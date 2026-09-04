@@ -1,5 +1,5 @@
 // 时光页（1.1.0）· 相处统计：数字摘要（hero 大数字 + 纪念日进度环）
-// + 相处热力图（近 12 个月双层表达；无数据时也默认铺满日历网格，GitHub 式）
+// + 相处热力图（GitHub 式日历年视图：格子从首条互动日长起，非当年可 ‹ › 翻年份）
 // + 我们的一月（月报，可翻历史月份）+ 相处徽章（同页最底部的收藏墙）。
 // hosted-tsx 约束：唯一 export 排在任何 JSX 闭合标签之前；辅助组件放文件尾部靠函数声明提升
 import { Card, EmptyState, StatusBadge, useRef } from "@neko/plugin-ui"
@@ -16,10 +16,11 @@ export function MomentPane(props: {
   monthAvailable: string[]
   monthLoading: boolean
   onPickMonth: (month: string) => void
+  onPickYear: (year: string) => void
 }) {
-  const { t, lanlan, summary, badges, heatmap, month, monthAvailable, monthLoading, onPickMonth } = props
+  const { t, lanlan, summary, badges, heatmap, month, monthAvailable, monthLoading, onPickMonth, onPickYear } = props
 
-  // 不做整体空态早退：无数据时热力图铺默认网格、徽章全部锁定占位，
+  // 不做整体空态早退：热力图无数据时卡内渲染空态、徽章全部锁定占位，
   // 页面结构与有数据时完全一致（GitHub 式），装完即知会长成什么样
   return (
     <div className="tm-pane">
@@ -30,7 +31,7 @@ export function MomentPane(props: {
 
       {/* ---- 相处热力图 ---- */}
       <Card title={t("panel.stats.heatmap", { defaultValue: "相处热力图" })} className="tm-heat-card">
-        <HeatGrid t={t} heatmap={heatmap} />
+        <HeatGrid t={t} heatmap={heatmap} onPickYear={onPickYear} />
       </Card>
 
       {/* ---- 我们的一月 ---- */}
@@ -339,29 +340,36 @@ function badgeLabel(t: TFunc, badge: StatsBadge): string {
   return map[id] || id
 }
 
-// 热力图（GitHub 贡献图布局）：列 = 周（近 12 个月固定窗口 ≈ 53 列），行 = 星期几（周一起 7 行）。
-// 窗口永远固定为 12 个月：数据不足时左侧照常铺空格——列数不随数据起点缩水
-// （否则只有一两个月数据时格子会被 cqw 弹性公式压到 7px 下限，整图缩成一窄条）。
+// 热力图（GitHub 贡献图布局 · 日历年视图）：列 = 周，行 = 星期几（周一起 7 行）。
+// 窗口由后端下发（start/end）：起点 = max(首条互动日, 视图年 1 月 1 日)——相识之前
+// 的日子不铺格，新装只有几格、随天数生长；终点 = min(12 月 31 日, 昨天)，今天明天才亮格。
+// 视图年不是当年时可 ‹ › 翻年份（复用月报导航样式，仅一年数据时隐藏）。
+// 窄网格切换弹性公式档位（tm-gh-w12/w26），格子不被 /49 公式压到 7px 下限。
 // 月份标签只标包含新月首日的那一列（顶部），左侧标一/三/五。
-// 格子深浅（4 档蓝）= 当天互动轮数；无记录天 = 浅灰格；今天之后不渲染（透明占位保持列高）。
-// 无数据时同样铺满近 12 个月的日历格（GitHub 式空网格）——亮起来只是时间问题
+// 格子深浅（4 档蓝）= 当天互动轮数；窗口内无记录天 = 浅灰格；窗口外不渲染（透明占位保持列高）。
+// 还没有可展示日子时卡内渲染空态，不再铺默认网格
 // hosted-tsx 无 SVG：格子用 div + 档位色；悬停 Tooltip 显示当日明细
-function HeatGrid(props: { t: TFunc; heatmap: Heatmap | null }) {
-  const { t, heatmap } = props
-  const real: HeatDay[] = (heatmap && heatmap.days) || []
-  const days: HeatDay[] = real.length ? real : buildCalendarDays()
+function HeatGrid(props: { t: TFunc; heatmap: Heatmap | null; onPickYear: (year: string) => void }) {
+  const { t, heatmap, onPickYear } = props
+  const days: HeatDay[] = (heatmap && heatmap.days) || []
+  const years: number[] = (heatmap && heatmap.years) || []
+  const curYear = Number((heatmap && heatmap.year) || 0)
+  const start = String((heatmap && heatmap.start) || "")
+  const end = String((heatmap && heatmap.end) || "")
   const byDate: Record<string, HeatDay> = {}
   days.forEach((day) => {
     if (day && day.date) byDate[String(day.date)] = day
   })
-  // 窗口锚定日历（近 12 个月），真实数据只是往里填格
-  const windowDays = buildCalendarDays()
-  const firstDate = windowDays.length ? String(windowDays[0].date) : ""
-  const lastDate = windowDays.length ? String(windowDays[windowDays.length - 1].date) : ""
-  const weeks = buildWeekColumns(firstDate, lastDate).map((week) => ({
+  const showGrid = !!start && !!end && start <= end
+  const weekList = showGrid ? buildWeekColumns(start, end) : []
+  const weeks = weekList.map((week) => ({
     ...week,
     monthLabel: week.monthNo ? t("panel.stats.monthShort", { defaultValue: "{m}月" }).replace("{m}", String(week.monthNo)) : "",
   }))
+  const sizeClass = weekList.length <= 12 ? " tm-gh-w12" : weekList.length <= 26 ? " tm-gh-w26" : ""
+  const idx = years.indexOf(curYear)
+  const prevYear = idx >= 0 && idx < years.length - 1 ? String(years[idx + 1]) : ""
+  const nextYear = idx > 0 ? String(years[idx - 1]) : ""
   const wdLabels = [
     t("panel.stats.heatWd1", { defaultValue: "一" }),
     "",
@@ -371,10 +379,43 @@ function HeatGrid(props: { t: TFunc; heatmap: Heatmap | null }) {
     "",
     "",
   ]
+  if (!showGrid) {
+    return (
+      <EmptyState
+        title={t("panel.stats.heatEmpty", { defaultValue: "还没有可展示的日子" })}
+        description={t("panel.stats.heatEmptySub", { defaultValue: "互动过的日子会在这里亮起来。" })}
+      />
+    )
+  }
   return (
     <div>
+      {years.length > 1 ? (
+        <div className="tm-month-nav">
+          <button
+            type="button"
+            className="tm-month-btn"
+            disabled={!prevYear}
+            onClick={() => prevYear && onPickYear(prevYear)}
+          >
+            ‹
+          </button>
+          <span className="tm-month-label">
+            {curYear && curYear === years[0]
+              ? t("panel.stats.heatYearThis", { defaultValue: "今年" })
+              : t("panel.stats.heatYearN", { defaultValue: "{y} 年" }).replace("{y}", String(curYear))}
+          </span>
+          <button
+            type="button"
+            className="tm-month-btn"
+            disabled={!nextYear}
+            onClick={() => nextYear && onPickYear(nextYear)}
+          >
+            ›
+          </button>
+        </div>
+      ) : null}
       <div className="tm-heat-scroll">
-        <div className="tm-gh">
+        <div className={`tm-gh${sizeClass}`}>
           <div className="tm-gh-monthrow">
             <span className="tm-gh-corner" />
             {weeks.map((week) => (
@@ -414,9 +455,7 @@ function HeatGrid(props: { t: TFunc; heatmap: Heatmap | null }) {
       </div>
       <div className="tm-heat-footer">
         <span className="tm-heat-note">
-          {real.length
-            ? t("panel.stats.heatNote", { defaultValue: "颜色深浅 = 当天互动轮数；悬停查看明细" })
-            : t("panel.stats.heatEmptySub", { defaultValue: "互动过的日子会在这里亮起来。" })}
+          {t("panel.stats.heatNote", { defaultValue: "颜色深浅 = 当天互动轮数；悬停查看明细" })}
         </span>
         <div className="tm-heat-legend">
           <span className="tm-heat-legend-label">{t("panel.stats.heatLess", { defaultValue: "少" })}</span>
@@ -478,21 +517,6 @@ function buildWeekColumns(firstDate: string, lastDate: string): WeekColumn[] {
 }
 
 type WeekColumn = { key: string; cells: string[]; monthNo: number }
-
-// 近 12 个月的占位日历（GitHub 式空网格）：本月 1 号往前推 11 个月到昨天（今天未过完不显示），
-// 每天 turns=0、无心情采样——格子全走 lv0 灰底
-function buildCalendarDays(): HeatDay[] {
-  const out: HeatDay[] = []
-  const today = new Date()
-  const end = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1)
-  const start = new Date(today.getFullYear(), today.getMonth() - 11, 1)
-  const cursor = new Date(start.getTime())
-  while (cursor.getTime() <= end.getTime()) {
-    out.push({ date: isoOfDate(cursor), turns: 0, valence: null })
-    cursor.setDate(cursor.getDate() + 1)
-  }
-  return out
-}
 
 // 月报导航：左右翻月 + 月份标题（历史封卷月固定，当月实时）
 function MonthNav(props: {

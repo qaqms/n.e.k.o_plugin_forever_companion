@@ -286,6 +286,8 @@
   "panel.stats.heatmap": "Mapa de calor",
   "panel.stats.heatEmpty": "Nada que mostrar aún",
   "panel.stats.heatEmptySub": "Los días que compartan se iluminarán aquí.",
+  "panel.stats.heatYearThis": "Este año",
+  "panel.stats.heatYearN": "{y}",
   "panel.stats.heatLess": "menos",
   "panel.stats.heatMore": "más",
   "panel.stats.heatWd1": "Lun",

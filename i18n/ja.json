@@ -286,6 +286,8 @@
   "panel.stats.heatmap": "ヒートマップ",
   "panel.stats.heatEmpty": "表示できる日がまだありません",
   "panel.stats.heatEmptySub": "やり取りがあった日がここで光ります。",
+  "panel.stats.heatYearThis": "今年",
+  "panel.stats.heatYearN": "{y}年",
   "panel.stats.heatLess": "少",
   "panel.stats.heatMore": "多",
   "panel.stats.heatWd1": "月",

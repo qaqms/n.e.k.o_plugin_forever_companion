@@ -168,7 +168,17 @@ export type HeatDay = {
   valence?: number | null
 }
 
-export type Heatmap = { months?: string[]; days?: HeatDay[] }
+// 热力图（get_stats heatmap）：GitHub 式日历年视图。start/end = 本年视图网格边界
+// （起点已被首条互动日截断，start > end 表示还没有可展示的日子）；
+// years = 可选择的年份（当年降序回退到最早明细年）；year = 当前视图年份
+export type Heatmap = {
+  months?: string[]
+  days?: HeatDay[]
+  years?: number[]
+  year?: number
+  start?: string
+  end?: string
+}
 
 // 月报（get_stats month）：voice = 本月声音（她当月写过的最长一条手记摘录）
 export type MonthVoice = { ts?: string; mood?: string; entry?: string }

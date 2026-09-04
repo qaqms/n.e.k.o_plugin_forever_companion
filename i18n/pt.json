@@ -286,6 +286,8 @@
   "panel.stats.heatmap": "Mapa de calor",
   "panel.stats.heatEmpty": "Nada para mostrar ainda",
   "panel.stats.heatEmptySub": "Os dias de convivência vão brilhar aqui.",
+  "panel.stats.heatYearThis": "Este ano",
+  "panel.stats.heatYearN": "{y}",
   "panel.stats.heatLess": "menos",
   "panel.stats.heatMore": "mais",
   "panel.stats.heatWd1": "Seg",

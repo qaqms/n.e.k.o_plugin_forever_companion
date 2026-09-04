@@ -327,10 +327,13 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     }
   }
 
-  async function onLoadStats(month?: string) {
+  async function onLoadStats(month?: string, year?: string) {
     setStatsLoading(true)
     try {
-      const payload = unwrapCallResult(await props.api.call("get_stats", month ? { month } : {}))
+      const args: Record<string, string> = {}
+      if (month) args.month = month
+      if (year) args.year = year
+      const payload = unwrapCallResult(await props.api.call("get_stats", args))
       const r = (payload || {}) as Record<string, any>
       setHeatData((r.heatmap || {}) as Heatmap)
       setMonthData((r.month || null) as MonthReport | null)
@@ -564,6 +567,10 @@ export default function Panel(props: PluginSurfaceProps<State>) {
               monthAvailable={monthList}
               monthLoading={statsLoading}
               onPickMonth={(month: string) => onLoadStats(month)}
+              // 翻年份时保住当前正在看的月份，月报不跟着跳回当月
+              onPickYear={(year: string) =>
+                onLoadStats(String((monthData && monthData.month) || "") || undefined, year)
+              }
             />
           ) : null}
           {activeTab === "settings" ? (

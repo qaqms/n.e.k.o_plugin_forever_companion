@@ -136,11 +136,9 @@ _POSITIVE_ACTIONS = frozenset({"warm_current", "spring_tide"})
 _COLD_ACTIONS = frozenset({
     "ebb_tide", "sea_fog", "shallow_reef", "storm_surge", "seek_harbor",
 })
-# days 逐日聚合的保留上限：超出窗口的旧天丢弃（徽章/累计总数即时重算不受影响，
-# 热力图窗口 12 个月远小于此上限；上限防的是"每天都聊"极端用户的 Store 膨胀）
+# days 逐日聚合的保留上限：超出窗口的旧天丢弃（徽章/累计总数即时重算不受影响；
+# 热力图年份选择的回退深度也受此约束，上限防的是"每天都聊"极端用户的 Store 膨胀）
 _STATS_DAYS_MAX = 730
-# 热力图窗口：最近 N 个月（含当月）
-_STATS_HEATMAP_MONTHS = 12
 # 月报封卷的保留上限：超出淘汰最旧（与个人日记/我的日记 52 篇同量级）
 _STATS_MONTHS_MAX = 24
 

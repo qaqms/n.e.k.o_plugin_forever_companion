@@ -286,6 +286,8 @@
   "panel.stats.heatmap": "Heatmap",
   "panel.stats.heatEmpty": "Nothing to show yet",
   "panel.stats.heatEmptySub": "Days you interacted will light up here.",
+  "panel.stats.heatYearThis": "This year",
+  "panel.stats.heatYearN": "{y}",
   "panel.stats.heatLess": "Less",
   "panel.stats.heatMore": "More",
   "panel.stats.heatWd1": "Mon",

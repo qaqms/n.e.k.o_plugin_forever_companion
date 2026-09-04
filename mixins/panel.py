@@ -1164,17 +1164,25 @@ class PanelEntriesMixin:
                     "type": "string",
                     "description": "月报目标月份（YYYY-MM）；留空返回最近一个有数据的月份",
                 },
+                "year": {
+                    "type": "string",
+                    "description": "热力图年份视图（YYYY）；留空或非法年份回到当年",
+                },
             },
         },
     )
-    async def get_stats(self, month: str = "", **_: Any):
-        """「时光」页签的数据入口：热力图全量 + 指定月月报（数据量大，按需拉取）。"""
+    async def get_stats(self, month: str = "", year: str = "", **_: Any):
+        """「时光」页签的数据入口：热力图（日历年视图）+ 指定月月报（数据量大，按需拉取）。"""
         lanlan, shard = await self._current_shard_async()
         today = self._stats_today()
+        # 年份参数按字符串下发（面板无数字输入组件）；非法值交给 heatmap_payload 回落当年
+        year_val = str(year).strip()
         payload: JsonObject = {
             "lanlan": lanlan,
             "today": today,
-            "heatmap": heatmap_payload(shard.stats, today),
+            "heatmap": heatmap_payload(
+                shard.stats, today, year=int(year_val) if year_val.isdigit() else None
+            ),
         }
         # 月报：显式指定月份 → 该月；留空 → 当月（有 days 数据）或最近一个已封卷月
         target = str(month or "").strip()

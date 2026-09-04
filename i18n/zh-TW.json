@@ -286,6 +286,8 @@
   "panel.stats.heatmap": "相處熱力圖",
   "panel.stats.heatEmpty": "還沒有可展示的日子",
   "panel.stats.heatEmptySub": "互動過的日子會在這裡亮起來。",
+  "panel.stats.heatYearThis": "今年",
+  "panel.stats.heatYearN": "{y} 年",
   "panel.stats.heatLess": "少",
   "panel.stats.heatMore": "多",
   "panel.stats.heatWd1": "一",

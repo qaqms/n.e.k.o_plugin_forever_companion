@@ -140,21 +140,65 @@ def test_badges_payload_unlock_progression() -> None:
     assert by_id["first_diary"]["unlocked"] is True
 
 
-def test_heatmap_payload_window_and_tone() -> None:
+def test_heatmap_payload_year_view_window_and_tone() -> None:
     stats = _seed_stats()
     heat = st.heatmap_payload(stats, "2026-09-03")
-    # 窗口 = 最近 12 个月（含当月），末位是当月
-    assert len(heat["months"]) == 12
-    assert heat["months"][-1] == "2026-09"
+    # 默认当年视图：起点被首条互动日截断（不再是"往前铺 12 个月空格"）
+    assert heat["years"] == [2026]
+    assert heat["year"] == 2026
+    assert heat["start"] == "2026-08-30"
+    # 终点 = 昨天：今天（09-03）的数据未统计完，明天才亮格
+    assert heat["end"] == "2026-09-02"
+    assert heat["months"] == ["2026-08", "2026-09"]
     days = {d["date"]: d for d in heat["days"]}
     assert days["2026-08-30"]["turns"] == 2
-    # 主导语气落在 09-01；今天（09-03）未过完不进热力图，明天才亮格
+    # 主导语气落在 09-01；09-03 被窗口截掉
     assert days["2026-09-01"]["tone"] == "happy"
     assert "2026-09-03" not in days
-    # 窗口起点之前的旧月份被裁掉
-    heat_old = st.heatmap_payload(stats, "2026-09-03")
-    earliest = heat_old["months"][0]
-    assert all(d["date"] >= earliest for d in heat_old["days"])
+    assert all(d["date"] >= heat["start"] and d["date"] <= heat["end"] for d in heat["days"])
+
+
+def test_heatmap_payload_multi_year_navigation() -> None:
+    stats = st.new_stats()
+    stats["first_seen"] = "2024-12-20T08:00:00+00:00"
+    for day in ("2024-12-20", "2025-06-01", "2026-08-01"):
+        stats = st.record_turn(stats, day)
+    heat = st.heatmap_payload(stats, "2026-09-03")
+    # years：当年降序回退到首条互动所在年
+    assert heat["years"] == [2026, 2025, 2024]
+    # 默认当年：起点不早于视图年 1 月 1 日，2024/2025 的天被截出窗口
+    assert heat["start"] == "2026-01-01"
+    assert heat["end"] == "2026-09-02"
+    assert [d["date"] for d in heat["days"]] == ["2026-08-01"]
+    # 翻到首互动年：网格从 first_seen 长起（12-20 → 12-31 整段可铺格）
+    h24 = st.heatmap_payload(stats, "2026-09-03", year=2024)
+    assert h24["year"] == 2024
+    assert h24["start"] == "2024-12-20" and h24["end"] == "2024-12-31"
+    assert [d["date"] for d in h24["days"]] == ["2024-12-20"]
+    # 中间整年：视图就是完整自然年
+    h25 = st.heatmap_payload(stats, "2026-09-03", year=2025)
+    assert h25["start"] == "2025-01-01" and h25["end"] == "2025-12-31"
+    # 非法/越界年份回落当年；字符串入参同样可用（面板传 YYYY 字符串）
+    assert st.heatmap_payload(stats, "2026-09-03", year=1999)["year"] == 2026
+    assert st.heatmap_payload(stats, "2026-09-03", year="2025")["year"] == 2025
+
+
+def test_heatmap_payload_empty_states() -> None:
+    # 全新安装（无任何互动痕迹）：空白视图，面板渲染空态而非铺默认网格
+    empty = st.heatmap_payload(st.new_stats(), "2026-09-03")
+    assert empty["years"] == [] and empty["start"] == "" and empty["days"] == []
+    # 安装当天就有互动：还没有"已完结天"（今天明天才亮格）——
+    # start > end，面板同样空态，但年份选择已就位
+    stats = st.new_stats()
+    stats = st.record_turn(stats, "2026-09-03")
+    heat = st.heatmap_payload(stats, "2026-09-03")
+    assert heat["years"] == [2026] and heat["year"] == 2026
+    assert heat["start"] == "2026-09-03" and heat["end"] == "2026-09-02"
+    assert heat["months"] == [] and heat["days"] == []
+    # 次日再看：第一天亮格，起点仍是首条互动日
+    next_day = st.heatmap_payload(stats, "2026-09-04")
+    assert next_day["start"] == "2026-09-03" and next_day["end"] == "2026-09-03"
+    assert [d["date"] for d in next_day["days"]] == ["2026-09-03"]
 
 
 def test_month_view_and_voice() -> None:

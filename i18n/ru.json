@@ -286,6 +286,8 @@
   "panel.stats.heatmap": "Тепловая карта",
   "panel.stats.heatEmpty": "Пока нечего показать",
   "panel.stats.heatEmptySub": "Дни вашего общения засветятся здесь.",
+  "panel.stats.heatYearThis": "Этот год",
+  "panel.stats.heatYearN": "{y}",
   "panel.stats.heatLess": "меньше",
   "panel.stats.heatMore": "больше",
   "panel.stats.heatWd1": "Пн",
