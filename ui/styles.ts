@@ -177,7 +177,8 @@ export const PANEL_STYLES = `
 .tm-status-right { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 
 /* ---- 精简状态条（0.9.0）：她是谁 · 一句话状态 · 心情胶囊 · 开关 ---- */
-.tm-statusbar-slim { padding: 10px 22px; gap: 12px; }
+/* row-gap 5px：提示行换行后与主行的距离（column-gap 维持 12px） */
+.tm-statusbar-slim { padding: 10px 22px; gap: 5px 12px; }
 .tm-status-main {
   display: inline-flex; align-items: center; gap: 10px; min-width: 0;
   padding: 4px 10px 4px 6px; border: none; border-radius: 999px; cursor: pointer;
@@ -311,6 +312,18 @@ export const PANEL_STYLES = `
 
 .tm-warnstrip { padding: 8px 16px 0; }
 .tm-warnstrip .neko-alert { padding: 5px 12px; border-radius: var(--radius-sm); font-size: 12.5px; line-height: 1.5; }
+/* 关闭状态细提示（1.1.7）：状态条卡片内第二行（.tm-statusbar 本就 flex-wrap，
+   整宽子元素自动换行）。替代旧的两条独立 Alert 条与卡片间悬浮提示行——
+   提示收进卡片内部后，状态条与内容区之间不再有任何夹缝元素 */
+.tm-status-hints { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 2px 18px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.tm-offhint-item { display: inline-flex; align-items: center; gap: 6px; }
+.tm-offhint-dot { opacity: 0.6; }
+.tm-offhint-link {
+  background: none; border: none; padding: 0; cursor: pointer;
+  font-size: 12px; color: var(--primary); text-decoration: underline; text-underline-offset: 2px;
+}
+.tm-offhint-link:hover { opacity: 0.8; }
+.tm-offhint-link:disabled { cursor: default; opacity: 0.6; }
 
 .tm-body { flex: 1; display: flex; min-height: 0; }
 .tm-tabs {

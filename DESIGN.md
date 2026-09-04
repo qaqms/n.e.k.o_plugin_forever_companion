@@ -280,6 +280,20 @@ zh-CN / en i18n
 - `get_stats` 入口新增 `year` 参数（YYYY 字符串，非法/越界回落当年）；
   翻年份时面板保住当前正在看的月份，月报不跟着跳回当月
 
+### 1.1.7：关闭状态提示并入状态条卡内
+
+- 旧行为：模拟关闭/情绪关闭各渲染一条页级独立 Alert 条（tm-warnstrip），
+  带边框底色与外边距，夹在状态条与内容区之间把页面拦腰切割，且与
+  状态条"已关闭"徽标、右上角开关按钮信息四重重复
+- 新行为：提示收进状态条卡片内部作第二行（.tm-statusbar 本就 flex-wrap，
+  整宽子元素自动换行）：「模拟已关闭 · 点击开启」（行内链直接触发总开关，
+  走原确认弹窗）、「情绪系统已关闭 · 去「情绪」页开启」（跳转情绪页签）；
+  两条同现时并排自动换行；无提示时状态条与旧版完全一致
+- 报错 danger Alert 保留原样（真错误需要醒目）；i18n 删
+  panel.mood.disabledWarn、增 4 键（panel.offHintState/Action、
+  panel.moodOffHintState/Action，8 语言）；旧 panel.disabledHint 本就
+  只存在于代码 defaultValue，无 i18n 键残留
+
 ## Out of Scope
 
 - 情绪日记的 LLM 自动总结写入（v1 只提供模型手写日记工具与人工查看）

@@ -13,10 +13,14 @@ type StatusBarProps = {
   canToggle: boolean
   onToggle: () => void
   onGotoOverview: () => void
+  // 关闭状态细提示（卡片内第二行）：模拟关闭→行内直接开启；情绪关闭→跳「情绪」页
+  showOffHint: boolean
+  showMoodHint: boolean
+  onGotoMood: () => void
 }
 
 export function StatusBar(props: StatusBarProps) {
-  const { t, status, mood, lanlan, canToggle, onToggle, onGotoOverview } = props
+  const { t, status, mood, lanlan, canToggle, onToggle, onGotoOverview, showOffHint, showMoodHint, onGotoMood } = props
 
   const enabled = status.enabled !== false
   const phaseColor = phaseColorOf(status)
@@ -49,6 +53,28 @@ export function StatusBar(props: StatusBarProps) {
           {enabled ? t("panel.turnOff", { defaultValue: "关闭模拟" }) : t("panel.turnOn", { defaultValue: "开启模拟" })}
         </Button>
       </div>
+      {showOffHint || showMoodHint ? (
+        <div className="tm-status-hints">
+          {showOffHint ? (
+            <span className="tm-offhint-item">
+              {t("panel.offHintState", { defaultValue: "模拟已关闭" })}
+              <span className="tm-offhint-dot">·</span>
+              <button type="button" className="tm-offhint-link" disabled={!canToggle} onClick={onToggle}>
+                {t("panel.offHintAction", { defaultValue: "点击开启" })}
+              </button>
+            </span>
+          ) : null}
+          {showMoodHint ? (
+            <span className="tm-offhint-item">
+              {t("panel.moodOffHintState", { defaultValue: "情绪系统已关闭" })}
+              <span className="tm-offhint-dot">·</span>
+              <button type="button" className="tm-offhint-link" onClick={onGotoMood}>
+                {t("panel.moodOffHintAction", { defaultValue: "去「情绪」页开启" })}
+              </button>
+            </span>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 }

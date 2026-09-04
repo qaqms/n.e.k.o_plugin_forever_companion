@@ -448,19 +448,12 @@ export default function Panel(props: PluginSurfaceProps<State>) {
         canToggle={!!toggle}
         onToggle={onToggle}
         onGotoOverview={() => setTab("overview")}
+        showOffHint={status.enabled === false}
+        showMoodHint={mood.system_enabled === false}
+        onGotoMood={() => setTab("mood")}
       />
 
       {status.error ? <div key="warn-error" className="tm-warnstrip"><Alert tone="danger" message={status.error} /></div> : null}
-      {status.enabled === false ? (
-        <div key="warn-disabled" className="tm-warnstrip">
-          <Alert tone="info" message={t("panel.disabledHint", { defaultValue: "模拟当前处于关闭状态，点击右上角「开启模拟」即可恢复。" })} />
-        </div>
-      ) : null}
-      {mood.system_enabled === false ? (
-        <div key="warn-mood" className="tm-warnstrip">
-          <Alert tone="warning" message={t("panel.mood.disabledWarn", { defaultValue: "情绪系统当前处于关闭状态（可在「情绪」页开启，实验性功能）。" })} />
-        </div>
-      ) : null}
 
       <div key="body" className="tm-body">
         <nav className="tm-tabs">
