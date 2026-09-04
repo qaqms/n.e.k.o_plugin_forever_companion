@@ -7,15 +7,20 @@ PluginStore 建成 enabled=False；disabled 态下 get 静默返回 default、se
 [tide].enabled=false、锚点重新随机，且 shutdown 会把这份幻影状态整体回写，覆盖掉
 上一次真实保存的开关/锚点/三本日记/相处统计。
 
-本文件用 _GatedStore 复刻宿主的 enabled 门控，锁死两件事：
+本文件用 _GatedStore 复刻宿主的 enabled 门控，锁死四件事：
 1. _load_state 之前必须先把 store 唤醒并读到真实值（开关与锚点重启不丢）；
 2. 唤醒失败的那次启动标记为"载入不可信"，此后即便 store 中途通电，
-   shutdown 也不得把幻影状态覆写回盘。
+   shutdown 也不得把幻影状态覆写回盘；
+3. （1.2.2）载入不可信后 store 中途回电：任何入口写入放行前必须先重载盘上
+   真实数据替换幻影分片（_ensure_shard 中途通电门控），堵死单路整包覆写；
+4. （1.2.2）可信会话的 shutdown 必须补刷 stats 与我的日记素材——这些增量
+   平时只进内存、等下一条用户消息搭车落盘，不补就会被"最后几轮聊完就关软件"吃掉。
 
 运行方式（插件目录内）：uv run python -m pytest tests -q
 """
 
 import asyncio
+import copy
 import time
 
 
@@ -213,3 +218,126 @@ def test_ready_probe_treats_missing_enabled_attr_as_ready(tm, boot_factory):
     run(p.startup())
     assert p._state_trusted is True
     assert p._enabled(p._get_shard("灵")) is True
+
+
+# ============================================================
+# 1.2.2 追加：中途通电重载入门控（幻影覆写）与 shutdown 补刷 stats/review
+# ============================================================
+
+_HISTORY_KEYS = ("diary@灵", "journal@灵", "review@灵", "stats@灵")
+
+
+def _seed_history(store):
+    """往盘上种一份"上次真实保存过"的陪伴记录，返回深拷贝快照供覆写断言。"""
+    store.data.update({
+        "diary@灵": [{"ts": "2026-08-10T12:00:00+00:00", "text": "今天很开心", "source": "self"}],
+        "journal@灵": [{
+            "page_no": 1,
+            "started_at": "2026-08-05",
+            "entries": [{"ts": "2026-08-05T20:00:00+00:00", "text": "第一页"}],
+        }],
+        "review@灵": {
+            "entries": [{"ts": "2026-08-12", "text": "第一篇"}],
+            "stats": {"turns": 2},
+        },
+        "stats@灵": {
+            "first_seen": "2026-08-01T00:00:00+00:00",
+            "backfilled": True,
+            "days": {"2026-08-10": {"turns": 5}},
+        },
+    })
+    return {key: copy.deepcopy(store.data[key]) for key in _HISTORY_KEYS}
+
+
+def test_mid_session_power_on_reloads_real_data_before_entry_write(tm, boot_factory):
+    """不可信启动后 store 中途回电：第一次入口写入前必须先把幻影换成盘上真实数据。
+
+    1.2.1 之后仅存的幻影覆写路径：不可信载入让内存分片从"空"起步，防线却只挡
+    shutdown 整体回写；store 醒来后入口单路写（toggle 等）照样会把盘上的锚点/
+    快进/三本日记/统计覆写掉。修复把"中途通电→重载入"门控放在 _ensure_shard
+    入口——所有写路径都先经它。回退修复时本测试以"锚点被覆写"失败。
+    """
+    p, store = _boot(tm, boot_factory, enabled=False, never_wakes=True)
+    history = _seed_history(store)
+
+    run(p.startup())
+    assert p._state_trusted is False
+
+    store.enabled = True  # 宿主会话中后期把配置推下来：store 回电
+    result = run(p.toggle())  # 关闭模拟（盘上真实态 enabled=True → 应为 False）
+
+    assert result.value["enabled"] is False
+    assert p._state_trusted is True, "store 回电后首笔写入必须已完成可信重载"
+    cycle = store.data["cycle@灵"]
+    assert cycle["enabled"] is False, "本次 toggle 应作用在真实数据上并落盘"
+    assert cycle["anchor_date"] == "2026-08-01", "锚点被幻影覆写（未先重载真实状态）"
+    assert cycle["advance_days"] == 3, "快进天数被幻影覆写"
+    for key in _HISTORY_KEYS:
+        assert store.data[key] == history[key], f"{key} 在幻影覆写路径中被牵连清掉"
+    # 内存同样被换成盘上真实数据（而非"当场生效"的幻影继续服役）
+    assert p._get_shard("灵").diary == history["diary@灵"]
+
+
+def test_untrusted_session_without_power_still_degrades_safely(tm, boot_factory):
+    """整场没通电：入口写静默空转（当场生效、重启即丢是既定降级），且绝不毁盘。"""
+    p, store = _boot(tm, boot_factory, enabled=False, never_wakes=True)
+    history = _seed_history(store)
+    run(p.startup())
+
+    result = run(p.toggle())  # 此刻 store 仍未通电：门控不触发，写入 no-op
+
+    # 幻影态从"空"起步：盘上的 enabled=True 看不见，toggle 按"关→开"生效。
+    # 降级契约＝内存当场生效（True）但落盘静默空转，盘上分片原样不动。
+    assert result.value["enabled"] is True, "未通电会话维持「当场生效」降级契约"
+    assert store.data["cycle@灵"] == dict(_PERSISTED_CYCLE), "盘上历史不得被幻影覆写"
+    for key in _HISTORY_KEYS:
+        assert store.data[key] == history[key]
+    assert p._state_trusted is False
+
+
+def test_shutdown_flushes_stats_and_review_materials(tm, boot_factory):
+    """可信会话的 shutdown 必须补刷 stats 与我的日记素材。
+
+    旧缺口：语气分布/和好/冷战事件与我的日记素材只进内存、等下一条用户消息
+    搭车落盘，shutdown 循环又只回写 cycle/mood/diary/journal——"最后几轮聊完
+    就关软件"必丢这批增量（正常退出也丢，不止强杀）。回退修复时本测试以
+    "stats@ 没有 days 增量"失败。
+    """
+    p, store = _boot(tm, boot_factory)
+    run(p.startup())
+    shard = p._get_shard("灵")
+
+    # 模拟"最后一条用户消息落盘之后"的增量：只进内存，没有下一条消息来搭车
+    p._feed_stats_turn(shard)
+    p._feed_stats_tone(shard, "warm")
+    p._feed_stats_made_up(shard)
+    p._feed_review_turn("灵", shard)
+    p._feed_review_action(shard, "storm_surge", origin="self")
+
+    run(p.shutdown())
+
+    assert store.data["stats@灵"] == shard.stats, "stats 增量没在会话末补刷"
+    assert any((day.get("made_up") or 0) == 1 for day in shard.stats.get("days", {}).values())
+    saved_review = store.data["review@灵"]
+    assert saved_review["stats"] == shard.review_stats, "我的日记素材没在会话末补刷"
+    assert saved_review["stats"]["turns"] == 1
+    assert saved_review["entries"] == []
+
+
+def test_untrusted_shutdown_skips_stats_and_review_too(tm, boot_factory):
+    """不可信会话的 shutdown 补刷同样不得执行（新增两键也要在信任门后面）。"""
+    p, store = _boot(tm, boot_factory, enabled=False, never_wakes=True)
+    _seed_history(store)
+    run(p.startup())
+
+    store.enabled = True  # 中途通电但不触发入口（无重载机会）
+    shard = p._get_shard("灵")
+    p._feed_stats_turn(shard)
+    p._feed_review_turn("灵", shard)
+    sets_before = store.set_calls
+
+    result = run(p.shutdown())
+
+    assert result.value.get("saved") is False
+    assert store.set_calls == sets_before, "不可信会话的 shutdown 不应产生任何写入"
+    assert "review@灵" not in store.data or store.data["review@灵"]["stats"]["turns"] == 2

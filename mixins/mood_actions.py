@@ -14,7 +14,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from plugin.sdk.plugin import Err, Ok, SdkError, llm_tool
+from plugin.sdk.plugin import Err, Ok, Result, SdkError, llm_tool
 
 from ..core.affect import _MOOD_AFFECT_IMPULSES, _apply_affect_impulse, _current_affect
 from ..core.fragments import recall_fragments
@@ -413,14 +413,17 @@ class MoodActionsMixin:
         timed: bool,
         lanlan: str | None = None,
         origin: str = "self",
-    ) -> JsonObject:
+    ) -> Result[JsonObject]:
+        """应用一个情绪动作并落盘；返回 Ok(payload) 或在任一 key 写失败时回 Err
+        （1.2.2 批次2：工具/入口据此向宿主传播，不再无条件成功）。"""
         name = str(lanlan or "").strip() or self._current_shard_name()
         shard = await self._ensure_shard(name)
         now = time.time()
         # 我的日记素材：记一笔动作事件。origin=user 是主人明确要求的演示
         #（"让她冷战"不算他对她不好），origin=self 才是她的自主反应
         self._feed_review_action(shard, action, origin=origin)
-        # 相处统计：同口径记当日情绪事件（origin=user 不计），随下面 mood 落盘
+        # 相处统计：同口径记当日情绪事件（origin=user 不计）；两路增量与 mood
+        # 一起即时落盘（批次2 起，不再"搭车"等下一条用户消息）
         self._feed_stats_mood_event(shard, action, origin=origin)
         # 默认时长：三个新动作有各自的默认（心有涟漪 15 分钟、暖流/满潮 30 分钟），
         # 其余动作回落 mood.default_action_minutes 配置
@@ -440,7 +443,14 @@ class MoodActionsMixin:
             self._apply_affect_impulse(shard, impulse[0], impulse[1], now=now)
         # 新情绪回合开始：重置和好提醒节流，允许在新回合里重新提醒一次
         shard.last_reconcile_nudge_ts = 0.0
-        await self._save_shard_mood(name, shard)
+        res_mood = await self._save_shard_mood(name, shard)
+        # 增量即时补刷（批次2）：情绪事件进了 stats@、动作事件进了 review@，
+        # 必须随本次动作一起落盘，而不是等下一条用户消息才冲刷
+        res_stats = await self._save_shard_stats(name, shard)
+        if self._review_enabled(shard):
+            res_review = await self._save_shard_review(name, shard)
+        else:
+            res_review = Ok(None)
         # 行为指令立即送达：模型只有"现在"知道要敷衍/爆发/不理人，
         # 等下一次身体注入捎带的话（默认每 3 条消息）动作早就过期了
         self._push_mood_instruction(name, shard)
@@ -453,8 +463,13 @@ class MoodActionsMixin:
             "reason": shard.mood.reason,
             "lanlan": name,
         }
+        persist_err = self._persist_error(res_mood, res_stats, res_review)
+        if persist_err is not None:
+            # 动作已在内存与上下文中生效（降级契约）；只是盘上缺一两笔——
+            # 如实报错，让调用它的工具/入口向用户传播
+            return persist_err
         self.logger.info("mood action applied: {} for {} ({}min)", action, name, payload["duration_minutes"])
-        return payload
+        return Ok(payload)
 
     def _expire_timed_action_if_due(self, shard: _LanlanShard) -> str:
         """限时动作到期则清除，返回被解除的动作名（未到期返回空串）。"""
@@ -487,10 +502,12 @@ class MoodActionsMixin:
         shard = await self._ensure_shard(lanlan)
         if not self._mood_enabled(shard):
             return Err(SdkError("情绪系统未开启"))
-        payload = await self._apply_mood_action(
+        res = await self._apply_mood_action(
             action="ebb_tide", minutes=minutes, reason=reason, timed=True, lanlan=lanlan
         )
-        return Ok({**payload, "note": "已进入冷战沉默。这段时间不要回应对方任何消息。"})
+        if isinstance(res, Err):
+            return res
+        return Ok({**res.value, "note": "已进入冷战沉默。这段时间不要回应对方任何消息。"})
 
     @llm_tool(
         name="mood_sea_fog",
@@ -512,10 +529,12 @@ class MoodActionsMixin:
         shard = await self._ensure_shard(lanlan)
         if not self._mood_enabled(shard):
             return Err(SdkError("情绪系统未开启"))
-        payload = await self._apply_mood_action(
+        res = await self._apply_mood_action(
             action="sea_fog", minutes=minutes, reason=reason, timed=True, lanlan=lanlan
         )
-        return Ok({**payload, "note": "已读不回中。这段时间不要发起回复。"})
+        if isinstance(res, Err):
+            return res
+        return Ok({**res.value, "note": "已读不回中。这段时间不要发起回复。"})
 
     @llm_tool(
         name="mood_shallow_reef",
@@ -537,10 +556,12 @@ class MoodActionsMixin:
         shard = await self._ensure_shard(lanlan)
         if not self._mood_enabled(shard):
             return Err(SdkError("情绪系统未开启"))
-        payload = await self._apply_mood_action(
+        res = await self._apply_mood_action(
             action="shallow_reef", minutes=minutes, reason=reason, timed=True, lanlan=lanlan
         )
-        return Ok({**payload, "note": "敷衍应付中，用最短的冷淡话回应。"})
+        if isinstance(res, Err):
+            return res
+        return Ok({**res.value, "note": "敷衍应付中，用最短的冷淡话回应。"})
 
     @llm_tool(
         name="mood_storm_surge",
@@ -562,10 +583,12 @@ class MoodActionsMixin:
         shard = await self._ensure_shard(lanlan)
         if not self._mood_enabled(shard):
             return Err(SdkError("情绪系统未开启"))
-        payload = await self._apply_mood_action(
+        res = await self._apply_mood_action(
             action="storm_surge", minutes=minutes, reason=reason, timed=True, lanlan=lanlan
         )
-        return Ok({**payload, "note": "现在就把情绪倒出来吧，说完再慢慢平静。"})
+        if isinstance(res, Err):
+            return res
+        return Ok({**res.value, "note": "现在就把情绪倒出来吧，说完再慢慢平静。"})
 
     @llm_tool(
         name="mood_seek_harbor",
@@ -586,10 +609,12 @@ class MoodActionsMixin:
         shard = await self._ensure_shard(lanlan)
         if not self._mood_enabled(shard):
             return Err(SdkError("情绪系统未开启"))
-        payload = await self._apply_mood_action(
+        res = await self._apply_mood_action(
             action="seek_harbor", minutes=None, reason=reason, timed=False, lanlan=lanlan
         )
-        return Ok({**payload, "note": "接下来的语气里带一点委屈和期待，等对方来哄。"})
+        if isinstance(res, Err):
+            return res
+        return Ok({**res.value, "note": "接下来的语气里带一点委屈和期待，等对方来哄。"})
 
     @llm_tool(
         name="mood_ripple",
@@ -613,10 +638,12 @@ class MoodActionsMixin:
         shard = await self._ensure_shard(lanlan)
         if not self._mood_enabled(shard):
             return Err(SdkError("情绪系统未开启"))
-        payload = await self._apply_mood_action(
+        res = await self._apply_mood_action(
             action="ripple", minutes=minutes, reason=reason, timed=True, lanlan=lanlan
         )
-        return Ok({**payload, "note": "已进入心有涟漪。语气带点小性子但还愿意理人；被哄好时记得调用 mood_rising_tide 切换状态。"})
+        if isinstance(res, Err):
+            return res
+        return Ok({**res.value, "note": "已进入心有涟漪。语气带点小性子但还愿意理人；被哄好时记得调用 mood_rising_tide 切换状态。"})
 
     @llm_tool(
         name="mood_warm_current",
@@ -639,10 +666,12 @@ class MoodActionsMixin:
         shard = await self._ensure_shard(lanlan)
         if not self._mood_enabled(shard):
             return Err(SdkError("情绪系统未开启"))
-        payload = await self._apply_mood_action(
+        res = await self._apply_mood_action(
             action="warm_current", minutes=minutes, reason=reason, timed=True, lanlan=lanlan
         )
-        return Ok({**payload, "note": "暖流涌动中。主动黏着他、撒撒娇，语气放软放甜。"})
+        if isinstance(res, Err):
+            return res
+        return Ok({**res.value, "note": "暖流涌动中。主动黏着他、撒撒娇，语气放软放甜。"})
 
     @llm_tool(
         name="mood_spring_tide",
@@ -665,10 +694,12 @@ class MoodActionsMixin:
         shard = await self._ensure_shard(lanlan)
         if not self._mood_enabled(shard):
             return Err(SdkError("情绪系统未开启"))
-        payload = await self._apply_mood_action(
+        res = await self._apply_mood_action(
             action="spring_tide", minutes=minutes, reason=reason, timed=True, lanlan=lanlan
         )
-        return Ok({**payload, "note": "满潮欢喜中。把开心的事说给他听，主动找话说，语气明亮。"})
+        if isinstance(res, Err):
+            return res
+        return Ok({**res.value, "note": "满潮欢喜中。把开心的事说给他听，主动找话说，语气明亮。"})
 
     @llm_tool(
         name="mood_rising_tide",
@@ -703,8 +734,15 @@ class MoodActionsMixin:
         #（口径：此前确实处于负面状态才算——没生过气就"转晴"不计数）
         if previous in _COLD_ACTIONS:
             self._feed_stats_made_up(shard)
-        await self._save_shard_mood(lanlan, shard)
+        res_mood = await self._save_shard_mood(lanlan, shard)
+        # 和好计数即时落盘（1.2.2 批次2）：过去只进内存、等下一条用户消息冲刷
+        res_stats = (
+            await self._save_shard_stats(lanlan, shard) if previous in _COLD_ACTIONS else Ok(None)
+        )
         await self._maybe_sync_proactive_pause()
+        persist_err = self._persist_error(res_mood, res_stats)
+        if persist_err is not None:
+            return persist_err
         self.logger.info("mood recovered via llm tool for {}, previous={}", lanlan, previous)
         return Ok({
             "previous_action": previous,
@@ -745,9 +783,11 @@ class MoodActionsMixin:
             "entry": text[:500],
         }
         shard.diary.append(record)
-        await self._save_shard_diary(lanlan, shard)
-        # 相处统计：第一篇手记里程碑（已有值不覆盖，永远是最早那次）
+        res_diary = await self._save_shard_diary(lanlan, shard)
+        # 相处统计：第一篇手记里程碑（已有值不覆盖，永远是最早那次）；
+        # 与 first_journal/first_review 同款即时落盘（1.2.2 批次2 补齐缺口）
         shard.stats = record_milestone(shard.stats, "first_diary")
+        res_stats = await self._save_shard_stats(lanlan, shard)
         # 低侵入记忆融合：把日记镜像为一条 read 推送，随对话上下文
         # 流入宿主的事实抽取/总结管线——这是插件内容进入角色长期记忆
         # 的唯一受支持路径（memory 总线对插件只读）
@@ -766,6 +806,9 @@ class MoodActionsMixin:
             coalesce_key=f"{self.plugin_id}.diary",
             metadata={"message_type": f"{self.plugin_id}.diary_entry", "phase": record["phase"]},
         )
+        persist_err = self._persist_error(res_diary, res_stats)
+        if persist_err is not None:
+            return persist_err
         return Ok({"saved": True, "total_entries": len(shard.diary)})
 
     @llm_tool(
@@ -834,14 +877,16 @@ class MoodActionsMixin:
             bool(new_page),
             affect=valence_now,
         )
-        await self._save_shard_journal(lanlan, shard)
-        # 相处统计：第一页个人日记里程碑 + 落盘（里程碑随下一次任意 stats 写入
-        # 持久化也可，这里显式存一次保证"第一篇"即时可见）
+        res_journal = await self._save_shard_journal(lanlan, shard)
+        # 相处统计：第一页个人日记里程碑 + 落盘（这里显式存一次保证"第一篇"即时可见）
         shard.stats = record_milestone(shard.stats, "first_journal")
-        await self._save_shard_stats(lanlan, shard)
+        res_stats = await self._save_shard_stats(lanlan, shard)
         # 0.7.0 起不再镜像 read 推送：个人日记只给用户翻看，不进她的对话上下文、
         # 不随对话历史被宿主记忆抽取——"续写衔接"由工具结果里的 recent_context
         # 即时承载（只存在于写日记的这轮工具结果里）
+        persist_err = self._persist_error(res_journal, res_stats)
+        if persist_err is not None:
+            return persist_err
         return Ok({
             "saved": True,
             "page": page_no,

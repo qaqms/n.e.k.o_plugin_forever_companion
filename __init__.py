@@ -51,6 +51,7 @@ from plugin.sdk.plugin import (
     Err,
     NekoPluginBase,
     Ok,
+    Result,
     SdkError,
     lifecycle,
     neko_plugin,
@@ -534,6 +535,9 @@ class ForeverCompanionPlugin(
         # 若照常在 shutdown 回写就会把上次保存的开关/锚点/日记覆写掉。
         # 默认 False：startup 之前（含 startup 失败）的任何 shutdown 都不该覆写。
         self._state_trusted: bool = False
+        # 重载入防重入标志：_retrust_state → _load_state → _ensure_shard 会绕回
+        # 门控自身，见 shards._ensure_shard 的中途通电门控
+        self._retrusting: bool = False
         # 主动搭话暂停的引用计数水位（Store key "proactive_state"）：
         # prev = 暂停前总开关原值（None = 未在暂停中），paused_by = 有生效情绪的角色集
         self._proactive_state: JsonObject = {"prev": None, "paused_by": []}
@@ -576,7 +580,11 @@ class ForeverCompanionPlugin(
             cfg_getter=lambda: self._emotion_sense_cfg,
             mood_enabled=lambda shard=None: self._mood_enabled(shard),
             phase_state=lambda shard=None: self._current_phase_state(shard),
-            save_mood=lambda lanlan, shard: self._save_shard_mood(lanlan, shard),
+            # 语气感知收尾落盘（1.2.2 批次2）：_feed_tone_affect 除心情外还把
+            # 当日语气分布喂进 stats 与我的日记素材（纯内存），过去只靠"下一条
+            # 用户消息"或 shutdown 搭车冲刷——改由本回调一并即时落盘（回调签名
+            # 不变，仍 (lanlan, shard)→awaitable；services 侧不动）
+            save_mood=lambda lanlan, shard: self._save_tone_sense_state(lanlan, shard),
             feed_affect=lambda shard, label, conf, now=None, weight=1.0: self._feed_tone_affect(
                 shard, label, conf, now=now, weight=weight
             ),
@@ -650,7 +658,9 @@ class ForeverCompanionPlugin(
         shard.stats = stats_record_turn(shard.stats, self._stats_today(ts), valence=valence)
 
     def _feed_stats_tone(self, shard: _LanlanShard, label: str) -> None:
-        """记一次她的语气分析结果（weight=1.0 主路径；落盘随 mood 保存搭车）。"""
+        """记一次她的语气分析结果（weight=1.0 主路径）。纯内存累加，即时落盘由
+        语气感知收尾 _save_tone_sense_state 随 mood 一起补刷（1.2.2 批次2 起，
+        不再等"搭车"下一条用户消息）。"""
         shard.stats = stats_record_tone(shard.stats, self._stats_today(), label)
 
     def _feed_stats_mood_event(self, shard: _LanlanShard, action: str, *, origin: str) -> None:
@@ -703,20 +713,18 @@ class ForeverCompanionPlugin(
             self.logger.info("stats months sealed for {}: {}", lanlan, sealed)
         return sealed
 
-    async def _save_settings(self) -> None:
-        res = await self.store.set(_STORE_SETTINGS, dict(self._settings_override))
-        if isinstance(res, Err):
-            self.logger.warning("persist settings failed: {}", res.error)
+    async def _save_settings(self) -> Result[None]:
+        return await self._store_write(_STORE_SETTINGS, dict(self._settings_override), "settings")
 
-    async def _save_lanlan_index(self) -> None:
-        res = await self.store.set(_STORE_LANLAN_INDEX, list(self._lanlan_index))
-        if isinstance(res, Err):
-            self.logger.warning("persist lanlan_index failed: {}", res.error)
+    async def _save_lanlan_index(self) -> Result[None]:
+        return await self._store_write(
+            _STORE_LANLAN_INDEX, list(self._lanlan_index), "lanlan_index",
+        )
 
-    async def _save_proactive_state(self) -> None:
-        res = await self.store.set(_STORE_PROACTIVE, dict(self._proactive_state))
-        if isinstance(res, Err):
-            self.logger.warning("persist proactive_state failed: {}", res.error)
+    async def _save_proactive_state(self) -> Result[None]:
+        return await self._store_write(
+            _STORE_PROACTIVE, dict(self._proactive_state), "proactive_state",
+        )
 
     # ==========================================
     # 生命周期
@@ -775,6 +783,15 @@ class ForeverCompanionPlugin(
             await self._save_shard_mood(lanlan, shard)
             await self._save_shard_diary(lanlan, shard)
             await self._save_shard_journal(lanlan, shard)
+            # 会话末补刷（1.2.2）：shutdown 过去不涵盖 stats@/review@ 两个 key，
+            # 关闭时补刷兜底（有内容才写，不给从未积累过的角色造空壳键）。
+            # 批次2 起语气分布/情绪事件/和好等增量已在产生点即时落盘
+            # （_save_tone_sense_state/_apply_mood_action 等），这里保留为
+            # 中途写失败等残余窗口的最后一道兜底。
+            if shard.stats:
+                await self._save_shard_stats(lanlan, shard)
+            if shard.review or shard.review_stats:
+                await self._save_shard_review(lanlan, shard)
         await self._save_settings()
         await self._save_proactive_state()
         return Ok({"status": "shutdown"})

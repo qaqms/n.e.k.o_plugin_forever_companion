@@ -14,7 +14,7 @@ import asyncio
 import time
 from typing import Any
 
-from plugin.sdk.plugin import Err, Ok, Result
+from plugin.sdk.plugin import Err, Ok, Result, SdkError
 
 from ..core.cycle import (
     compute_phase_state,
@@ -92,25 +92,33 @@ class ShardsMixin:
 
     async def _ensure_shard(self, lanlan: str) -> _LanlanShard:
         """确保角色 shard 已从 Store 载入，并登记进 lanlan_index（面板只读角色列表数据源）。"""
+        # 中途通电门控（1.2.2）：载入不可信但 store 现已回电——先把幻影分片换成
+        # 盘上真实数据，再放行本次写入。_load_state 没读到真数据的会话里，内存
+        # 分片是从"空"起步的幻影、改动又从未落过盘；store 醒来后任何一条单路
+        # 整包覆写（面板操作/消息驱动落盘）都会吃掉盘上真实历史。v1.2.1 只把
+        # shutdown 整体回写挡在门外，这条路是剩下的覆写入口。所有写路径（入口、
+        # tick、工具归因）都先过本方法，挂这里即全覆盖。
+        if not self._state_trusted and not self._retrusting and self._store_ready:
+            await self._retrust_state()
         shard = self._get_shard(lanlan)
         if shard.loaded:
             return shard
-        cycle_res = await self.store.get(_cycle_key(lanlan))
+        cycle_res = await self._store_read(_cycle_key(lanlan))
         if isinstance(cycle_res, Ok) and isinstance(cycle_res.value, dict):
             shard.cycle = dict(cycle_res.value)
-        mood_res = await self.store.get(_mood_key(lanlan))
+        mood_res = await self._store_read(_mood_key(lanlan))
         if isinstance(mood_res, Ok):
             shard.mood = _MoodState.from_mapping(mood_res.value)
-        diary_res = await self.store.get(_diary_key(lanlan))
+        diary_res = await self._store_read(_diary_key(lanlan))
         if isinstance(diary_res, Ok) and isinstance(diary_res.value, list):
             shard.diary = [dict(item) for item in diary_res.value if isinstance(item, dict)]
         # 个人日记（0.7.0）：journal@ 优先；缺失且存在旧版 weekly@ 时一次性迁移
         # （每条周记成为独立一页，legacy 标记），旧 key 原样保留作备份不再写入
-        journal_res = await self.store.get(_journal_key(lanlan))
+        journal_res = await self._store_read(_journal_key(lanlan))
         if isinstance(journal_res, Ok) and isinstance(journal_res.value, list):
             shard.journal = [dict(item) for item in journal_res.value if isinstance(item, dict)]
         else:
-            weekly_res = await self.store.get(_weekly_key(lanlan))
+            weekly_res = await self._store_read(_weekly_key(lanlan))
             if isinstance(weekly_res, Ok) and isinstance(weekly_res.value, list):
                 legacy = [dict(item) for item in weekly_res.value if isinstance(item, dict)]
                 shard.journal = migrate_weekly_to_pages(legacy)
@@ -123,19 +131,19 @@ class ShardsMixin:
         # 我的日记（0.8.0）：已成文篇目 + 累计中的素材统计合并存一个 key
         #（成文时篇目追加与 stats 清零原子地一次写入；独立 stats key 仅作
         # 旧数据兼容读取，不再写入）
-        review_res = await self.store.get(_review_key(lanlan))
+        review_res = await self._store_read(_review_key(lanlan))
         if isinstance(review_res, Ok) and isinstance(review_res.value, dict):
             raw_review = review_res.value
             shard.review = [dict(item) for item in raw_review.get("entries") or [] if isinstance(item, dict)]
             stats = raw_review.get("stats")
             shard.review_stats = dict(stats) if isinstance(stats, dict) else {}
         else:
-            stats_res = await self.store.get(_review_stats_key(lanlan))
+            stats_res = await self._store_read(_review_stats_key(lanlan))
             if isinstance(stats_res, Ok) and isinstance(stats_res.value, dict):
                 shard.review_stats = dict(stats_res.value)
         # 相处统计（1.1.0）：stats@<角色>；首载时从三本日记时间戳一次性回填
         # "那天有互动"的活跃标记（轮数无法回填，只点亮天数让热力图有起点）
-        stats_store_res = await self.store.get(_stats_key(lanlan))
+        stats_store_res = await self._store_read(_stats_key(lanlan))
         if isinstance(stats_store_res, Ok) and isinstance(stats_store_res.value, dict):
             shard.stats = dict(stats_store_res.value)
         if not shard.stats.get("backfilled"):
@@ -473,15 +481,43 @@ class ShardsMixin:
         )
         return False
 
+    async def _retrust_state(self) -> None:
+        """载入不可信后 store 中途回电：把盘上真实状态重新载入，替换幻影分片。
+
+        未通电期间的读全是空值、写全被静默丢弃——内存里那份是从"空"起步的幻影，
+        盘上的才是权威数据。store 一醒，在任何一次写入放行之前整体重来：清掉
+        各 shard 的载入标记与全局容器，重跑 _load_state（这次读到真数据、
+        _state_trusted 置真）+ _refresh_config。未通电期间"当场生效但没存住"的
+        改动会随重载回退——它们本就没落过盘，回到盘上值是预期（面板下个轮询
+        即见真实状态）。
+
+        _retrusting 防重入：_load_state → _ensure_shard 会绕回门控自身。
+        """
+        self._retrusting = True
+        try:
+            self.logger.warning(
+                "store became ready after an untrusted load: reloading persisted "
+                "state before accepting any write"
+            )
+            for shard in self._shards.values():
+                shard.loaded = False
+            self._lanlan_index = []
+            self._settings_override = {}
+            self._proactive_state = {"prev": None, "paused_by": []}
+            await self._load_state()
+            await self._refresh_config()
+        finally:
+            self._retrusting = False
+
     async def _load_state(self) -> None:
         self._state_trusted = await self._ensure_store_ready()
-        settings_res = await self.store.get(_STORE_SETTINGS)
+        settings_res = await self._store_read(_STORE_SETTINGS)
         if isinstance(settings_res, Ok) and isinstance(settings_res.value, dict):
             self._settings_override = dict(settings_res.value)
-        index_res = await self.store.get(_STORE_LANLAN_INDEX)
+        index_res = await self._store_read(_STORE_LANLAN_INDEX)
         if isinstance(index_res, Ok) and isinstance(index_res.value, list):
             self._lanlan_index = [str(n) for n in index_res.value if str(n)]
-        proactive_res = await self.store.get(_STORE_PROACTIVE)
+        proactive_res = await self._store_read(_STORE_PROACTIVE)
         if isinstance(proactive_res, Ok) and isinstance(proactive_res.value, dict):
             raw = proactive_res.value
             prev = raw.get("prev")
@@ -509,10 +545,10 @@ class ShardsMixin:
             # 载入不可信（store 未通电）：所有读都是空值，此刻迁移会把"空"当成
             # 旧数据搬进分片并落盘，宁可推迟到下次可信启动再迁
             return
-        index_res = await self.store.get(_STORE_LANLAN_INDEX)
+        index_res = await self._store_read(_STORE_LANLAN_INDEX)
         if isinstance(index_res, Ok) and index_res.value is not None:
             return  # 已迁移过（或全新安装已写过索引）：幂等跳过
-        legacy_res = await self.store.get(_STORE_CYCLE)
+        legacy_res = await self._store_read(_STORE_CYCLE)
         legacy = legacy_res.value if isinstance(legacy_res, Ok) else None
         if not isinstance(legacy, dict):
             return  # 无旧数据：全新安装，索引随首个 shard 创建落盘
@@ -526,7 +562,7 @@ class ShardsMixin:
             "phase_seen": legacy.get("phase_seen") or "",
             "params": dict(params) if isinstance(params, dict) else {},
         }
-        mood_res = await self.store.get(_STORE_MOOD)
+        mood_res = await self._store_read(_STORE_MOOD)
         if isinstance(mood_res, Ok) and isinstance(mood_res.value, dict):
             raw_mood = mood_res.value
             shard.mood = _MoodState.from_mapping(raw_mood)
@@ -535,7 +571,7 @@ class ShardsMixin:
                 self._proactive_state["prev"] = dict(prev)
                 if shard.mood.is_active():
                     self._proactive_state["paused_by"] = [lanlan]
-        diary_res = await self.store.get(_STORE_DIARY)
+        diary_res = await self._store_read(_STORE_DIARY)
         if isinstance(diary_res, Ok) and isinstance(diary_res.value, list):
             shard.diary = [dict(item) for item in diary_res.value if isinstance(item, dict)]
         shard.loaded = True
@@ -551,56 +587,84 @@ class ShardsMixin:
         await self._save_proactive_state()
         self.logger.info("legacy single-character state migrated to shard {}", lanlan)
 
-    async def _save_shard_cycle(self, lanlan: str, shard: _LanlanShard) -> Result[None]:
+    # ==========================================
+    # 落盘统一出口（1.2.2 批次2）：_store_write / _store_read
+    # ==========================================
+
+    async def _store_write(self, key: str, value: Any, label: str) -> Result[None]:
+        """统一落盘：未通电预警 + 真失败 warning + 回传宿主 Result（调用方自行决定对外语义）。
+
+        两条路径的语义必须分清：
+        - 未通电（enabled=False）：宿主 set 静默空转返回 Ok——不是失败，
+          维持"当场生效、重启即丢"的既定降级契约（批次1 锁死），只留 warning；
+        - 真失败（磁盘满/DB 锁等返回 Err）：留 warning 并把 Err 原样回传，
+          由用户可见的写入口决定是否向宿主报失败（不再"面板显示成功、盘上没写"）。
+        """
         if not self._store_ready:
-            # 宿主 store 未通电时 set 是静默空操作，开关/锚点会"当场生效、重启即丢"
-            self.logger.warning(
-                "store not ready: cycle state for {} not persisted (enabled={})",
-                lanlan, shard.cycle.get("enabled"),
-            )
-        res = await self.store.set(_cycle_key(lanlan), dict(shard.cycle))
+            self.logger.warning("store not ready: {} not persisted", label)
+        res = await self.store.set(key, value)
         if isinstance(res, Err):
-            self.logger.warning("persist cycle failed for {}: {}", lanlan, res.error)
+            self.logger.warning("persist {} failed: {}", label, res.error)
         return res
 
-    async def _save_shard_mood(self, lanlan: str, shard: _LanlanShard) -> None:
-        res = await self.store.set(_mood_key(lanlan), shard.mood.to_mapping())
-        if isinstance(res, Err):
-            self.logger.warning("persist mood failed for {}: {}", lanlan, res.error)
+    async def _store_read(self, key: str) -> Result[Any]:
+        """统一读取：store.get 返回 Err（DB 抖动/读失败）时留痕，与"值不存在
+        （Ok(None)）"区分——过去读失败被静默按缺省处理，表现为"数据全空"且零日志。
+        只加日志，不改变降级行为：调用方拿到原始 Result，仍按缺省继续。"""
+        res = await self.store.get(key)
+        if not isinstance(res, Ok):
+            self.logger.warning("store read failed for {}: {}", key, res.error)
+        return res
 
-    async def _save_shard_diary(self, lanlan: str, shard: _LanlanShard) -> None:
+    @staticmethod
+    def _persist_error(*results: Result[None]) -> Err | None:
+        """多键写入聚合：任一 Err 即取第一个包装为入口 Err（英文消息，
+        对齐 failed to migrate background 风格）；全 Ok 返回 None。
+        前面的写不回滚（保持简单）：真失败极罕见，重试幂等。"""
+        for res in results:
+            if isinstance(res, Err):
+                return Err(SdkError(f"persist failed: {res.error}"))
+        return None
+
+    async def _save_shard_cycle(self, lanlan: str, shard: _LanlanShard) -> Result[None]:
+        return await self._store_write(
+            _cycle_key(lanlan), dict(shard.cycle), f"cycle state for {lanlan}",
+        )
+
+    async def _save_shard_mood(self, lanlan: str, shard: _LanlanShard) -> Result[None]:
+        return await self._store_write(
+            _mood_key(lanlan), shard.mood.to_mapping(), f"mood state for {lanlan}",
+        )
+
+    async def _save_shard_diary(self, lanlan: str, shard: _LanlanShard) -> Result[None]:
         # 内存与落盘保持同一截断语义：都只保留最近 _DIARY_MAX_ENTRIES 条，
         # 避免本次会话 total 与重启后 total 不一致
         shard.diary = list(shard.diary[-_DIARY_MAX_ENTRIES:])
-        res = await self.store.set(_diary_key(lanlan), list(shard.diary))
-        if isinstance(res, Err):
-            self.logger.warning("persist diary failed for {}: {}", lanlan, res.error)
+        return await self._store_write(_diary_key(lanlan), list(shard.diary), f"diary for {lanlan}")
 
-    async def _save_diary(self) -> None:
+    async def _save_diary(self) -> Result[None]:
         """兼容包装：保存"当前"shard 的手记（无 lanlan 上下文的旧调用点/测试用）。"""
         name = self._current_shard_name()
-        await self._save_shard_diary(name, self._get_shard(name))
+        return await self._save_shard_diary(name, self._get_shard(name))
 
-    async def _save_shard_journal(self, lanlan: str, shard: _LanlanShard) -> None:
+    async def _save_shard_journal(self, lanlan: str, shard: _LanlanShard) -> Result[None]:
         # 与手记同一截断语义：内存与落盘都只保留最近 _JOURNAL_MAX_PAGES 页
         shard.journal = list(shard.journal[-_JOURNAL_MAX_PAGES:])
-        res = await self.store.set(_journal_key(lanlan), list(shard.journal))
-        if isinstance(res, Err):
-            self.logger.warning("persist journal failed for {}: {}", lanlan, res.error)
+        return await self._store_write(
+            _journal_key(lanlan), list(shard.journal), f"journal for {lanlan}",
+        )
 
-    async def _save_shard_review(self, lanlan: str, shard: _LanlanShard) -> None:
+    async def _save_shard_review(self, lanlan: str, shard: _LanlanShard) -> Result[None]:
         """我的日记落盘：成文篇目与素材统计合并写进一个 key（stats 随篇目一起走，
         成文时原子清零——两个独立 key 反而会在中途崩溃时出现篇目已加而 stats
         未清的错位；加载侧对旧独立 stats key 只读迁移）。"""
-        res = await self.store.set(
-            _review_key(lanlan), {"entries": list(shard.review), "stats": dict(shard.review_stats)}
+        return await self._store_write(
+            _review_key(lanlan),
+            {"entries": list(shard.review), "stats": dict(shard.review_stats)},
+            f"review for {lanlan}",
         )
-        if isinstance(res, Err):
-            self.logger.warning("persist review failed for {}: {}", lanlan, res.error)
 
-    async def _save_shard_stats(self, lanlan: str, shard: _LanlanShard) -> None:
+    async def _save_shard_stats(self, lanlan: str, shard: _LanlanShard) -> Result[None]:
         """相处统计落盘（stats@<角色>；只增不清零，纯本地）。"""
-        res = await self.store.set(_stats_key(lanlan), dict(shard.stats))
-        if isinstance(res, Err):
-            self.logger.warning("persist stats failed for {}: {}", lanlan, res.error)
+        return await self._store_write(_stats_key(lanlan), dict(shard.stats), f"stats for {lanlan}")
 

@@ -70,7 +70,10 @@ class EmotionSenseService:
         cfg_getter: Callable[[], JsonObject],
         mood_enabled: Callable[..., bool],
         phase_state: Callable[..., Any],
-        save_mood: Callable[..., Awaitable[None]],
+        # save_mood 是主类的"语气感知收尾落盘"回调（签名保持 (lanlan, shard)→
+        # awaitable 不变）；1.2.2 批次2 起它除 mood 外还补刷 stats/review 并回传
+        # Result——本服务只是 await、按既定语义丢弃返回值，签名允许返回值透传即可
+        save_mood: Callable[..., Awaitable[Any]],
         feed_affect: Callable[..., None],
         core_config_loader: Callable[[], JsonObject],
         core_config_path: Callable[[], Path | None],

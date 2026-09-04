@@ -17,6 +17,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from plugin.sdk.plugin import Err, Result
+
 from ..core.affect import _feed_tone_affect
 from ..core.fragments import (
     build_fragment_prompt,
@@ -200,6 +202,22 @@ class SensesMixin:
             # 相处统计：当日语气分布（热力图悬停/月报语气主色），同口径只记主路径
             self._feed_stats_tone(shard, label)
 
+    async def _save_tone_sense_state(self, lanlan: str, shard: _LanlanShard) -> Result[None]:
+        """语气感知收尾落盘（1.2.2 批次2）：mood 之外补刷 stats 与我的日记素材。
+
+        _feed_tone_affect 把当日语气分布喂进 stats 与 review 素材（纯内存），
+        过去"落盘随 mood 保存搭车"的说法是失真的——_save_shard_mood 只写 mood@
+        一个 key，这批增量实际要等下一条用户消息（whisper）或 shutdown 才被
+        冲刷。这里在语气分析收尾随 mood 一起即时补刷，消灭"内存有、盘上没有"
+        的窗口。stats/review 写失败仅留 warning（_store_write）：感知是后台
+        链路，不该变成会失败的入口；入口语义的 Err 传播见面板与情绪工具。
+        """
+        res = await self._save_shard_mood(lanlan, shard)
+        await self._save_shard_stats(lanlan, shard)
+        if self._review_enabled(shard) and (shard.review or shard.review_stats):
+            await self._save_shard_review(lanlan, shard)
+        return res
+
     async def _maybe_tone_sense(self, lanlan: str, shard: _LanlanShard) -> bool:
         """语气感知主入口（tick 驱动，只对当前角色 shard）：门控链 → 分析 → 分模式判定。"""
         return await self._emotion_sense._maybe_tone_sense(lanlan, shard)
@@ -381,7 +399,9 @@ class SensesMixin:
         shard.review_stats = record_turn(shard.review_stats, valence=valence)
 
     def _feed_review_tone(self, shard: _LanlanShard, label: str) -> None:
-        """记一次语气分析结果（她的回复被分析出 label 时，随 _save_shard_mood 落盘）。"""
+        """记一次语气分析结果（她的回复被分析出 label 时）。纯内存累加，
+        即时落盘由语气感知收尾 _save_tone_sense_state 随 mood 一起补刷
+        （stats 与 review 素材同步冲刷，不再等下一条用户消息）。"""
         if not self._review_enabled(shard):
             return
         shard.review_stats = record_tone(shard.review_stats, label)
@@ -446,10 +466,23 @@ class SensesMixin:
             return False, "compose_failed"
         stats_snapshot = dict(shard.review_stats)
         record = review_record(_now_utc().isoformat(timespec="seconds"), stats_snapshot, text)
+        # 写入前快照：落盘失败要整体回滚——过去"先追加内存+清零素材、再写
+        # （且不检查结果）"，真失败（磁盘满/DB 锁）会让这一篇与整段素材永久丢失，
+        # 面板却显示成功
+        prev_review = list(shard.review)
+        prev_stats = dict(shard.review_stats)
         shard.review = append_review(shard.review, record)
         shard.review_stats = review_new_stats()  # 成文后清零重新累计（review 的 new_stats，勿与 stats 的同名混淆）
-        await self._save_shard_review(lanlan, shard)
-        # 相处统计：第一篇我的日记里程碑（不覆盖最早值）
+        res = await self._save_shard_review(lanlan, shard)
+        if isinstance(res, Err):
+            # 回滚内存到快照：盘上还是旧内容，内存必须与盘上同构，否则篇目
+            # "存在"于本次会话、重启即人间蒸发；素材清零同样撤销，门槛仍成立，
+            # 下一趟 tick / 下一次面板触发可重试（不因一次写失败永久卡死）
+            shard.review = prev_review
+            shard.review_stats = prev_stats
+            return False, "persist_failed"
+        # 相处统计：第一篇我的日记里程碑（不覆盖最早值）；这次 stats 写失败仅
+        # _store_write 留 warning，篇目已安全落盘，可接受
         shard.stats = record_milestone(shard.stats, "first_review")
         await self._save_shard_stats(lanlan, shard)
         self.logger.info(

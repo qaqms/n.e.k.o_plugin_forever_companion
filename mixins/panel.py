@@ -15,7 +15,7 @@ import time
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from plugin.sdk.plugin import Err, Ok, SdkError, plugin_entry, quick_action, tr, ui
+from plugin.sdk.plugin import Err, Ok, Result, SdkError, plugin_entry, quick_action, tr, ui
 
 from ..core.appearance import (
     APPEARANCE_FILLS,
@@ -441,6 +441,9 @@ class PanelEntriesMixin:
         if not updates:
             return Err(SdkError(self.i18n.t("errors.no_valid_fields", default="没有可更新的设置字段")))
         lanlan, shard = await self._current_shard_async()
+        # 本入口的两处落盘（cycle@<角色> 与全局 settings）：任一 Err 最后回 Err
+        res_cycle: Result[None] = Ok(None)
+        res_settings: Result[None] = Ok(None)
         try:
             tide_patch: JsonObject = {}
             mood_patch: JsonObject = {}
@@ -474,7 +477,7 @@ class PanelEntriesMixin:
                 cycle_dirty = True
             if cycle_dirty:
                 # enabled 与 params 的变更合并为一次落盘（原先两处各写一次），语义不变
-                await self._save_shard_cycle(lanlan, shard)
+                res_cycle = await self._save_shard_cycle(lanlan, shard)
             if "enabled" in updates:
                 # prime 注入保持在落盘之后（先持久化再副作用，与阶段开场白同例）
                 await self._prime_inject_on_enable(was_enabled, lanlan, shard)
@@ -573,7 +576,7 @@ class PanelEntriesMixin:
                         **_cfg_section(overrides.get("stats")), **stats_patch,
                     }
                     self._stats_cfg.update(stats_patch)
-                await self._save_settings()
+                res_settings = await self._save_settings()
                 self._sync_debug_entries()
         except (TideConfigError, ValueError, TypeError) as exc:
             return Err(SdkError(str(exc)))
@@ -581,6 +584,11 @@ class PanelEntriesMixin:
             self.logger.warning("update_settings failed: {}", exc)
             return Err(SdkError(f"failed to save settings: {exc}"))
 
+        # 落盘失败优先于一切回显：任一 Err 即向面板报错（参数校验的 warning
+        # 只说明"没存住的值还不合法"，不掩盖写失败本身）
+        persist_err = self._persist_error(res_cycle, res_settings)
+        if persist_err is not None:
+            return persist_err
         # 参数变更后校验一次整体合法性（如活跃窗口与潮汐期重叠，按当前角色 shard）
         try:
             phase = self._current_phase_state(shard)
@@ -653,7 +661,10 @@ class PanelEntriesMixin:
         # effective = today + advance_days 与 anchor 比对），用户看到的就是
         # "刚设的首日先被快进了一天"。快进语义在新首日下重新从头积累。
         shard.cycle["advance_days"] = 0
-        await self._save_shard_cycle(lanlan, shard)
+        res_cycle = await self._save_shard_cycle(lanlan, shard)
+        persist_err = self._persist_error(res_cycle)
+        if persist_err is not None:
+            return persist_err
         phase = self._current_phase_state(shard)
         self.logger.info("anchor set to {} for {} (advance_days cleared)", anchor_iso, lanlan)
         return Ok({
@@ -696,7 +707,10 @@ class PanelEntriesMixin:
         current = int(shard.cycle.get("advance_days") or 0)
         new_value = max(0, current + days)
         shard.cycle["advance_days"] = new_value
-        await self._save_shard_cycle(lanlan, shard)
+        res_cycle = await self._save_shard_cycle(lanlan, shard)
+        persist_err = self._persist_error(res_cycle)
+        if persist_err is not None:
+            return persist_err
         phase = self._current_phase_state(shard)
         return Ok({
             **build_status_payload(phase, enabled=self._enabled(shard)),
@@ -719,8 +733,12 @@ class PanelEntriesMixin:
         lanlan, shard = await self._current_shard_async()
         was_enabled = self._enabled(shard)
         shard.cycle["enabled"] = not was_enabled
-        await self._save_shard_cycle(lanlan, shard)
+        res_cycle = await self._save_shard_cycle(lanlan, shard)
         await self._prime_inject_on_enable(was_enabled, lanlan, shard)
+        # 写失败如实报错（内存仍当场生效）：不再"面板显示成功、盘上没写"
+        persist_err = self._persist_error(res_cycle)
+        if persist_err is not None:
+            return persist_err
         return Ok({
             **build_status_payload(self._current_phase_state(shard), enabled=self._enabled(shard)),
             "lanlan": lanlan,
@@ -752,11 +770,16 @@ class PanelEntriesMixin:
         # 我的日记一并重置（重置语义是"当前角色清零重来"，评价与素材同属）
         shard.review = []
         shard.review_stats = review_new_stats()
-        await self._save_shard_cycle(lanlan, shard)
-        await self._save_shard_mood(lanlan, shard)
-        await self._save_shard_diary(lanlan, shard)
-        await self._save_shard_review(lanlan, shard)
+        res_cycle = await self._save_shard_cycle(lanlan, shard)
+        res_mood = await self._save_shard_mood(lanlan, shard)
+        res_diary = await self._save_shard_diary(lanlan, shard)
+        res_review = await self._save_shard_review(lanlan, shard)
         await self._maybe_sync_proactive_pause()
+        # 多键写入：任一 Err 即向用户报错（前面的写不回滚，保持简单；
+        # 真失败极罕见，重试幂等）
+        persist_err = self._persist_error(res_cycle, res_mood, res_diary, res_review)
+        if persist_err is not None:
+            return persist_err
         return Ok({
             **build_status_payload(self._current_phase_state(shard), enabled=self._enabled(shard)),
             "lanlan": lanlan,
@@ -771,8 +794,9 @@ class PanelEntriesMixin:
     # @ui.action 是 api.call 可达的前提（同 get_journal 先例），非动作区展示用途
 
     async def _gallery_index(self) -> JsonObject:
-        """图库索引记录（归一后的 {items, next}）；坏数据按空索引降级。"""
-        res = await self.store.get(_STORE_GALLERY_INDEX)
+        """图库索引记录（归一后的 {items, next}）；坏数据按空索引降级。
+        读失败（Err）经 _store_read 留痕后同样按空索引降级（批次2）。"""
+        res = await self._store_read(_STORE_GALLERY_INDEX)
         return gallery_normalize_index(res.value if isinstance(res, Ok) else None)
 
     async def _gallery_save_index(self, index: JsonObject) -> bool:
@@ -1036,7 +1060,7 @@ class PanelEntriesMixin:
         shard.mood.reason = ""
         shard.mood.started_at = 0.0
         shard.mood.expires_at = 0.0
-        await self._save_shard_mood(lanlan, shard)
+        res_mood = await self._save_shard_mood(lanlan, shard)
         await self._maybe_sync_proactive_pause()
         # 手动解除也要让模型知道状态已清（工具路径有 note，UI 路径没有）
         self.push_message(
@@ -1054,6 +1078,9 @@ class PanelEntriesMixin:
             coalesce_key=f"{self.plugin_id}.mood_instruction",
             metadata={"message_type": f"{self.plugin_id}.mood_instruction", "action": "lifted"},
         )
+        persist_err = self._persist_error(res_mood)
+        if persist_err is not None:
+            return persist_err
         return Ok({"cleared": True, "previous_action": previous, "lanlan": lanlan})
 
     @plugin_entry(
@@ -1104,7 +1131,7 @@ class PanelEntriesMixin:
         action = str(action or "").strip()
         if action not in (*_TIMED_ACTIONS, "seek_harbor"):
             return Err(SdkError(f"unknown mood action: {action!r}"))
-        payload = await self._apply_mood_action(
+        res = await self._apply_mood_action(
             action=action,
             minutes=int(minutes) if minutes else None,
             reason=str(reason or "")[:200] or "手动触发",
@@ -1112,7 +1139,9 @@ class PanelEntriesMixin:
             lanlan=lanlan,
             origin="user",  # 主人明确要求的演示，评价里与她的自主情绪区分开
         )
-        return Ok({**payload, "note": "已进入该情绪状态，行为指令已送入她的对话上下文。"})
+        if isinstance(res, Err):
+            return res
+        return Ok({**res.value, "note": "已进入该情绪状态，行为指令已送入她的对话上下文。"})
 
     @ui.action(
         label=tr("actions.get_diary.label", default="查看时光日记"),
@@ -1200,7 +1229,10 @@ class PanelEntriesMixin:
         if not removed:
             return Err(SdkError("fragment not found"))
         shard.diary = remaining
-        await self._save_shard_diary(lanlan, shard)
+        res_diary = await self._save_shard_diary(lanlan, shard)
+        persist_err = self._persist_error(res_diary)
+        if persist_err is not None:
+            return persist_err
         return Ok({"removed": removed, "lanlan": lanlan})
 
     @ui.action(
@@ -1273,6 +1305,10 @@ class PanelEntriesMixin:
     async def write_review_now(self, **_: Any):
         lanlan, shard = await self._current_shard_async()
         written, reason = await self._maybe_write_review(lanlan, shard, force=True)
+        if not written and reason == "persist_failed":
+            # 成文成功但落盘失败（批次2 回滚路径）：篇目与素材已还原、可重试，
+            # 对用户如实报写失败而非"没写成"的软提示
+            return Err(SdkError("persist failed: review entry not saved, material kept for retry"))
         if not written:
             notes = {
                 "disabled": "我的日记开关未开启（[review].enabled）。",
@@ -1303,7 +1339,10 @@ class PanelEntriesMixin:
         count = len(shard.review)
         shard.review = []
         shard.review_stats = review_new_stats()
-        await self._save_shard_review(lanlan, shard)
+        res_review = await self._save_shard_review(lanlan, shard)
+        persist_err = self._persist_error(res_review)
+        if persist_err is not None:
+            return persist_err
         return Ok({"cleared": count, "lanlan": lanlan})
 
     @ui.action(
@@ -1384,7 +1423,10 @@ class PanelEntriesMixin:
     async def clear_stats(self, **_: Any):
         lanlan, shard = await self._current_shard_async()
         shard.stats = {"backfilled": True}
-        await self._save_shard_stats(lanlan, shard)
+        res_stats = await self._save_shard_stats(lanlan, shard)
+        persist_err = self._persist_error(res_stats)
+        if persist_err is not None:
+            return persist_err
         self.logger.info("stats cleared for {}", lanlan)
         return Ok({"cleared": True, "lanlan": lanlan})
 
@@ -1404,7 +1446,10 @@ class PanelEntriesMixin:
         lanlan, shard = await self._current_shard_async()
         count = len(shard.diary)
         shard.diary = []
-        await self._save_shard_diary(lanlan, shard)
+        res_diary = await self._save_shard_diary(lanlan, shard)
+        persist_err = self._persist_error(res_diary)
+        if persist_err is not None:
+            return persist_err
         return Ok({"cleared": count, "lanlan": lanlan})
 
     @ui.action(
@@ -1452,6 +1497,7 @@ class PanelEntriesMixin:
         current = await self._resolve_current_lanlan()
         if name == current:
             return Err(SdkError(f"{name} 是宿主当前角色，不允许清除其数据"))
+        first_delete_err: Err | None = None
         for key in (
             _cycle_key(name), _mood_key(name), _diary_key(name),
             _journal_key(name), _weekly_key(name),  # weekly@ 为 0.7.0 前的旧周记 key，一并清
@@ -1461,10 +1507,19 @@ class PanelEntriesMixin:
             res = await self.store.delete(key)
             if isinstance(res, Err):
                 self.logger.warning("prune: delete {} failed: {}", key, res.error)
+                if first_delete_err is None:
+                    first_delete_err = res
         self._lanlan_index.remove(name)
-        await self._save_lanlan_index()
+        res_index = await self._save_lanlan_index()
         self._shards.pop(name, None)
         # 孤儿 shard 若还带着生效情绪，引用计数水位需立即自愈
         await self._maybe_sync_proactive_pause()
+        # 批次2：任一 delete / 索引落盘失败都向用户传播 Err（盘上残留的 key 仍在，
+        # 角色数据并未清干净——过去只 warning，面板却显示"已清除"）
+        persist_err = self._persist_error(
+            first_delete_err if first_delete_err is not None else Ok(None), res_index,
+        )
+        if persist_err is not None:
+            return persist_err
         self.logger.info("orphan lanlan pruned: {}", name)
         return Ok({"pruned": name})
