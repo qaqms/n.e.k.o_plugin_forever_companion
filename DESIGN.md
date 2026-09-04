@@ -378,6 +378,52 @@ zh-CN / en i18n
   不再受损，日志会明确留痕；根治需宿主在绑定 `ctx._instance` 后即刷新 runtime config，
   属平台侧时序，不在插件工作区内改。
 
+### 1.2.2：自动保存链路加固（保存失败传播 + 中途通电门控 + 增量即时落盘）
+
+针对"交互完重启软件丢数据"的全链路审计后分两批修复。审计结论：交互→落盘主干
+本身健康（写入口都即时 `await store.set`，宿主 SQLite 逐写 commit，对强杀免疫），
+漏洞集中在三处——shutdown 回写覆盖不全、宿主未通电窗口的假成功、不可信载入后的
+幻影覆写残余路径。
+
+**批次1（防线）**：
+- shutdown 整体回写补 `stats@`/`review@`（此前只回写 cycle/mood/diary/journal：
+  语气分布/情绪事件/和好等增量与我的日记素材平时"等下一条用户消息搭车落盘"，
+  最后几轮聊完直接关软件必丢，正常退出也丢）。补刷有内容才写，不给空角色造壳键。
+- `_ensure_shard` 顶部新增**中途通电门控**（`_retrust_state`）：启动未通电的
+  不可信会话里内存分片是从"空"起步的幻影；v1.2.1 只挡住了 shutdown 整体回写,
+  入口单路写没有门控——store 会话中后期回电后，任何一次面板操作/消息落盘都会
+  把幻影整包覆写盘上真实历史（1.2.1 修复后仅存的毁数据路径）。门控检测到
+  "不可信 + 已回电"即重跑 `_load_state` 换回盘上真实数据再放行本次写入；
+  `_retrusting` 防重入。仍未回电则维持"当场生效、重启即丢"的既定降级契约。
+  所有写路径（面板入口/工具归因/tick）都先过 `_ensure_shard`，挂点即全覆盖。
+- 回归：`tests/test_store_readiness.py` +4（中途通电重载/未通电降级不毁盘/
+  shutdown 补刷 stats·review/不可信 shutdown 连带跳过新键）；均已反向验证
+  （回退修复后以正确理由红）。
+
+**批次2（错误传播与搭车缺口）**：
+- 统一出口 `_store_write`（not-ready warning + 真失败 warning + 回传 Result）/
+  `_store_read`（读 Err 留痕，与"值不存在 Ok(None)"区分——过去读失败静默表现为
+  "数据全空"零线索）/ `_persist_error`（多键聚合）；九个保存方法全部返回
+  `Result[None]`。cycle 的 not-ready 文案语义保留（`(enabled=)` 后缀并入统一格式）。
+- 用户可见写入口按结果传播 Err（toggle/锚点/快进/重置/update_settings/解除情绪/
+  触发情绪/删碎片/三处 clear/write_review_now/prune_lanlan + 12 情绪工具 +
+  手记/日记工具）：真写失败（磁盘满/DB 锁）不再"面板显示成功、盘上没写"；
+  未通电空转不算失败（降级契约不变）。多键写任一 Err 即报 Err，前面不回滚
+  （真失败极罕见、重试幂等，保持简单）。
+- `_maybe_write_review` 落盘失败整体回滚：快照还原篇目与素材、不记里程碑、
+  返回 `persist_failed`（面板映射为 Err）——过去"先改内存+清零素材再写且不看
+  结果"，写失败会同时丢这篇与该段素材，且重启后旧素材复活重复成文。
+- 搭车缺口补刷（消灭失真注释）：语气分析收尾 `_save_tone_sense_state`
+  （mood+stats+review 同刷）、`_apply_mood_action`（动作事件即时进
+  stats@/review@）、rising_tide 和好计数、tool_write_diary 的 first_diary
+  里程碑即时落盘（对齐 first_journal/first_review）。
+- 回归：`tests/test_persist_errors.py` 10 条（`_ErrStore` 对指定 key 注入真
+  Err）；回退批次2 源码后 9/10 以正确理由红。
+- 已知残留（有意不动）：tick/whisper/shutdown/host_coord 等非用户入口写失败仅
+  留 warning 不回 Err（后台链路不该变成会失败的入口，shutdown 兜底已覆盖）；
+  prune_lanlan 部分失败后重试会被"角色不在名单"拒绝（Err 已如实报，残留键可见
+  需带外处理）；同轮多 1-2 次本地 SQLite 写（批次1 审计已认可开销可忽略）。
+
 ## Out of Scope
 
 - 情绪日记的 LLM 自动总结写入（v1 只提供模型手写日记工具与人工查看）
