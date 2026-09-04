@@ -372,6 +372,27 @@ def plugin_factory_full(default_tide):
     return _make
 
 
+@pytest.fixture
+def boot_factory(default_tide):
+    """裸实例工厂：不预跑 _load_state/_refresh_config，由测试自己驱动 startup。
+
+    专给"启动时序本身"用（如 store 通电时机如何决定载入可信度）：可注入自定义
+    store/config 复刻宿主行为。与 plugin_factory* 的唯一区别就是不调 _ready。
+    """
+
+    def _make(tide_extra=None, store=None, config=None, current_lanlan="", http=None):
+        tide = dict(default_tide)
+        tide.update(tide_extra or {})
+        p = make_plugin(tide_section=tide, current_lanlan=current_lanlan, http=http)
+        if store is not None:
+            p.store = store
+        if config is not None:
+            p.config = config
+        return p
+
+    return _make
+
+
 async def _ready(p):
     await p._load_state()
     await p._refresh_config()

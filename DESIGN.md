@@ -332,6 +332,52 @@ zh-CN / en i18n
   （draft 实时预览、saved 才生效，切页签不丢 draft，关面板未保存即回退）。
 - i18n 净增 63 键 ×8 语言（旧单图链路的 entries/fields/panel.appearance 死键清理）。
 
+### 1.2.1：修复"重启后模拟开关复位"（Store 通电时序）
+
+- **根因不在插件读写链**：toggle 落 `cycle@<角色>.enabled` 正确、`_enabled()` 的
+  "分片 > [tide].enabled" 优先级也正确（用生产等价配置做全链路模拟时 enabled 能保住）。
+  真因是**宿主启动时序**：SDK 在构造插件实例时 `ctx._effective_config` 还是 None，
+  按 `resolve_store_enabled({})` 把 `PluginStore` 建成 `enabled=False`；disabled 态下
+  `get` 静默返回 default、`set` 静默丢弃、都不报错。而 `startup()` 第一行就是
+  `_load_state()`（全部持久状态在此读），通电只发生在其后的 `_refresh_config()` 里
+  第一次 `config.dump()` 回灌时——于是每次重启都"读到空"，开关退回 fail-closed 的
+  false、锚点重新随机，且 `shutdown()` 会把这份幻影整体回写，把上次真实保存的
+  开关/锚点/快进/三本日记覆写掉（用户机 store.db 里 `enabled:False` +
+  `lanlan_index`/`stats@` 两键从未出现，即此路径的痕迹）。
+- **修法（只改插件，不动宿主）**：`mixins/shards.py` 新增 `_ensure_store_ready()`，在
+  `_load_state()` 读任何东西之前探测 `store.enabled`，未通电则读一次 effective config
+  触发宿主 `refresh_runtime_config` 翻转开关，最多 3 次、间隔 0.2s、单次读超时 2s；
+  **读配置本身抛错则立即放弃**（宿主不可达时重试唤不醒，硬等会顶到
+  `[plugin_runtime].timeout` 拉起超时）。探测只依赖公开属性 `store.enabled`，
+  用 `getattr(..., True)` 兜底：FakeStore 等无该属性的实现按可用处理，未来宿主去掉
+  门控也自动退化。
+- **防覆写降级**：`_load_state()` 首行置 `self._state_trusted`；False 期间
+  `shutdown()` 跳过全部分片整体回写并回 `saved:False`，`_ensure_shard` 的
+  `lanlan_index`/`stats` 一次性落盘与 0.4.0 legacy 迁移一并推迟（此刻写下去的都是
+  从空 store 推出的幻影）。宁可本次不落盘，也不毁历史；会话内单点写入仍各自落。
+  `_save_shard_cycle` 在 store 未通电时补一条 warning，让"当场生效、重启即丢"可诊断。
+- **默认 `_state_trusted=False`**：startup 之前（含 startup 失败）的任何 shutdown
+  都不该覆写。
+- **测试**：`tests/test_store_readiness.py` 用 `_GatedStore` 复刻宿主 enabled 门控
+  （`get/set` 在未通电时静默空转），5 条覆盖迟通电必须读回 / 永不通电不得覆写 /
+  正常路径照常落盘 / 无 enabled 属性不误伤 / 宿主不可达快速降级。已反向验证：
+  把源码回退到 1.2.0 后这些测试以正确理由红（`_enabled()` 出 False、盘上
+  `enabled`/`advance_days`/`params` 被抹、锚点 2026-08-01 漂到 2026-08-17）。
+  `tests/conftest.py` 加 `boot_factory`（不预跑 `_ready`、可注入自定义 store/config）。
+- **勘误（1.1.0「数据安全（更新不丢）」那条不成立）**：该节按"数据根与源码目录物理
+  分离"断言三条更新路径都不碰数据。实测在**安装版**里
+  `resolve_plugin_storage_dir` 与插件安装目录同一个根（
+  `%LOCALAPPDATA%/N.E.K.O/plugins/<id>/` 既放源码也放 `data/store.db`），数据目录
+  嵌套在插件目录内部，导入覆盖包会连同它一起重建（store.db 的 ctime 与全部行的
+  created_at 都等于导入后首次启动时刻，且当天无任何 reset/clear 触发）——记录实际归零。
+  开发源码树布局下确实分离，所以这个差异只在安装版显现。已把 README 相应三条改为
+  如实描述（升级前不得假定记录保留；Market 路径待验证）。1.2.1 只修"读不回"，
+  不修"被清掉"——后者属宿主侧安装布局，不在插件工作区内改。
+- **残留风险**：若宿主是靠 startup 返回后才处理的 `CONFIG_UPDATE` 推送通电（startup
+  期间下行消息被缓冲），则本次读配置唤不醒 store，走降级分支——症状当次仍在但数据
+  不再受损，日志会明确留痕；根治需宿主在绑定 `ctx._instance` 后即刷新 runtime config，
+  属平台侧时序，不在插件工作区内改。
+
 ## Out of Scope
 
 - 情绪日记的 LLM 自动总结写入（v1 只提供模型手写日记工具与人工查看）

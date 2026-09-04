@@ -528,6 +528,12 @@ class ForeverCompanionPlugin(
         # per-lanlan 状态分片：惰性从 Store 载入，见 _ensure_shard
         self._shards: dict[str, _LanlanShard] = {}
         self._lanlan_index: list[str] = []
+        # 本次启动的载入是否可信（_load_state 里探测 store 是否已通电后置位）。
+        # False 期间禁止任何"整体回写"：宿主构造实例时 effective config 还没就位，
+        # PluginStore 会以 disabled 建出来，读写静默空转，此时读到的"空"不是真的空，
+        # 若照常在 shutdown 回写就会把上次保存的开关/锚点/日记覆写掉。
+        # 默认 False：startup 之前（含 startup 失败）的任何 shutdown 都不该覆写。
+        self._state_trusted: bool = False
         # 主动搭话暂停的引用计数水位（Store key "proactive_state"）：
         # prev = 暂停前总开关原值（None = 未在暂停中），paused_by = 有生效情绪的角色集
         self._proactive_state: JsonObject = {"prev": None, "paused_by": []}
@@ -751,6 +757,17 @@ class ForeverCompanionPlugin(
 
     @lifecycle(id="shutdown")
     async def shutdown(self, **_: Any):
+        if not self._state_trusted:
+            # 本次启动没能在 store 通电后读到真实状态（见 _ensure_store_ready），
+            # 内存里的分片是从"空"起步、混着本次会话改动的幻影。整体回写会把上一
+            # 次真实保存的开关/锚点/快进/三本日记覆写掉——宁可本次不落盘
+            # （会话内的单点写入仍各自落过），也不毁掉历史。
+            self.logger.warning(
+                "shutdown with untrusted startup load: skipping wholesale re-save "
+                "to avoid overwriting persisted state ({} shard(s))",
+                len(self._shards),
+            )
+            return Ok({"status": "shutdown", "saved": False})
         for lanlan, shard in list(self._shards.items()):
             if not shard.loaded:
                 continue

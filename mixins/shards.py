@@ -10,6 +10,7 @@ _refresh_config 的 settings 覆盖层合并、_save_shard_* 的分片持久化�
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
@@ -49,6 +50,15 @@ from ..core.state import (
 from ..core.stats import backfill_day
 
 JsonObject = dict[str, Any]
+
+# Store 就绪探测：宿主在构造插件实例时 effective config 尚未就位，SDK 会把
+# PluginStore 构造成 enabled=False；disabled 态下 get 静默返回 default、set 静默
+# 丢弃（都不报错），于是本插件全部持久状态在启动读时"看起来都是空的"。所以
+# _load_state 之前先探测/唤醒。重试次数、单次读超时与间隔都刻意很小：startup 是宿主
+# 同步等待的拉起路径（[plugin_runtime].timeout 有上限），探测绝不能把它拖到超时。
+_STORE_READY_ATTEMPTS = 3
+_STORE_READY_RETRY_S = 0.2
+_STORE_READY_PROBE_TIMEOUT_S = 2.0
 
 
 def _journal_entries(journal: list[JsonObject]) -> list[JsonObject]:
@@ -154,11 +164,15 @@ class ShardsMixin:
                 if earliest is not None:
                     shard.stats["first_seen"] = earliest.isoformat(timespec="seconds")
             shard.stats["backfilled"] = True
-            await self._save_shard_stats(lanlan, shard)
+            # 载入不可信时不落盘：此刻 shard.stats 是从空 store 推出的幻影，
+            # 写下去会把上一次真实积累的统计覆写成"今天刚开始"
+            if self._state_trusted:
+                await self._save_shard_stats(lanlan, shard)
         shard.loaded = True
         if lanlan not in self._lanlan_index:
             self._lanlan_index.append(lanlan)
-            await self._save_lanlan_index()
+            if self._state_trusted:
+                await self._save_lanlan_index()
             self.logger.info("lanlan shard registered: {}", lanlan)
         return shard
 
@@ -413,7 +427,54 @@ class ShardsMixin:
         today = self._today_str()
         return compute_phase_state(today=today, **params)
 
+    @property
+    def _store_ready(self) -> bool:
+        """宿主 store 是否已通电（enabled）。
+
+        FakeStore / 无该属性的自定义实现按可用处理：getattr 缺省 True，既不
+        阻塞测试，也在 SDK 未来去掉门控时退化为"永远可用"。
+        """
+        return bool(getattr(self.store, "enabled", True))
+
+    async def _ensure_store_ready(self) -> bool:
+        """确认 PluginStore 可用；disabled 时读一次 effective config 尝试唤醒宿主。
+
+        宿主在插件实例构造那一刻 effective config 还没就位，SDK 据此把 store
+        建成 disabled，而 disabled 态读写全部静默空转（宿主 storage/store.py 的
+        `if not self.enabled` 早退）——本插件所有持久状态在启动读时会被误判为
+        "从未设置"，重启后总开关、锚点、日记一律"看起来是空的"。读一次 config 会
+        触发宿主把配置回灌进实例并刷新 store.enabled；读到了但开关还没翻上来就短促
+        重试几次（唤醒也可能来自宿主稍后推下来的 CONFIG_UPDATE）。读配置本身失败则
+        立刻放弃——宿主不可达时重试同样唤不醒，白等还会顶到拉起超时。
+        探测失败绝不抛错：调用方据此走"不可信载入"降级（见 _load_state / shutdown）。
+        """
+        for attempt in range(_STORE_READY_ATTEMPTS):
+            if self._store_ready:
+                if attempt:
+                    self.logger.info("plugin store ready after {} attempts", attempt + 1)
+                return True
+            try:
+                await self.config.dump(timeout=_STORE_READY_PROBE_TIMEOUT_S)
+            except Exception as exc:
+                self.logger.warning(
+                    "store readiness probe failed ({}); treating this boot's load "
+                    "as untrusted instead of waiting", exc.__class__.__name__
+                )
+                return False
+            if self._store_ready:
+                self.logger.info("plugin store ready after {} attempts", attempt + 1)
+                return True
+            if attempt + 1 < _STORE_READY_ATTEMPTS:
+                await asyncio.sleep(_STORE_READY_RETRY_S)
+        self.logger.warning(
+            "PluginStore still disabled after {} attempts; this boot's loaded "
+            "state is treated as untrusted and will NOT overwrite persisted data",
+            _STORE_READY_ATTEMPTS,
+        )
+        return False
+
     async def _load_state(self) -> None:
+        self._state_trusted = await self._ensure_store_ready()
         settings_res = await self.store.get(_STORE_SETTINGS)
         if isinstance(settings_res, Ok) and isinstance(settings_res.value, dict):
             self._settings_override = dict(settings_res.value)
@@ -444,6 +505,10 @@ class ShardsMixin:
         （暂停水位）搬进 proactive_state——升级瞬间若正处于暂停中，水位不跟着走
         会导致主动搭话永远卡死。旧 key 全部保留作备份，不再写入。
         """
+        if not self._state_trusted:
+            # 载入不可信（store 未通电）：所有读都是空值，此刻迁移会把"空"当成
+            # 旧数据搬进分片并落盘，宁可推迟到下次可信启动再迁
+            return
         index_res = await self.store.get(_STORE_LANLAN_INDEX)
         if isinstance(index_res, Ok) and index_res.value is not None:
             return  # 已迁移过（或全新安装已写过索引）：幂等跳过
@@ -487,6 +552,12 @@ class ShardsMixin:
         self.logger.info("legacy single-character state migrated to shard {}", lanlan)
 
     async def _save_shard_cycle(self, lanlan: str, shard: _LanlanShard) -> Result[None]:
+        if not self._store_ready:
+            # 宿主 store 未通电时 set 是静默空操作，开关/锚点会"当场生效、重启即丢"
+            self.logger.warning(
+                "store not ready: cycle state for {} not persisted (enabled={})",
+                lanlan, shard.cycle.get("enabled"),
+            )
         res = await self.store.set(_cycle_key(lanlan), dict(shard.cycle))
         if isinstance(res, Err):
             self.logger.warning("persist cycle failed for {}: {}", lanlan, res.error)
