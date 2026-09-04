@@ -104,8 +104,32 @@ export type LanlanItem = {
 // 语气分析模型槽位下拉项：value 为槽位 id（"" = 宿主默认情感模型槽），model 为该槽当前模型名（空串 = 未知）
 export type ToneSlotOption = { value?: string; model?: string }
 
-// 面板外观轻量标记（进 5s 轮询）：图片本体走 get_panel_background 按需拉取
-export type PanelBgMeta = { set?: boolean; dim?: number }
+// 面板外观（1.2.0）：图库索引条目——不含原图本体（走 get_gallery_image 按需拉取）；
+// thumb 为面板生成并回填的小缩略图 data URL（旧图迁移后短暂为空，随后补齐）
+export type GalleryItem = {
+  id?: string
+  name?: string
+  mime?: string
+  size?: number
+  added_at?: string
+  thumb?: string
+}
+
+// 面板外观参数（与后端 panel_appearance 记录同构）：draft=编辑中实时预览，
+// saved=已保存生效；除 bg_id 外的数值/枚举字段都有明确取值域（见 utils.normAppearance）
+export type Appearance = {
+  bg_id: string
+  fill: string
+  position: string
+  blur: number
+  dim: number
+  brightness: number
+  saturate: number
+  contrast: number
+  glass: number
+  card_alpha: number
+  text_weight: number
+}
 
 // 我的日记：已成文的一篇评价（get_review 返回，时间倒序）
 export type ReviewEntry = {
@@ -218,7 +242,6 @@ export type State = {
   lanlan?: string
   lanlan_list?: LanlanItem[]
   tone_slot_options?: ToneSlotOption[]
-  panel_bg?: PanelBgMeta
   review_brief?: ReviewBrief
   channel_status?: ChannelStatus
   week_activity?: number

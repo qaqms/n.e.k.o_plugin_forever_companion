@@ -4,10 +4,17 @@ import {
   Alert,
   Page,
 } from "@neko/plugin-ui"
-import { useConfirm, useEffect, useLocalState, useState, useToast } from "@neko/plugin-ui"
+import { useConfirm, useEffect, useLocalState, useRef, useState, useToast } from "@neko/plugin-ui"
 import type { HostedAction, PluginSurfaceProps } from "@neko/plugin-ui"
-import type { FormValues, Settings, State } from "./types"
-import { DATE_RE, settingsToForm } from "./utils"
+import type { Appearance, FormValues, GalleryItem, Settings, State } from "./types"
+import {
+  DATE_RE,
+  appearanceVars,
+  bgLayerStyle,
+  compressImageDataUrl,
+  normAppearance,
+  settingsToForm,
+} from "./utils"
 import { PANEL_STYLES } from "./styles"
 import { StatusBar } from "./statusbar"
 import { OverviewPane } from "./overview"
@@ -37,10 +44,16 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   // 会被 VALID_TABS 校验兜回 overview，但初值本身也要指向 overview
   const [tab, setTab] = useLocalState<string>("tide.tab", "overview")
   const [form, setForm] = useState<FormValues>(settingsToForm({}))
-  // 面板外观：自定义背景图本体按需拉取（不进 5s 轮询）；遮罩强度随图一起落盘
-  const [bgUrl, setBgUrl] = useState<string>("")
-  const [bgDim, setBgDim] = useState<number>(0.3)
-  const [bgSaving, setBgSaving] = useState(false)
+  // 面板外观（1.2.0）：图库索引/外观参数（saved=生效、draft=实时预览）按需拉取；
+  // 图片本体逐条缓存（imgCache），绝不进 5s 轮询载荷
+  const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([])
+  const [savedAp, setSavedAp] = useState<Appearance>(normAppearance(null))
+  const [draftAp, setDraftAp] = useState<Appearance>(normAppearance(null))
+  const [imgCache, setImgCache] = useState<Record<string, string>>({})
+  const imgInflight = useRef<Record<string, boolean>>({})
+  const thumbTried = useRef<Record<string, boolean>>({})
+  const [apSaving, setApSaving] = useState(false)
+  const [apBusy, setApBusy] = useState(false)
   // 时光页：相处统计的热力图/月报数据量大，进页时按需拉取（不随 5s 轮询）；
   // 切角色时清掉旧数据等下次进页重拉
   const [heatData, setHeatData] = useState<Heatmap | null>(null)
@@ -93,54 +106,146 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     return () => clearInterval(timer)
   }, [])
 
-  // 背景图只在面板打开时拉一次：几 MB 的 data URL 不该进轮询；
-  // 应用/移除后立即本地更新，不依赖重拉。拉取失败按默认背景处理，不弹错
+  // 外观（1.2.0）：面板打开时拉一次图库索引 + 已存参数（图片本体不进轮询）；
+  // 旧版单图背景在后端入口内自动迁移进图库。拉取失败按默认外观处理，不弹错
   useEffect(() => {
     let alive = true
-    Promise.resolve(props.api.call("get_panel_background", {}))
+    Promise.resolve(props.api.call("get_panel_gallery", {}))
       .then((payload) => {
         if (!alive) return
         const r = (unwrapCallResult(payload) || {}) as Record<string, any>
-        if (r.set) {
-          setBgUrl(String(r.data_url || ""))
-          setBgDim(Number(r.dim ?? 0.3))
+        const items = Array.isArray(r.items) ? (r.items as GalleryItem[]) : []
+        const ap = normAppearance(r.appearance)
+        setGalleryItems(items)
+        setSavedAp(ap)
+        setDraftAp(ap)
+        if (ap.bg_id) {
+          loadImage(ap.bg_id)
         }
       })
       .catch(() => {
-        // 背景拉取失败无伤大雅：默认渐变底照旧可用，console 留痕便于排查
-        console.warn("[forever_companion] load panel background failed")
+        console.warn("[forever_companion] load panel gallery failed")
       })
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  async function onApplyBg(dataUrl: string, dim: number) {
+  // 图片本体按需拉取（带在途去重）：选中某张壁纸时若没缓存就拉
+  function loadImage(id: string) {
+    if (!id) return
+    if (imgCache[id] || imgInflight.current[id]) return
+    imgInflight.current[id] = true
+    Promise.resolve(props.api.call("get_gallery_image", { item_id: id }))
+      .then((payload) => {
+        const r = (unwrapCallResult(payload) || {}) as Record<string, any>
+        if (r && typeof r.data_url === "string" && r.data_url) {
+          setImgCache((prev) => ({ ...prev, [id]: r.data_url }))
+        }
+      })
+      .catch(() => { console.warn("[forever_companion] load gallery image failed") })
+      .finally(() => { imgInflight.current[id] = false })
+  }
+
+  // draft 指向的图若未缓存则补拉（切换/新加入库时）
+  useEffect(() => {
+    loadImage(draftAp.bg_id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftAp.bg_id])
+
+  // 缺缩略图的在用图（如旧版迁移来的 legacy）：拿到本体后本地画一张回填
+  useEffect(() => {
+    const current = savedAp.bg_id
+    const item = galleryItems.find((it) => (it.id || "") === current)
+    if (!current || !item || item.thumb || thumbTried.current[current]) return
+    const dataUrl = imgCache[current]
     if (!dataUrl) return
-    setBgSaving(true)
+    thumbTried.current[current] = true
+    compressImageDataUrl(dataUrl, item.mime || "image/png", "raw")
+      .then((res) => {
+        if (res.thumb) {
+          props.api.call("gallery_set_thumb", { item_id: current, thumb: res.thumb })
+            .then(() => { setGalleryItems((prev) => prev.map((it) => ((it.id || "") === current ? { ...it, thumb: res.thumb } : it))) })
+            .catch(() => {})
+        }
+      })
+      .catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [galleryItems, imgCache, savedAp.bg_id])
+
+  function onDraftChange(patch: Record<string, string | number>) {
+    setDraftAp((prev) => normAppearance(Object.assign({}, prev, patch)))
+  }
+
+  // 外观保存：整包 draft 参数发后端（悬空 bg_id 会被后端静默解除），回填归一结果
+  async function saveAppearance() {
+    const next = draftAp
+    setApSaving(true)
     try {
-      const payload = unwrapCallResult(await props.api.call("set_panel_background", { data_url: dataUrl, dim }))
+      const payload = unwrapCallResult(await props.api.call("set_panel_appearance", {
+        bg_id: next.bg_id, fill: next.fill, position: next.position,
+        blur: next.blur, dim: next.dim, brightness: next.brightness,
+        saturate: next.saturate, contrast: next.contrast, glass: next.glass,
+        card_alpha: next.card_alpha, text_weight: next.text_weight,
+      }))
       const r = (payload || {}) as Record<string, any>
-      setBgUrl(String(dataUrl))
-      setBgDim(Number(r.dim ?? dim))
+      const ap = normAppearance(r.appearance || next)
+      setSavedAp(ap)
+      setDraftAp(ap)
       toast.success(t("panel.appearance.applied", { defaultValue: "背景已更新" }))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
     } finally {
-      setBgSaving(false)
+      setApSaving(false)
     }
   }
 
-  async function onRemoveBg() {
-    setBgSaving(true)
+  // 导入：面板侧已压好并生成缩略图；入册即时生效但不自动选为壁纸（选图走 draft+保存）
+  async function addImage(dataUrl: string, thumb: string, name: string) {
+    setApBusy(true)
     try {
-      await props.api.call("clear_panel_background", {})
-      setBgUrl("")
-      setBgDim(0.3)
-      toast.success(t("panel.appearance.removed", { defaultValue: "已恢复默认背景" }))
+      const payload = unwrapCallResult(await props.api.call("gallery_add", { data_url: dataUrl, thumb, name }))
+      const r = (payload || {}) as Record<string, any>
+      const items = Array.isArray(r.items) ? (r.items as GalleryItem[]) : []
+      setGalleryItems(items)
+      const newId = String(r.id || "")
+      if (newId) {
+        setImgCache((prev) => ({ ...prev, [newId]: dataUrl }))
+      }
+      toast.success(t("panel.appearance.added", { defaultValue: "已加入图库" }))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
     } finally {
-      setBgSaving(false)
+      setApBusy(false)
+    }
+  }
+
+  // 删除图库图（danger 确认）：后端会顺带解除在用的 bg_id，回填 appearance
+  async function removeImage(id: string) {
+    if (!id) return
+    const ok = await confirmDialog({
+      title: t("actions.gallery_remove.label", { defaultValue: "从图库删除图片" }),
+      message: t("actions.gallery_remove.confirm", { defaultValue: "将从图库删除这张图片（若正在使用会一并停用背景），不可恢复，确认？" }),
+      tone: "danger",
+      ...confirmLabels,
+    })
+    if (!ok) return
+    setApBusy(true)
+    try {
+      const payload = unwrapCallResult(await props.api.call("gallery_remove", { item_id: id }))
+      const r = (payload || {}) as Record<string, any>
+      const items = Array.isArray(r.items) ? (r.items as GalleryItem[]) : []
+      setGalleryItems(items)
+      const ap = normAppearance(r.appearance)
+      setSavedAp(ap)
+      setDraftAp(ap)
+      const cache = { ...imgCache }
+      delete cache[id]
+      setImgCache(cache)
+      toast.success(t("panel.diary.deleted", { defaultValue: "已删除" }))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setApBusy(false)
     }
   }
 
@@ -430,13 +535,19 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     { id: "settings", label: t("panel.tab.settings", { defaultValue: "设置" }) },
   ]
 
+  // 实时预览语义：背景层按 draft 渲染（图未拉到时留空闪一次可接受）；
+  // 参数经 display:contents 包装层落成 CSS 变量供 styles.ts 的 var() 消费
+  const bgDataUrl = draftAp.bg_id ? (imgCache[draftAp.bg_id] || "") : ""
+  const rootStyle = Object.assign({ display: "contents" }, appearanceVars(draftAp)) as Record<string, string>
+
   return (
-    <Page className={bgUrl ? "tm-has-bg" : ""}>
+    <Page className={bgDataUrl ? "tm-has-bg" : ""}>
+      <div key="root" className="tm-appearance-root" style={rootStyle}>
       <style key="styles">{PANEL_STYLES}</style>
 
-      {bgUrl ? (
-        <div key="bg" className="tm-bg" style={{ backgroundImage: `url("${bgUrl}")` }}>
-          <div className="tm-bg-dim" style={{ opacity: bgDim }} />
+      {bgDataUrl ? (
+        <div key="bg" className="tm-bg" style={bgLayerStyle(draftAp, bgDataUrl)}>
+          <div className="tm-bg-dim" style={{ opacity: String(draftAp.dim) }} />
         </div>
       ) : null}
 
@@ -578,17 +689,22 @@ export default function Panel(props: PluginSurfaceProps<State>) {
               onPruneLanlan={onPruneLanlan}
             >
               <AppearanceCard
-                key={`${bgUrl ? "set" : "empty"}:${bgDim}`}
                 t={t}
-                currentUrl={bgUrl}
-                dim={bgDim}
-                saving={bgSaving}
-                onApply={onApplyBg}
-                onRemove={onRemoveBg}
+                items={galleryItems}
+                draft={draftAp}
+                saved={savedAp}
+                saving={apSaving}
+                uploading={apBusy}
+                onDraft={onDraftChange}
+                onSave={saveAppearance}
+                onRevert={() => { setDraftAp(savedAp) }}
+                onAdd={addImage}
+                onAskRemove={(item: GalleryItem) => removeImage(String(item.id || ""))}
               />
             </ManagePane>
           ) : null}
         </div>
+      </div>
       </div>
     </Page>
   )

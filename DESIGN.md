@@ -294,6 +294,44 @@ zh-CN / en i18n
   panel.moodOffHintState/Action，8 语言）；旧 panel.disabledHint 本就
   只存在于代码 defaultValue，无 i18n 键残留
 
+### 1.2.0：面板外观升级——图片图库 + 可调背景
+
+旧"单图上传 + 遮罩滑杆"升维为两件事：**图库**（图片留存、自选壁纸、逐张增删）
+与**背景调节**（十项参数，实时预览 + 卡底「保存外观」钮整包生效，另有「还原」）。
+
+- **存储**（全部全局一份，与角色无关；均走 Store，不进 plugin.toml——图片
+  data URL 是大 payload，`update_own_config` 有 4.5s 硬超时且面板无 config 写通道）：
+  `panel_appearance`（归一后的参数 dict）、`gallery_index`（`{items:[{id,name,mime,
+  size,added_at,thumb}], next}`，条目不含原图）、`gallery_img/<id>`（每张图一条
+  `{data_url,mime,size,added_at}`，本体绝不进 5s 轮询 context）。
+  纯逻辑（data URL 校验/参数 clamp/索引操作/旧图迁移）在 `core/appearance.py`，
+  顺带消灭了 0.7.2 时代 panel.py 与 `__init__.py` 各写一份校验的"同款复刻"漂移隐患。
+- **旧数据迁移**：旧 `panel_bg` 单图记录在首次 `get_panel_gallery` 时以后端
+  （无图像库，生成不了缩略图）一次性迁成图库条目 `legacy`（dim 一并带走），
+  原 key 保留作回滚备份；缩略图由面板拿到本体后用 canvas 画一张经
+  `gallery_set_thumb` 回填（SVG 会污染 canvas，缩略图尽力而为，失败走棋盘占位样式）。
+- **上传压缩管线（前端 canvas）**：导入方式二选一（默认自动压缩）——
+  auto 缩到长边 2560 转 WebP q0.82（失败降 JPEG；仍不划算则回退原图），
+  raw 原样入册（字节闸 4.4MB≈base64 5.9M 字符，卡在后端 6M 字符上限内）；
+  GIF/SVG 不转码（动图/矢量语义）等同 raw。256px 缩略图两档都顺手生成。
+  图库上限 24 张（4.5MB×24 是 store.db 体积与实用性的折中）。
+- **入口**（六个，全 `@ui.action`+`@plugin_entry` 双装饰）：`get_panel_gallery`
+  （索引+参数+迁移，一个请求开面板）、`gallery_add`、`gallery_remove`
+  （删在用图时后端顺带清 `bg_id` 并回新 appearance）、`gallery_set_thumb`、
+  `get_gallery_image`（按需拉本体）、`set_panel_appearance`（**整包替换**语义：
+  未传字段回默认；悬空 bg_id 静默解除；参数宽容 clamp 不报错）。
+- **渲染参数化**：styles.ts 原本无 CSS 变量，新增经 `tm-appearance-root` 包装层
+  （div `display:contents`，不改布局也不改变 .tm-bg 的包含块）落成
+  `--tm-glass`（毛玻璃半径）/ `--tm-card-k`（卡片底色不透明度系数，
+  `rgba(var(--tm-card-rgb), calc(.72*k))`，主题 rgb 由暗色 media 切换）/
+  `--tm-text-color`+`--tm-text-shadow`（文字浓度：`color-mix(in srgb, var(--text)
+  N%, transparent)` + 随浓度自动加深的投影；老内核双声明回退原色）。
+  背景本体（填充/位置/滤镜链/遮罩 opacity/模糊外扩 bleed）全走 .tm-bg 内联样式，
+  blur>0 时 `inset` 负扩防滤镜边缘露底。所有默认值精确复刻 1.1.x 观感。
+- **语义分工**：图库是资产库（增删即时持久）；"用哪张+怎么调"是设置
+  （draft 实时预览、saved 才生效，切页签不丢 draft，关面板未保存即回退）。
+- i18n 净增 63 键 ×8 语言（旧单图链路的 entries/fields/panel.appearance 死键清理）。
+
 ## Out of Scope
 
 - 情绪日记的 LLM 自动总结写入（v1 只提供模型手写日记工具与人工查看）
@@ -326,7 +364,8 @@ zh-CN / en i18n
   PluginStore 键（0.5.0 起按角色分片 `cycle@<角色名>` / `mood@<角色名>` / `diary@<角色名>` /
   `journal@<角色名>`（0.7.0 起，旧 `weekly@` 迁入后保留备份）/ `review@<角色名>`
   （0.8.0 起，`{entries, stats}` 合一存储），加 `lanlan_index` / `settings` /
-  `proactive_state` 三个全局键；旧键保留备份）
+  `proactive_state` 三个全局键；1.2.0 起另有全局外观键 `panel_appearance` /
+  `gallery_index` / `gallery_img/<id>`（旧单图 `panel_bg` 仅迁移读，保留备份））
 - lifecycle/background work: startup 时刷新运行配置并注册；timer 每 10s 轮询总线与到期检查；
   plugin_runtime.auto_start=true 随宿主自动启动（切角色卡等操作会重启插件服务，
   不自动启动会静默消失），知情同意由 [tide].enabled=false fail-closed 保证

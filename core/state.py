@@ -26,18 +26,34 @@ _STORE_CYCLE = "cycle_state"
 _STORE_MOOD = "mood_state"
 _STORE_DIARY = "mood_diary"
 
-# 面板外观（0.7.2）：全局一份的自定义背景图（data URL 全量存 Store）。
-# 图片本体不进 5s 轮询 context，面板按需经 get_panel_background 入口拉取
+# ---- 面板外观（0.7.2 单图 → 1.2.0 图库 + 可调背景）----
+# 旧版单图背景（panel_bg）仅作迁移来源与回滚备份，1.2.0 起不再写入。
+# 1.2.0 布局（全部全局一份，与角色无关）：
+#   panel_appearance  生效的外观参数 {bg_id, fill, position, blur, dim,
+#                     brightness, saturate, contrast, glass, card_alpha, text_weight}
+#   gallery_index     图库索引 {items:[{id,name,mime,size,added_at,thumb}], next:int}
+#                     ——条目不含原图；thumb 是前端生成的缩略图 data URL（可空）
+#   gallery_img/<id>  每张原图一条 {data_url, mime, size, added_at}——
+#                     图片本体绝不进 5s 轮询 context，面板按需经入口拉取
 _STORE_PANEL_BG = "panel_bg"
-# data URL 字符上限（≈4.5MB 原图）：Store 单值 JSON 与 IPC 载荷都能扛住，
-# 更大的图请用户先压缩；面板侧报错文案引用此限制的近似值（4MB）
+_STORE_PANEL_APPEARANCE = "panel_appearance"
+_STORE_GALLERY_INDEX = "gallery_index"
+_GALLERY_IMG_PREFIX = "gallery_img/"
+# data URL 字符上限（≈4.5MB 原图）：Store 单值 JSON 与 IPC 载荷都能扛住；
+# 图库走"前端压缩为主、上限兜底"，更大的图前端会先压到限内再入册
 _PANEL_BG_MAX_CHARS = 6_000_000
+# 缩略图字符上限：160~256px WebP 一般十几 KB，400K 字符是宽容兜底
+_GALLERY_THUMB_MAX_CHARS = 400_000
+# 图库容量上限：每张 ≤4.5MB base64，24 张是 store.db 体积与实用性的折中
+_GALLERY_MAX_ITEMS = 24
 # 允许的 MIME（data:image/<mime>;base64 前缀里解析出来的部分）
 _PANEL_BG_MIMES = frozenset({
     "image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml",
 })
 # 遮罩强度默认值：压暗背景保证磨砂卡片上的文字可读（0=不压暗，上限 0.85）
 _PANEL_BG_DEFAULT_DIM = 0.3
+# 旧版单图迁移进图库时使用的固定条目 id（缩略图由面板生成后经入口回填）
+_LEGACY_BG_ID = "legacy"
 
 
 def _cycle_key(lanlan: str) -> str:

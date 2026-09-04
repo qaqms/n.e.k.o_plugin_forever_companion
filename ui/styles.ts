@@ -664,42 +664,103 @@ export const PANEL_STYLES = `
 }
 
 /* ============================================================
-   面板外观（自定义背景图）
+   面板外观（1.2.0：图片图库 + 可调背景）
    ============================================================ */
 /* 背景层绝对定位沉底：内容三块（状态栏/警示条/主体）抬高 z-index 盖在其上；
+   填充/位置/滤镜与模糊外扩全部由 panel.tsx 的内联样式即时给（实时预览）；
    dim 层用不透明深色底 + 内联 opacity 控制压暗程度，保证磨砂卡片上文字可读 */
-.tm-bg {
-  position: absolute; inset: 0; z-index: 0; pointer-events: none;
-  background-size: cover; background-position: center; background-repeat: no-repeat;
-}
+.tm-bg { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
 .tm-bg-dim { position: absolute; inset: 0; background: #0a0f1c; }
 .tm-statusbar, .tm-body, .tm-warnstrip { position: relative; z-index: 1; }
 /* 有背景时页面底色换深色基底（图片会铺满，基底只防白边透出），亮暗模式同色 */
 .neko-page.tm-has-bg { background: #0e1524; }
-/* 透明主题强化：自定义背景下磨砂卡片加深模糊与饱和，叠出更通透的玻璃感 */
+/* 透明主题强化：自定义背景下磨砂卡片加深模糊与饱和，叠出更通透的玻璃感。
+   可调参数经 tm-appearance-root 包装层落成 CSS 变量（var() 消费，回退值=1.1.x 观感）：
+   --tm-glass 毛玻璃半径 / --tm-card-k 卡片底色不透明度系数（0~1）/
+   --tm-text-color + --tm-text-shadow 文字浓淡与自动描边 / --tm-card-rgb 主题底色 */
 .tm-has-bg .neko-card, .tm-has-bg .tm-card {
-  -webkit-backdrop-filter: blur(16px) saturate(1.35);
-  backdrop-filter: blur(16px) saturate(1.35);
+  /* 卡片底色 = 主题色 × 强度系数（默认 100% 时与无覆盖几乎一致：亮白 0.72/0.56、暗 0.72/0.58 折中） */
+  background: linear-gradient(180deg,
+    rgba(var(--tm-card-rgb, 255, 255, 255), calc(0.72 * var(--tm-card-k, 1))) 0%,
+    rgba(var(--tm-card-rgb, 255, 255, 255), calc(0.57 * var(--tm-card-k, 1))) 100%);
+  -webkit-backdrop-filter: blur(var(--tm-glass, 16px)) saturate(1.35);
+  backdrop-filter: blur(var(--tm-glass, 16px)) saturate(1.35);
 }
 .tm-has-bg .tm-statusbar {
-  -webkit-backdrop-filter: blur(16px) saturate(1.35);
-  backdrop-filter: blur(16px) saturate(1.35);
+  -webkit-backdrop-filter: blur(var(--tm-glass, 16px)) saturate(1.35);
+  backdrop-filter: blur(var(--tm-glass, 16px)) saturate(1.35);
 }
 .tm-has-bg .tm-tabs {
-  -webkit-backdrop-filter: blur(14px);
-  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(calc(var(--tm-glass, 16px) * 0.875));
+  backdrop-filter: blur(calc(var(--tm-glass, 16px) * 0.875));
+}
+/* 整体字体显示强度：只作用于正文继承链上的文字（按钮/徽标等自带色的组件不受影响）；
+   低浓度自动加深投影保证可读。color-mix 不支持的老浏览器回退原 --text */
+.tm-has-bg .tm-body, .tm-has-bg .tm-statusbar {
+  color: var(--text);
+  color: var(--tm-text-color, var(--text));
+  text-shadow: var(--tm-text-shadow, none);
 }
 
-/* 外观卡：预览区与操作行 */
+/* 外观卡：图库/调节区共用网格 */
 .tm-appearance { display: grid; gap: 10px; }
-.tm-appearance-actions { display: flex; gap: 8px; align-items: center; }
-.tm-bg-preview {
-  position: relative; height: 110px; border-radius: var(--radius-md); overflow: hidden;
-  background-size: cover; background-position: center; background-repeat: no-repeat;
-  border: 1px solid rgba(255, 255, 255, 0.7);
-  box-shadow: 0 4px 14px rgba(2, 6, 23, 0.12);
+.tm-appearance-save {
+  display: flex; gap: 8px; align-items: center;
+  border-top: 1px solid rgba(255, 255, 255, 0.65);
+  padding-top: 10px;
 }
-.tm-bg-preview-dim { position: absolute; inset: 0; background: #0a0f1c; }
+.tm-save-hint { margin-right: auto; font-size: 12px; color: var(--muted); }
+
+/* 图库网格：缩略图平铺 + 左上「不用壁纸」格 + 角标/删除钮 */
+.tm-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
+.tm-gallery-tile {
+  position: relative; height: 88px; border-radius: var(--radius-md); overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.7); cursor: pointer;
+  background-size: cover; background-position: center; background-repeat: no-repeat;
+  box-shadow: 0 2px 10px rgba(2, 6, 23, 0.1);
+}
+.tm-gallery-active { border: 2px solid var(--primary); box-shadow: 0 2px 12px rgba(96, 165, 250, 0.35); }
+.tm-gallery-none { display: grid; place-items: center; background: rgba(255, 255, 255, 0.35); }
+.tm-gallery-none-mark { font-size: 22px; line-height: 1; color: var(--muted); }
+/* 无缩略图（旧迁移图回填前的窗口期）：棋盘格占位 */
+.tm-gallery-thumbless {
+  background-image: repeating-conic-gradient(rgba(148, 163, 184, 0.35) 0% 25%, transparent 0% 50%);
+  background-size: 16px 16px;
+}
+.tm-gallery-use {
+  position: absolute; left: 4px; bottom: 4px; padding: 1px 6px; border-radius: 999px;
+  font-size: 11px; color: #fff; background: rgba(15, 23, 42, 0.68);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+.tm-gallery-del {
+  position: absolute; top: 3px; right: 3px; width: 20px; height: 20px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 14px; line-height: 1; color: #fff;
+  background: rgba(15, 23, 42, 0.55); cursor: pointer; opacity: 0.85;
+}
+.tm-gallery-del:hover { background: var(--danger); opacity: 1; }
+
+/* 背景调节：填充/位置/滑杆组；未选壁纸时整组降透明度（控件已 disabled） */
+.tm-adjust-grid { display: grid; gap: 10px; }
+.tm-adjust-off { opacity: 0.45; pointer-events: none; }
+.tm-pos-grid { display: inline-grid; grid-template-columns: repeat(3, 30px); grid-auto-rows: 30px; gap: 4px; }
+.tm-pos-cell {
+  border: 1px solid rgba(255, 255, 255, 0.75); border-radius: 7px; padding: 0;
+  background: rgba(255, 255, 255, 0.4); cursor: pointer;
+  display: grid; place-items: stretch;
+}
+.tm-pos-active { border: 2px solid var(--primary); background: rgba(96, 165, 250, 0.18); }
+.tm-pos-dot { width: 7px; height: 7px; border-radius: 50%; margin: 6px; background: var(--muted); }
+.tm-pos-active .tm-pos-dot { background: var(--primary); }
+
+/* 暗色模式适配：卡片底色变量、外观卡与图库控件的描边/底色 */
+@media (prefers-color-scheme: dark) {
+  .tm-has-bg { --tm-card-rgb: 30, 41, 59; }
+  .tm-appearance-save { border-top-color: rgba(148, 163, 184, 0.16); }
+  .tm-gallery-tile { border-color: rgba(148, 163, 184, 0.22); box-shadow: 0 2px 10px rgba(2, 6, 23, 0.35); }
+  .tm-gallery-none { background: rgba(30, 41, 59, 0.55); }
+  .tm-pos-cell { border-color: rgba(148, 163, 184, 0.22); background: rgba(30, 41, 59, 0.55); }
+  .tm-pos-active { background: rgba(64, 158, 255, 0.22); }
+}
 
 /* ============================================================
    纯 CSS 线框图标（hosted 运行时不支持 SVG，颜色随 currentColor）

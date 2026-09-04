@@ -17,6 +17,20 @@ from zoneinfo import ZoneInfo
 
 from plugin.sdk.plugin import Err, Ok, SdkError, plugin_entry, quick_action, tr, ui
 
+from ..core.appearance import (
+    APPEARANCE_FILLS,
+    APPEARANCE_POSITIONS,
+    appearance_defaults,
+    clamp_appearance,
+    gallery_add_item,
+    gallery_find,
+    gallery_img_key,
+    gallery_next_id,
+    gallery_normalize_index,
+    gallery_remove_item,
+    legacy_to_gallery,
+    parse_image_data_url,
+)
 from ..core.cycle import (
     TideConfigError,
     build_month_calendar,
@@ -29,11 +43,11 @@ from ..core.review import new_stats as review_new_stats
 from ..core.review import review_due
 from ..core.state import (
     _FRAGMENT_DEFAULT_SLOT,
-    _PANEL_BG_DEFAULT_DIM,
-    _PANEL_BG_MAX_CHARS,
-    _PANEL_BG_MIMES,
+    _GALLERY_THUMB_MAX_CHARS,
     _REVIEW_DEFAULT_SLOT,
     _REVIEW_MIN_TURNS_FORCED,
+    _STORE_GALLERY_INDEX,
+    _STORE_PANEL_APPEARANCE,
     _STORE_PANEL_BG,
     _TIMED_ACTIONS,
     _TONE_SLOT_OPTIONS_CACHE_TTL,
@@ -72,30 +86,6 @@ def _slot_dormancy_hint(core_cfg: JsonObject, slot: str) -> str:
             "插件无法直连——在宿主设置里配置自己的 API 服务商后本功能即可使用"
         )
     return "所选槽位在宿主未配置模型（或未保存服务商 URL），去宿主设置配置该槽位的模型"
-
-
-def _parse_panel_bg(data_url: Any) -> tuple[str, int]:
-    """面板背景图 data URL 校验（纯函数，不碰存储；与 __init__.py 同款复刻）。"""
-    text = str(data_url or "").strip()
-    if not text.startswith("data:"):
-        raise ValueError("background must be a data: URL")
-    if len(text) > _PANEL_BG_MAX_CHARS:
-        raise ValueError("background image too large")
-    header = text.split(",", 1)[0]
-    mime = header[len("data:"):].split(";", 1)[0].strip().lower()
-    if mime not in _PANEL_BG_MIMES:
-        raise ValueError(f"unsupported image type: {mime or 'unknown'}")
-    if "," not in text:
-        raise ValueError("malformed data: URL")
-    return mime, len(text)
-
-
-def _clamp_panel_bg_dim(value: Any) -> float:
-    """遮罩强度归一到 [0, 0.85]；坏值回退默认，不报错（与 __init__.py 同款复刻）。"""
-    try:
-        return min(0.85, max(0.0, float(value)))
-    except (TypeError, ValueError):
-        return _PANEL_BG_DEFAULT_DIM
 
 
 class PanelEntriesMixin:
@@ -264,8 +254,8 @@ class PanelEntriesMixin:
             "advance_days": int(shard.cycle.get("advance_days") or 0),
             "mood": mood_payload,
             "settings": self._settings_snapshot(shard),
-            # 面板外观：只下发轻量标记（是否已设背景/遮罩强度），图片本体走
-            # get_panel_background 按需拉取，不进 5s 轮询载荷
+            # 面板外观（1.2.0）：图库/外观参数不进轮询，面板打开时走
+            # get_panel_gallery 一次性按需拉取（原"轻量标记"通道前端从未消费，已删）
             # 语气分析模型槽位下拉选项（含各槽当前模型名；拉取失败时静态兜底）
             "tone_slot_options": await self._tone_slot_options(),
             "calendar": calendar,
@@ -290,7 +280,6 @@ class PanelEntriesMixin:
             # 相处统计（1.1.0）：数字摘要 + 徽章墙进 5s 轮询（纯本地即时计算，
             # 开销可忽略）；热力图/月报数据量大，走 get_stats 入口按需拉取
             "stats_summary": self._stats_summary_view(shard),
-            "panel_bg": await self._panel_bg_meta(),
         }
 
     def _stats_summary_view(self, shard: _LanlanShard) -> JsonObject:
@@ -331,13 +320,6 @@ class PanelEntriesMixin:
             if ts is not None and ts.timestamp() >= cutoff:
                 count += 1
         return count
-
-    async def _panel_bg_meta(self) -> JsonObject:
-        """背景图轻量标记：无记录/坏记录一律按未设置处理（宽容降级）"""
-        res = await self.store.get(_STORE_PANEL_BG)
-        if isinstance(res, Ok) and isinstance(res.value, dict) and res.value.get("data_url"):
-            return {"set": True, "dim": _clamp_panel_bg_dim(res.value.get("dim"))}
-        return {"set": False, "dim": _PANEL_BG_DEFAULT_DIM}
 
     _EDITABLE_SETTINGS = (
         "enabled", "auto_derive", "cycle_length", "period_length",
@@ -781,81 +763,259 @@ class PanelEntriesMixin:
             "reset": True,
         })
 
-    # ---- 面板外观：自定义背景图（全局一份，与角色无关） ----
-    # 图片 data URL 全量存 Store；context 只带轻量标记，面板按需拉取本体。
+    # ---- 面板外观（1.2.0）：图片图库 + 可调背景（全局一份，与角色无关） ----
+    # 每张原图一条 key（gallery_img/<id>），索引与外观参数都是小记录；
+    # 图片本体绝不进 5s 轮询 context，面板按需经入口拉取。
+    # 旧版单图 panel_bg 在首次 get_panel_gallery 时一次性迁移进图库并生效，
+    # 原 key 保留不动（回滚旧版本不丢数据）。
     # @ui.action 是 api.call 可达的前提（同 get_journal 先例），非动作区展示用途
 
+    async def _gallery_index(self) -> JsonObject:
+        """图库索引记录（归一后的 {items, next}）；坏数据按空索引降级。"""
+        res = await self.store.get(_STORE_GALLERY_INDEX)
+        return gallery_normalize_index(res.value if isinstance(res, Ok) else None)
+
+    async def _gallery_save_index(self, index: JsonObject) -> bool:
+        res = await self.store.set(
+            _STORE_GALLERY_INDEX,
+            {"items": index.get("items") or [], "next": int(index.get("next") or 1)},
+        )
+        return not isinstance(res, Err)
+
+    async def _saved_appearance(self) -> JsonObject:
+        """已保存的外观参数（归一）；无记录回退默认，不写盘。"""
+        res = await self.store.get(_STORE_PANEL_APPEARANCE)
+        raw = res.value if isinstance(res, Ok) else None
+        if isinstance(raw, dict):
+            return clamp_appearance(raw)
+        return appearance_defaults()
+
     @ui.action(
-        label=tr("actions.get_panel_background.label", default="读取面板背景"),
+        label=tr("actions.get_panel_gallery.label", default="打开图库面板"),
         tone="default",
     )
     @plugin_entry(
-        id="get_panel_background",
-        name=tr("entries.get_panel_background.name", default="读取面板背景"),
-        description=tr("entries.get_panel_background.description", default="读取面板自定义背景图与遮罩强度（面板内部用）。"),
+        id="get_panel_gallery",
+        name=tr("entries.get_panel_gallery.name", default="读取面板图库"),
+        description=tr("entries.get_panel_gallery.description", default="读取面板图库索引与外观参数，并迁移旧版单图背景（面板内部用）。"),
         input_schema={"type": "object", "properties": {}},
         metadata={"result_kind": "event"},
     )
-    async def get_panel_background(self, **_: Any):
-        res = await self.store.get(_STORE_PANEL_BG)
-        if isinstance(res, Ok) and isinstance(res.value, dict) and res.value.get("data_url"):
-            rec = res.value
-            return Ok({
-                "set": True,
-                "data_url": str(rec.get("data_url")),
-                "mime": str(rec.get("mime") or ""),
-                "size": int(rec.get("size") or 0),
-                "dim": _clamp_panel_bg_dim(rec.get("dim")),
-            })
-        return Ok({"set": False, "dim": _PANEL_BG_DEFAULT_DIM})
+    async def get_panel_gallery(self, **_: Any):
+        index = await self._gallery_index()
+        res = await self.store.get(_STORE_PANEL_APPEARANCE)
+        raw = res.value if isinstance(res, Ok) else None
+        if isinstance(raw, dict):
+            return Ok({"items": index.get("items") or [], "appearance": clamp_appearance(raw), "migrated": False})
+        # 外观参数从未建立 → 尝试旧版单图一次性迁移
+        legacy_res = await self.store.get(_STORE_PANEL_BG)
+        migrated = legacy_to_gallery(legacy_res.value if isinstance(legacy_res, Ok) else None)
+        if migrated is not None:
+            gid, item, image, appearance = migrated
+            if gallery_find(index, gid) is None:
+                set_res = await self.store.set(gallery_img_key(gid), image)
+                if isinstance(set_res, Err):
+                    return Err(SdkError("failed to migrate background"))
+                index, _ = gallery_add_item(index, item)
+                if not await self._gallery_save_index(index):
+                    return Err(SdkError("failed to migrate background"))
+            save_res = await self.store.set(_STORE_PANEL_APPEARANCE, appearance)
+            if isinstance(save_res, Err):
+                return Err(SdkError("failed to migrate background"))
+            self.logger.info("legacy panel background migrated into gallery: id={}", gid)
+            return Ok({"items": index.get("items") or [], "appearance": appearance, "migrated": True})
+        return Ok({"items": index.get("items") or [], "appearance": appearance_defaults(), "migrated": False})
 
     @ui.action(
-        label=tr("actions.set_panel_background.label", default="设置面板背景"),
+        label=tr("actions.gallery_add.label", default="添加图片到图库"),
         tone="primary",
     )
     @plugin_entry(
-        id="set_panel_background",
-        name=tr("entries.set_panel_background.name", default="设置面板背景"),
-        description=tr(
-            "entries.set_panel_background.description",
-            default="把一张图片（data URL，≤4MB）设为面板背景，可选遮罩强度 0~0.85。",
-        ),
+        id="gallery_add",
+        name=tr("entries.gallery_add.name", default="添加图片到图库"),
+        description=tr("entries.gallery_add.description", default="把一张图片（data URL，≤4MB）连同缩略图加入面板图库（面板内部用）。"),
         input_schema={
             "type": "object",
             "properties": {
-                "data_url": {"type": "string", "description": tr("fields.panelBgDataUrl", default="图片 data URL（base64）")},
-                "dim": {"type": "number", "minimum": 0, "maximum": 0.85, "description": tr("fields.panelBgDim", default="遮罩强度（0=不压暗）")},
+                "data_url": {"type": "string", "description": tr("fields.galleryDataUrl", default="图片 data URL（base64）")},
+                "thumb": {"type": "string", "description": tr("fields.galleryThumb", default="缩略图 data URL（可空，面板稍后回填）")},
+                "name": {"type": "string", "description": tr("fields.galleryName", default="图片文件名")},
             },
             "required": ["data_url"],
         },
     )
-    async def set_panel_background(self, data_url: str = "", dim: Any = None, **_: Any):
+    async def gallery_add(self, data_url: str = "", thumb: str = "", name: str = "", **_: Any):
         try:
-            mime, size = _parse_panel_bg(data_url)
+            mime, size = parse_image_data_url(data_url)
+            thumb_text = str(thumb or "").strip()
+            if thumb_text:
+                parse_image_data_url(thumb_text, _GALLERY_THUMB_MAX_CHARS)
         except ValueError as exc:
             return Err(SdkError(str(exc)))
-        dim_value = _clamp_panel_bg_dim(dim if dim is not None else _PANEL_BG_DEFAULT_DIM)
-        record = {"data_url": str(data_url).strip(), "mime": mime, "size": size, "dim": dim_value}
-        res = await self.store.set(_STORE_PANEL_BG, record)
+        index = await self._gallery_index()
+        item = {
+            "id": "",
+            "name": str(name or "")[:80],
+            "mime": mime,
+            "size": size,
+            "added_at": _now_utc().isoformat(timespec="seconds"),
+            "thumb": thumb_text,
+        }
+        index, added = gallery_add_item(index, item)
+        if not added:
+            return Err(SdkError("gallery is full"))
+        item["id"] = gallery_next_id(index)
+        res = await self.store.set(
+            gallery_img_key(item["id"]),
+            {"data_url": str(data_url).strip(), "mime": mime, "size": size, "added_at": item["added_at"]},
+        )
         if isinstance(res, Err):
-            return Err(SdkError("failed to save background"))
-        self.logger.info("panel background set: mime={} size={} chars dim={}", mime, size, dim_value)
-        return Ok({"set": True, "mime": mime, "size": size, "dim": dim_value})
+            return Err(SdkError("failed to save image"))
+        if not await self._gallery_save_index(index):
+            await self.store.delete(gallery_img_key(item["id"]))
+            return Err(SdkError("failed to save image"))
+        self.logger.info("gallery image added: id={} mime={} chars={}", item["id"], mime, size)
+        return Ok({"id": item["id"], "items": index.get("items") or []})
 
     @ui.action(
-        label=tr("actions.clear_panel_background.label", default="移除面板背景"),
+        label=tr("actions.gallery_remove.label", default="从图库删除图片"),
+        tone="danger",
+    )
+    @plugin_entry(
+        id="gallery_remove",
+        name=tr("entries.gallery_remove.name", default="从图库删除图片"),
+        description=tr("entries.gallery_remove.description", default="删除图库中的一张图片；若它正被用作背景则一并解除（面板内部用）。"),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "item_id": {"type": "string", "description": tr("fields.galleryItemId", default="图库条目 id")},
+            },
+            "required": ["item_id"],
+        },
+    )
+    async def gallery_remove(self, item_id: str = "", **_: Any):
+        gid = str(item_id or "").strip()
+        if not gid:
+            return Err(SdkError("item_id required"))
+        index = await self._gallery_index()
+        if gallery_find(index, gid) is None:
+            return Err(SdkError("image not found"))
+        gallery_remove_item(index, gid)
+        await self.store.delete(gallery_img_key(gid))
+        if not await self._gallery_save_index(index):
+            return Err(SdkError("failed to update gallery"))
+        appearance = await self._saved_appearance()
+        if appearance.get("bg_id") == gid:
+            appearance["bg_id"] = ""
+            await self.store.set(_STORE_PANEL_APPEARANCE, appearance)
+        self.logger.info("gallery image removed: id={}", gid)
+        return Ok({"items": index.get("items") or [], "appearance": appearance})
+
+    @ui.action(
+        label=tr("actions.gallery_set_thumb.label", default="回填图库缩略图"),
         tone="default",
     )
     @plugin_entry(
-        id="clear_panel_background",
-        name=tr("entries.clear_panel_background.name", default="移除面板背景"),
-        description=tr("entries.clear_panel_background.description", default="移除自定义背景图，面板恢复默认渐变底。"),
-        input_schema={"type": "object", "properties": {}},
+        id="gallery_set_thumb",
+        name=tr("entries.gallery_set_thumb.name", default="回填图库缩略图"),
+        description=tr("entries.gallery_set_thumb.description", default="为图库条目补存缩略图（面板生成后回填；旧版迁移图与无缩略图片用）。"),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "item_id": {"type": "string", "description": tr("fields.galleryItemId", default="图库条目 id")},
+                "thumb": {"type": "string", "description": tr("fields.galleryThumb", default="缩略图 data URL（可空，面板稍后回填）")},
+            },
+            "required": ["item_id", "thumb"],
+        },
     )
-    async def clear_panel_background(self, **_: Any):
-        await self.store.delete(_STORE_PANEL_BG)
-        self.logger.info("panel background cleared")
-        return Ok({"set": False, "dim": _PANEL_BG_DEFAULT_DIM})
+    async def gallery_set_thumb(self, item_id: str = "", thumb: str = "", **_: Any):
+        gid = str(item_id or "").strip()
+        if not gid:
+            return Err(SdkError("item_id required"))
+        try:
+            parse_image_data_url(thumb, _GALLERY_THUMB_MAX_CHARS)
+        except ValueError as exc:
+            return Err(SdkError(str(exc)))
+        index = await self._gallery_index()
+        item = gallery_find(index, gid)
+        if item is None:
+            return Err(SdkError("image not found"))
+        item["thumb"] = str(thumb).strip()
+        if not await self._gallery_save_index(index):
+            return Err(SdkError("failed to update gallery"))
+        return Ok({"items": index.get("items") or []})
+
+    @ui.action(
+        label=tr("actions.get_gallery_image.label", default="读取图库原图"),
+        tone="default",
+    )
+    @plugin_entry(
+        id="get_gallery_image",
+        name=tr("entries.get_gallery_image.name", default="读取图库原图"),
+        description=tr("entries.get_gallery_image.description", default="按条目 id 拉取图库原图 data URL（面板按需加载背景用）。"),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "item_id": {"type": "string", "description": tr("fields.galleryItemId", default="图库条目 id")},
+            },
+            "required": ["item_id"],
+        },
+        metadata={"result_kind": "event"},
+    )
+    async def get_gallery_image(self, item_id: str = "", **_: Any):
+        gid = str(item_id or "").strip()
+        if not gid:
+            return Err(SdkError("item_id required"))
+        index = await self._gallery_index()
+        item = gallery_find(index, gid)
+        if item is None:
+            return Err(SdkError("image not found"))
+        res = await self.store.get(gallery_img_key(gid))
+        rec = res.value if isinstance(res, Ok) else None
+        if not isinstance(rec, dict) or not str(rec.get("data_url") or ""):
+            return Err(SdkError("image not found"))
+        return Ok({
+            "data_url": str(rec.get("data_url")),
+            "mime": str(rec.get("mime") or ""),
+            "name": str(item.get("name") or ""),
+        })
+
+    @ui.action(
+        label=tr("actions.set_panel_appearance.label", default="保存面板外观"),
+        tone="primary",
+    )
+    @plugin_entry(
+        id="set_panel_appearance",
+        name=tr("entries.set_panel_appearance.name", default="保存面板外观"),
+        description=tr("entries.set_panel_appearance.description", default="整包保存面板背景外观参数（所用图库图/填充/位置/滤镜/毛玻璃/文字浓度等）；未传的字段回默认，越界自动夹取（面板内部用）。"),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "bg_id": {"type": "string", "description": tr("fields.appearanceBgId", default="用作背景的图库条目 id，空串=不启用背景图")},
+                "fill": {"type": "string", "enum": list(APPEARANCE_FILLS), "description": tr("fields.appearanceFill", default="背景填充方式：cover 裁剪铺满 / contain 完整显示 / repeat 平铺 / stretch 拉伸")},
+                "position": {"type": "string", "enum": list(APPEARANCE_POSITIONS), "description": tr("fields.appearancePosition", default="背景位置（九宫格）")},
+                "blur": {"type": "number", "minimum": 0, "maximum": 30, "description": tr("fields.appearanceBlur", default="背景模糊（px）")},
+                "dim": {"type": "number", "minimum": 0, "maximum": 0.85, "description": tr("fields.appearanceDim", default="背景遮罩强度（0=不压暗）")},
+                "brightness": {"type": "number", "minimum": 30, "maximum": 150, "description": tr("fields.appearanceBrightness", default="背景亮度（%）")},
+                "saturate": {"type": "number", "minimum": 0, "maximum": 200, "description": tr("fields.appearanceSaturate", default="背景饱和度（%）")},
+                "contrast": {"type": "number", "minimum": 50, "maximum": 200, "description": tr("fields.appearanceContrast", default="背景对比度（%）")},
+                "glass": {"type": "number", "minimum": 0, "maximum": 40, "description": tr("fields.appearanceGlass", default="卡片毛玻璃强度（px）")},
+                "card_alpha": {"type": "number", "minimum": 0, "maximum": 100, "description": tr("fields.appearanceCardAlpha", default="卡片底色强度（%，100=不透明底色）")},
+                "text_weight": {"type": "number", "minimum": 40, "maximum": 100, "description": tr("fields.appearanceTextWeight", default="整体字体显示强度（%，越低越淡并自动描边）")},
+            },
+        },
+    )
+    async def set_panel_appearance(self, **kwargs: Any):
+        appearance = clamp_appearance(kwargs)
+        if appearance.get("bg_id"):
+            index = await self._gallery_index()
+            if gallery_find(index, str(appearance["bg_id"])) is None:
+                # 悬空引用（图被别处删了）：静默解除，不炸保存
+                appearance["bg_id"] = ""
+        res = await self.store.set(_STORE_PANEL_APPEARANCE, appearance)
+        if isinstance(res, Err):
+            return Err(SdkError("failed to save appearance"))
+        return Ok({"appearance": appearance})
 
     @plugin_entry(
         id="lift_mood",

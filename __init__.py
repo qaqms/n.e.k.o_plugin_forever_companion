@@ -88,6 +88,39 @@ from .core.affect import (
 from .core.affect import (
     _feed_tone_affect as _feed_tone_affect,
 )
+from .core.appearance import (
+    APPEARANCE_FILLS as APPEARANCE_FILLS,
+)
+from .core.appearance import (
+    APPEARANCE_POSITIONS as APPEARANCE_POSITIONS,
+)
+from .core.appearance import (
+    appearance_defaults as appearance_defaults,
+)
+from .core.appearance import (
+    clamp_appearance as clamp_appearance,
+)
+from .core.appearance import (
+    gallery_add_item as gallery_add_item,
+)
+from .core.appearance import (
+    gallery_find as gallery_find,
+)
+from .core.appearance import (
+    gallery_next_id as gallery_next_id,
+)
+from .core.appearance import (
+    gallery_normalize_index as gallery_normalize_index,
+)
+from .core.appearance import (
+    gallery_remove_item as gallery_remove_item,
+)
+from .core.appearance import (
+    legacy_to_gallery as legacy_to_gallery,
+)
+from .core.appearance import (
+    parse_image_data_url as parse_image_data_url,
+)
 from .core.cycle import (
     TideConfigError,
     build_status_payload,
@@ -214,6 +247,15 @@ from .core.state import (
     _FRAGMENT_DEFAULT_SLOT as _FRAGMENT_DEFAULT_SLOT,
 )
 from .core.state import (
+    _GALLERY_IMG_PREFIX as _GALLERY_IMG_PREFIX,
+)
+from .core.state import (
+    _GALLERY_MAX_ITEMS as _GALLERY_MAX_ITEMS,
+)
+from .core.state import (
+    _GALLERY_THUMB_MAX_CHARS as _GALLERY_THUMB_MAX_CHARS,
+)
+from .core.state import (
     _JOURNAL_DEFAULT_INTERVAL_DAYS as _JOURNAL_DEFAULT_INTERVAL_DAYS,
 )
 from .core.state import (
@@ -226,19 +268,22 @@ from .core.state import (
     _KNOWN_CATGIRLS_CACHE_TTL as _KNOWN_CATGIRLS_CACHE_TTL,
 )
 from .core.state import (
+    _LEGACY_BG_ID as _LEGACY_BG_ID,
+)
+from .core.state import (
     _MOOD_ACTION_DEFAULT_LABELS as _MOOD_ACTION_DEFAULT_LABELS,
 )
 from .core.state import (
     _MOOD_ACTION_LABEL_KEYS as _MOOD_ACTION_LABEL_KEYS,
 )
 from .core.state import (
-    _PANEL_BG_DEFAULT_DIM,
-    _PANEL_BG_MAX_CHARS,
-    _PANEL_BG_MIMES,
-    _STORE_LANLAN_INDEX,
-    _STORE_PROACTIVE,
-    _STORE_SETTINGS,
-    _LanlanShard,
+    _PANEL_BG_DEFAULT_DIM as _PANEL_BG_DEFAULT_DIM,
+)
+from .core.state import (
+    _PANEL_BG_MAX_CHARS as _PANEL_BG_MAX_CHARS,
+)
+from .core.state import (
+    _PANEL_BG_MIMES as _PANEL_BG_MIMES,
 )
 from .core.state import (
     _POSITIVE_ACTIONS as _POSITIVE_ACTIONS,
@@ -271,7 +316,19 @@ from .core.state import (
     _STORE_DIARY as _STORE_DIARY,
 )
 from .core.state import (
+    _STORE_GALLERY_INDEX as _STORE_GALLERY_INDEX,
+)
+from .core.state import (
+    _STORE_LANLAN_INDEX,
+    _STORE_PROACTIVE,
+    _STORE_SETTINGS,
+    _LanlanShard,
+)
+from .core.state import (
     _STORE_MOOD as _STORE_MOOD,
+)
+from .core.state import (
+    _STORE_PANEL_APPEARANCE as _STORE_PANEL_APPEARANCE,
 )
 from .core.state import (
     _STORE_PANEL_BG as _STORE_PANEL_BG,
@@ -433,31 +490,8 @@ MASTER_NAME_TOKEN = "{MASTER_NAME}"
 LANLAN_NAME_TOKEN = "{LANLAN_NAME}"
 
 
-def _parse_panel_bg(data_url: Any) -> tuple[str, int]:
-    """面板背景图 data URL 校验（纯函数，不碰存储）。
-
-    返回 (mime, 字符数)；非法时抛 ValueError，入口层翻译成 Err 给面板。
-    """
-    text = str(data_url or "").strip()
-    if not text.startswith("data:"):
-        raise ValueError("background must be a data: URL")
-    if len(text) > _PANEL_BG_MAX_CHARS:
-        raise ValueError("background image too large")
-    header = text.split(",", 1)[0]
-    mime = header[len("data:"):].split(";", 1)[0].strip().lower()
-    if mime not in _PANEL_BG_MIMES:
-        raise ValueError(f"unsupported image type: {mime or 'unknown'}")
-    if "," not in text:
-        raise ValueError("malformed data: URL")
-    return mime, len(text)
-
-
-def _clamp_panel_bg_dim(value: Any) -> float:
-    """遮罩强度归一到 [0, 0.85]；坏值回退默认，不报错（装饰性参数宽容处理）"""
-    try:
-        return min(0.85, max(0.0, float(value)))
-    except (TypeError, ValueError):
-        return _PANEL_BG_DEFAULT_DIM
+# 面板背景校验与外观参数归一已收拢到 core/appearance.py（1.2.0），
+# 经上方再导出暴露；此处不再保留同款复刻（旧单图时代的双份实现是漂移隐患）
 
 # Store 布局 / key 函数 / 常量表 / 纯工具函数 / _MoodState / _LanlanShard
 # 已抽出到 state.py（碎片提取在 fragments.py、个人日记页逻辑在 journal.py），

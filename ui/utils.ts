@@ -1,5 +1,6 @@
-// 面板共享逻辑：阶段配色/文案映射、情绪徽标语气、设置快照 → 表单初值
-import type { FormValues, Settings, Status, TFunc } from "./types"
+// 面板共享逻辑：阶段配色/文案映射、情绪徽标语气、设置快照 → 表单初值、
+// 面板外观（1.2.0 图库 + 可调背景）参数归一/渲染换算/canvas 压缩
+import type { Appearance, FormValues, Settings, Status, TFunc } from "./types"
 
 export const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -159,6 +160,169 @@ export function phaseLabels(t: TFunc): Record<string, string> {
 export function lanlanPhaseLabel(t: TFunc, phase?: string): string {
   if (!phase || phase === "error") return ""
   return phaseLabels(t)[phase] || ""
+}
+
+// ---- 面板外观（1.2.0）：参数归一 / 背景层样式 / 渲染变量 / 图片压缩 ----
+
+// 默认值复刻 1.1.x 观感（cover/center/glass16/dim0.3/无滤镜/底色与文字满格）；
+// 与后端 core/appearance.py 的 clamp_appearance 保持同一套域值，两边各归一一次
+export const APPEARANCE_DEFAULTS: AppearanceDefaults = {
+  bg_id: "", fill: "cover", position: "center",
+  blur: 0, dim: 0.3, brightness: 100, saturate: 100, contrast: 100,
+  glass: 16, card_alpha: 100, text_weight: 100,
+}
+
+// 类型别名绕开校验器：export const 注解里不能带泛型尖括号的逗号
+export type AppearanceDefaults = Record<string, string | number>
+
+export const APPEARANCE_FILLS = ["cover", "contain", "repeat", "stretch"]
+export const APPEARANCE_POSITIONS = [
+  "left top", "center top", "right top",
+  "left center", "center", "right center",
+  "left bottom", "center bottom", "right bottom",
+]
+
+const APPEARANCE_NUMERIC: NumericRangeMap = {
+  blur: [0, 30], dim: [0, 0.85], brightness: [30, 150],
+  saturate: [0, 200], contrast: [50, 200], glass: [0, 40],
+  card_alpha: [0, 100], text_weight: [40, 100],
+}
+
+// 校验器同样不认内联 Record 注解：先起别名（range 是 [min, max] 两元数组）
+export type NumericRange = number[]
+export type NumericRangeMap = Record<string, NumericRange>
+
+export function normAppearance(raw?: AppearanceDefaults | null): Appearance {
+  const src = (raw && typeof raw === "object") ? raw : {}
+  const out = Object.assign({} as AppearanceDefaults, APPEARANCE_DEFAULTS)
+  const bg = String(src.bg_id || "").trim()
+  out.bg_id = bg && bg.length <= 64 ? bg : ""
+  const fill = String(src.fill || "").trim().toLowerCase()
+  out.fill = APPEARANCE_FILLS.indexOf(fill) >= 0 ? fill : "cover"
+  const pos = String(src.position || "").trim().toLowerCase().replace(/\s+/g, " ")
+  out.position = APPEARANCE_POSITIONS.indexOf(pos) >= 0 ? pos : "center"
+  const keys = Object.keys(APPEARANCE_NUMERIC)
+  for (let i = 0; i < keys.length; i += 1) {
+    const name = keys[i]
+    const value = Number((src as Record<string, any>)[name])
+    const range = APPEARANCE_NUMERIC[name]
+    if (!isFinite(value)) {
+      out[name] = APPEARANCE_DEFAULTS[name]
+    } else {
+      out[name] = Math.min(range[1], Math.max(range[0], value))
+    }
+  }
+  return out as Appearance
+}
+
+export function appearanceEquals(a: Appearance, b: Appearance): boolean {
+  const keys = Object.keys(APPEARANCE_DEFAULTS)
+  for (let i = 0; i < keys.length; i += 1) {
+    if (String((a as Record<string, any>)[keys[i]]) !== String((b as Record<string, any>)[keys[i]])) return false
+  }
+  return true
+}
+
+// 背景层内联样式：填充/位置/滤镜全部按参数即时算（实时预览就靠它）。
+// 有模糊时把层向外扩 blur+6px，否则 filter 会把图像边缘拉出透明露底
+export function bgLayerStyle(ap: Appearance, dataUrl: string): Record<string, string> {
+  const size = ap.fill === "contain" ? "contain" : ap.fill === "repeat" ? "auto" : ap.fill === "stretch" ? "100% 100%" : "cover"
+  const filters: string[] = []
+  if (ap.blur > 0) filters.push(`blur(${ap.blur}px)`)
+  if (ap.brightness !== 100) filters.push(`brightness(${ap.brightness}%)`)
+  if (ap.saturate !== 100) filters.push(`saturate(${ap.saturate}%)`)
+  if (ap.contrast !== 100) filters.push(`contrast(${ap.contrast}%)`)
+  return {
+    backgroundImage: `url("${dataUrl}")`,
+    backgroundSize: size,
+    backgroundRepeat: ap.fill === "repeat" ? "repeat" : "no-repeat",
+    backgroundPosition: ap.position,
+    filter: filters.length ? filters.join(" ") : "none",
+    WebkitFilter: filters.length ? filters.join(" ") : "none",
+    inset: ap.blur > 0 ? `${-Math.round(ap.blur) - 6}px` : "0px",
+  }
+}
+
+// 写到根包装 div 上的 CSS 自定义属性（display:contents 不改布局），
+// 供 styles.ts 里 var() 消费；glass 恒写，其余仅偏离默认时写
+export type CssVarMap = Record<string, string>
+
+export function appearanceVars(ap: Appearance): CssVarMap {
+  const vars: CssVarMap = { "--tm-glass": `${ap.glass}px` }
+  vars["--tm-card-k"] = String(Math.round(ap.card_alpha) / 100)
+  if (ap.text_weight < 100) {
+    const w = ap.text_weight
+    const conc = Math.round(55 + (w - 40) * 0.75)
+    vars["--tm-text-color"] = `color-mix(in srgb, var(--text) ${conc}%, transparent)`
+    if (w < 95) {
+      const radius = Math.round((100 - w) / 10) + 2
+      const alpha = (((100 - w) / 60) * 0.5 + 0.15).toFixed(2)
+      vars["--tm-text-shadow"] = `0 1px ${radius}px rgba(2, 6, 23, ${alpha})`
+    }
+  }
+  return vars
+}
+
+function loadImageElement(src: string): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = () => reject(new Error("image decode failed"))
+    img.src = src
+  })
+}
+
+function drawScaled(img: any, edge: number, mime: string, quality: number): string {
+  const w = Number(img.naturalWidth || img.width) || 0
+  const h = Number(img.naturalHeight || img.height) || 0
+  if (!w || !h) throw new Error("image size unknown")
+  const scale = Math.min(1, edge / Math.max(w, h))
+  const canvas = document.createElement("canvas")
+  canvas.width = Math.max(1, Math.round(w * scale))
+  canvas.height = Math.max(1, Math.round(h * scale))
+  const ctx = canvas.getContext("2d")
+  if (!ctx) throw new Error("canvas unavailable")
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+  const out = canvas.toDataURL(mime, quality)
+  if (String(out || "").indexOf(`data:${mime}`) !== 0) throw new Error("encode failed")
+  return out
+}
+
+// 压缩管线：auto=限长边 2560 转 WebP（失败降 JPEG，仍不划算则用原图）+ 256px 缩略图；
+// raw=原样入册（仅补缩略图）；thumb=只生成缩略图（旧迁移图回填用）。
+// GIF/SVG 不转码（动图/矢量语义）：auto 对它们等同 raw；SVG 画进 canvas 会污染
+// toDataURL（SecurityError），缩略图尽力而为、失败留空由面板以占位样式呈现。
+export function compressImageDataUrl(
+  dataUrl: string,
+  mime: string,
+  mode: string,
+): Promise<{ dataUrl: string; thumb: string; skipped: boolean }> {
+  const animated = mime === "image/gif" || mime === "image/svg+xml"
+  return loadImageElement(dataUrl).then((img) => {
+    let out = dataUrl
+    let skipped = false
+    if (mode === "auto" && !animated) {
+      try {
+        let candidate = drawScaled(img, 2560, "image/webp", 0.82)
+        if (candidate.length >= dataUrl.length) {
+          candidate = drawScaled(img, 2560, "image/jpeg", 0.82)
+        }
+        out = candidate.length < dataUrl.length ? candidate : dataUrl
+        skipped = out === dataUrl
+      } catch {
+        out = dataUrl
+        skipped = true
+      }
+    }
+    // 缩略图一律尽力生成（raw 档入册也要有图可看）；失败留空由占位样式兜底
+    let thumb = ""
+    try {
+      thumb = drawScaled(img, 256, animated ? "image/png" : "image/webp", 0.7)
+    } catch {
+      thumb = ""
+    }
+    return { dataUrl: out, thumb, skipped }
+  })
 }
 
 export function settingsToForm(settings: Settings): FormValues {
