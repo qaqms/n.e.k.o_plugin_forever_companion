@@ -815,7 +815,7 @@ export const PANEL_STYLES = `
   display: flex; align-items: center; justify-content: space-between; gap: 18px;
   flex-wrap: wrap; margin-bottom: 18px;
 }
-.tm-hero-days { display: flex; flex-direction: column; gap: 2px; cursor: default; }
+.tm-hero-days { display: flex; flex-direction: column; gap: 6px; cursor: default; }
 .tm-hero-days-value {
   font-size: 40px; font-weight: 800; line-height: 1; letter-spacing: -0.5px;
   background: linear-gradient(180deg, #3c4a5e 0%, #5a6b82 100%);
@@ -846,7 +846,7 @@ export const PANEL_STYLES = `
 .tm-stat-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
 .tm-hero-card .tm-stat-strip { margin-bottom: 0; }
 .tm-stat-cell {
-  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
   padding: 10px 4px; border-radius: 10px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.32) 100%);
   border: 1px solid rgba(255, 255, 255, 0.7);
