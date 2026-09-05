@@ -419,6 +419,8 @@ Plugin Manager → 永远的陪伴：
 | `journal invite pushed for ...` | 个人日记邀请已递（写不写由她决定） |
 | `review composed for ... (turns=...)` | 我的日记成文一篇（期间轮数/累计篇数） |
 | `review compose dormant: slot ... unresolved` | 成文模型槽位未配置，我的日记休眠（去面板选槽位） |
+| `review compose failed for <角色>: ...` | 我的日记成文失败原因（1.2.2 审查轮起留痕）：`request failed`=直连端点不通（上一行有具体异常）；`empty or unparsable reply (len=..., head=...)`=模型回复为空或剥壳后无正文，带前 40 字符预览可判断话风问题 |
+| `tone direct chat completion failed: <异常类>: <信息>` / `... returned no usable content: payload head=...` | 直连小模型失败（语气感知/碎片提取/我的日记成文共用通道）：前者请求异常，后者 HTTP 通了但响应不是可用的 OpenAI 形态。1.2.2 审查轮起从 debug 升为 warning——面板提示"详见插件日志"自此可查 |
 | `reconcile nudge pushed during ...` | 冷战中检测到你在道歉/哄她，已提醒她该调心情转晴工具了 |
 | `re-registered N missing llm tools` | 检测到工具丢失并重注册（正常情况不应反复出现） |
 | `plugin store ready after N attempts` | 启动时持久存储延迟通电，插件已把它唤醒（N=1 即一次成功） |

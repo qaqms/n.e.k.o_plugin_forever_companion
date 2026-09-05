@@ -463,6 +463,15 @@ class SensesMixin:
         )
         text = parse_review_response(raw or "")
         if not text:
+            # 留痕分级（1.2.2 审查轮）：面板提示"稍后再试（详见插件日志）"，
+            # 过去这条路径完全静默（请求失败也只有 debug 级）——让用户查无可查。
+            # raw=None 请求失败（_post_chat_completion 已另有 warning）；
+            # 否则是回复为空/剥壳后无正文，带上长度与前 40 字符预览便于判断话风
+            if raw is None:
+                detail = "request failed (see 'tone direct chat completion' warning above)"
+            else:
+                detail = f"empty or unparsable reply (len={len(raw)}, head={str(raw)[:40]!r})"
+            self.logger.warning("review compose failed for {}: {}", lanlan, detail)
             return False, "compose_failed"
         stats_snapshot = dict(shard.review_stats)
         record = review_record(_now_utc().isoformat(timespec="seconds"), stats_snapshot, text)

@@ -337,7 +337,7 @@ def test_tick_self_heals_untrusted_session_after_power_on(tm, boot_factory):
 
 
 # ---------------------------------------------------------------------------
-# P4 · 随机默认锚点：可信当场落盘（不再依赖"捎带"）
+# P4 · 随机默认锚点：可信即落盘（不再依赖"捎带"）
 # ---------------------------------------------------------------------------
 
 
@@ -354,3 +354,75 @@ def test_randomized_anchor_persisted_on_trusted_startup(tm, boot_factory):
     saved = store.data["cycle@灵"]["anchor_date"]
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(saved)), f"锚点必须可信即落盘，got: {saved!r}"
     assert p._get_shard("灵").cycle["anchor_date"] == saved
+
+
+# ---------------------------------------------------------------------------
+# P5 · 成文失败可观测性：面板说"详见插件日志"，日志里就必须真有东西
+# ---------------------------------------------------------------------------
+
+
+def test_review_compose_failure_logs_detailed_reason(tm, boot_factory, monkeypatch):
+    """compose_failed 必须留 warning 并区分两种原因：请求失败(None) / 空或不可解析回复。
+
+    真实症状（2026-09-05 用户测试）：面板连点"立即写一篇"出现"模型调用失败或
+    回复为空，稍后再试（详见插件日志）"，插件日志里却一行都找不到。
+    """
+    p = _boot(tm, boot_factory, _ErrStore(tm, initial={"cycle@default": dict(_ENABLED_CYCLE)}))
+    logger = _RecLogger()
+    p.logger = logger
+    monkeypatch.setattr(
+        p, "_resolve_tone_slot",
+        lambda cfg, slot: {"base_url": "http://x", "api_key": "k", "model": "m"},
+    )
+    shard = p._get_shard("default")
+    stats = tm.new_stats()
+    for _ in range(12):
+        stats = tm.record_turn(stats)
+    shard.review_stats = stats
+
+    monkeypatch.setattr(p, "_post_chat_completion", lambda *a, **k: "")
+    written, reason = run(p._maybe_write_review("default", shard, force=True))
+    assert (written, reason) == (False, "compose_failed")
+    assert any(
+        "review compose failed" in w and "unparsable" in w and "len=0" in w
+        for w in logger.warnings
+    ), f"空回复必须留痕含长度，got: {logger.warnings}"
+
+    logger.warnings.clear()
+    monkeypatch.setattr(p, "_post_chat_completion", lambda *a, **k: None)
+    written2, reason2 = run(p._maybe_write_review("default", shard, force=True))
+    assert (written2, reason2) == (False, "compose_failed")
+    assert any(
+        "review compose failed" in w and "request failed" in w for w in logger.warnings
+    ), f"请求失败必须留痕并指向直连 warning，got: {logger.warnings}"
+
+
+def test_tone_direct_completion_logs_warnings(tm, boot_factory, monkeypatch):
+    """直连小模型的失败留痕从 debug 升为 warning（debug 不进日志文件），并区分
+    "请求异常"与"HTTP 通了但响应非 OpenAI 形态"（后者过去完全静默）。"""
+    p = boot_factory(current_lanlan="default")
+    logger = _RecLogger()
+    p.logger = logger
+
+    assert p._post_chat_completion("http://127.0.0.1:9", "k", "m", "hi") is None
+    assert any(
+        "tone direct chat completion failed" in w for w in logger.warnings
+    ), f"请求异常必须 warning 级留痕，got: {logger.warnings}"
+
+    import urllib.request
+
+    class _Resp:
+        def read(self):
+            return b'{"error": "upstream rejected"}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=None: _Resp())
+    assert p._post_chat_completion("http://x", "k", "m", "hi") is None
+    assert any(
+        "no usable content" in w and "upstream rejected" in w for w in logger.warnings
+    ), f"坏响应形态必须留痕带前缀预览，got: {logger.warnings}"

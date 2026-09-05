@@ -183,9 +183,11 @@ def _post_chat_completion(
     try:
         with urllib.request.urlopen(req, timeout=15.0) as resp:
             payload = _json.loads(resp.read().decode("utf-8"))
-    except Exception as exc:  # noqa: BLE001 - 直连失败静默降级
+    except Exception as exc:  # noqa: BLE001 - 直连失败仍降级，但必须留痕（1.2.2 审查轮）
+        # warning 而非 debug：debug 不进日志文件，面板提示"详见插件日志"时会
+        # 出现"让用户查、又查不到"的诊断盲区；调用点都有分钟级节流，不会刷屏
         if logger is not None:
-            logger.debug("tone direct chat completion failed: {}", exc)
+            logger.warning("tone direct chat completion failed: {}: {}", exc.__class__.__name__, exc)
         return None
     choices = payload.get("choices") if isinstance(payload, dict) else None
     if isinstance(choices, list) and choices:
@@ -194,6 +196,13 @@ def _post_chat_completion(
             content = message.get("content")
             if isinstance(content, str):
                 return content
+    # HTTP 通了但响应不是可用的 OpenAI 形态（错误体被 200 返回/网关劫持页等）：
+    # 过去同样静默 None，与"请求失败"无从区分——留一条带前 80 字符的 warning
+    if logger is not None:
+        logger.warning(
+            "tone direct chat completion returned no usable content: payload head={!r}",
+            str(payload)[:80],
+        )
     return None
 
 
