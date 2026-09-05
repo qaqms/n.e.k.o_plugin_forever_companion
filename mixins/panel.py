@@ -774,10 +774,11 @@ class PanelEntriesMixin:
         res_mood = await self._save_shard_mood(lanlan, shard)
         res_diary = await self._save_shard_diary(lanlan, shard)
         res_review = await self._save_shard_review(lanlan, shard)
-        await self._maybe_sync_proactive_pause()
+        # 重置清空了情绪动作：同步解除暂停，水位写结果一并聚合（1.2.2 审查轮 P2）
+        res_pause = await self._maybe_sync_proactive_pause()
         # 多键写入：任一 Err 即向用户报错（前面的写不回滚，保持简单；
         # 真失败极罕见，重试幂等）
-        persist_err = self._persist_error(res_cycle, res_mood, res_diary, res_review)
+        persist_err = self._persist_error(res_cycle, res_mood, res_diary, res_review, res_pause)
         if persist_err is not None:
             return persist_err
         return Ok({
@@ -800,15 +801,19 @@ class PanelEntriesMixin:
         return gallery_normalize_index(res.value if isinstance(res, Ok) else None)
 
     async def _gallery_save_index(self, index: JsonObject) -> bool:
-        res = await self.store.set(
+        # 统一写出口（1.2.2 审查轮 P1）：未通电时宿主静默空转返回 Ok——与其余
+        # 状态一致维持"当场生效、重启即丢"降级契约，但会留 store not ready
+        # warning；真失败（Err）返回 False 由入口向用户传播，不再假报保存成功
+        res = await self._store_write(
             _STORE_GALLERY_INDEX,
             {"items": index.get("items") or [], "next": int(index.get("next") or 1)},
+            "gallery index",
         )
         return not isinstance(res, Err)
 
     async def _saved_appearance(self) -> JsonObject:
-        """已保存的外观参数（归一）；无记录回退默认，不写盘。"""
-        res = await self.store.get(_STORE_PANEL_APPEARANCE)
+        """已保存的外观参数（归一）；无记录回退默认，不写盘。读失败经 _store_read 留痕。"""
+        res = await self._store_read(_STORE_PANEL_APPEARANCE)
         raw = res.value if isinstance(res, Ok) else None
         if isinstance(raw, dict):
             return clamp_appearance(raw)
@@ -827,23 +832,25 @@ class PanelEntriesMixin:
     )
     async def get_panel_gallery(self, **_: Any):
         index = await self._gallery_index()
-        res = await self.store.get(_STORE_PANEL_APPEARANCE)
+        res = await self._store_read(_STORE_PANEL_APPEARANCE)
         raw = res.value if isinstance(res, Ok) else None
         if isinstance(raw, dict):
             return Ok({"items": index.get("items") or [], "appearance": clamp_appearance(raw), "migrated": False})
         # 外观参数从未建立 → 尝试旧版单图一次性迁移
-        legacy_res = await self.store.get(_STORE_PANEL_BG)
+        legacy_res = await self._store_read(_STORE_PANEL_BG)
         migrated = legacy_to_gallery(legacy_res.value if isinstance(legacy_res, Ok) else None)
         if migrated is not None:
             gid, item, image, appearance = migrated
             if gallery_find(index, gid) is None:
-                set_res = await self.store.set(gallery_img_key(gid), image)
+                set_res = await self._store_write(gallery_img_key(gid), image, f"gallery image {gid} (migrated)")
                 if isinstance(set_res, Err):
                     return Err(SdkError("failed to migrate background"))
                 index, _ = gallery_add_item(index, item)
                 if not await self._gallery_save_index(index):
                     return Err(SdkError("failed to migrate background"))
-            save_res = await self.store.set(_STORE_PANEL_APPEARANCE, appearance)
+            save_res = await self._store_write(
+                _STORE_PANEL_APPEARANCE, appearance, "panel appearance (migrated)",
+            )
             if isinstance(save_res, Err):
                 return Err(SdkError("failed to migrate background"))
             self.logger.info("legacy panel background migrated into gallery: id={}", gid)
@@ -889,14 +896,15 @@ class PanelEntriesMixin:
         if not added:
             return Err(SdkError("gallery is full"))
         item["id"] = gallery_next_id(index)
-        res = await self.store.set(
+        res = await self._store_write(
             gallery_img_key(item["id"]),
             {"data_url": str(data_url).strip(), "mime": mime, "size": size, "added_at": item["added_at"]},
+            f"gallery image {item['id']}",
         )
         if isinstance(res, Err):
             return Err(SdkError("failed to save image"))
         if not await self._gallery_save_index(index):
-            await self.store.delete(gallery_img_key(item["id"]))
+            await self._store_delete(gallery_img_key(item["id"]), f"gallery image {item['id']} (rollback)")
             return Err(SdkError("failed to save image"))
         self.logger.info("gallery image added: id={} mime={} chars={}", item["id"], mime, size)
         return Ok({"id": item["id"], "items": index.get("items") or []})
@@ -925,13 +933,18 @@ class PanelEntriesMixin:
         if gallery_find(index, gid) is None:
             return Err(SdkError("image not found"))
         gallery_remove_item(index, gid)
-        await self.store.delete(gallery_img_key(gid))
+        # 图本体删除是 best-effort（索引先除名即可对用户不可见；写失败留痕，
+        # 残留 blob 无引用不致数据错乱）；统一删除出口在 P1 收编
+        await self._store_delete(gallery_img_key(gid), f"gallery image {gid}")
         if not await self._gallery_save_index(index):
             return Err(SdkError("failed to update gallery"))
         appearance = await self._saved_appearance()
         if appearance.get("bg_id") == gid:
+            # 解除对该图的引用（写失败不拦删除：悬空 bg_id 在读取与保存侧自愈）
             appearance["bg_id"] = ""
-            await self.store.set(_STORE_PANEL_APPEARANCE, appearance)
+            await self._store_write(
+                _STORE_PANEL_APPEARANCE, appearance, f"panel appearance (unref {gid})",
+            )
         self.logger.info("gallery image removed: id={}", gid)
         return Ok({"items": index.get("items") or [], "appearance": appearance})
 
@@ -994,7 +1007,7 @@ class PanelEntriesMixin:
         item = gallery_find(index, gid)
         if item is None:
             return Err(SdkError("image not found"))
-        res = await self.store.get(gallery_img_key(gid))
+        res = await self._store_read(gallery_img_key(gid))  # 读失败经统一出口留痕
         rec = res.value if isinstance(res, Ok) else None
         if not isinstance(rec, dict) or not str(rec.get("data_url") or ""):
             return Err(SdkError("image not found"))
@@ -1036,7 +1049,9 @@ class PanelEntriesMixin:
             if gallery_find(index, str(appearance["bg_id"])) is None:
                 # 悬空引用（图被别处删了）：静默解除，不炸保存
                 appearance["bg_id"] = ""
-        res = await self.store.set(_STORE_PANEL_APPEARANCE, appearance)
+        # 统一写出口（P1）：真失败 Err 传播、未通电留 not-ready 预警（降级契约
+        # 与其余状态一致——当场生效、重启即丢，日志可见）
+        res = await self._store_write(_STORE_PANEL_APPEARANCE, appearance, "panel appearance")
         if isinstance(res, Err):
             return Err(SdkError("failed to save appearance"))
         return Ok({"appearance": appearance})
@@ -1061,7 +1076,8 @@ class PanelEntriesMixin:
         shard.mood.started_at = 0.0
         shard.mood.expires_at = 0.0
         res_mood = await self._save_shard_mood(lanlan, shard)
-        await self._maybe_sync_proactive_pause()
+        # 解除情绪 → 解除暂停；水位写失败纳入聚合向用户可见（1.2.2 审查轮 P2）
+        res_pause = await self._maybe_sync_proactive_pause()
         # 手动解除也要让模型知道状态已清（工具路径有 note，UI 路径没有）
         self.push_message(
             visibility=[],
@@ -1078,7 +1094,7 @@ class PanelEntriesMixin:
             coalesce_key=f"{self.plugin_id}.mood_instruction",
             metadata={"message_type": f"{self.plugin_id}.mood_instruction", "action": "lifted"},
         )
-        persist_err = self._persist_error(res_mood)
+        persist_err = self._persist_error(res_mood, res_pause)
         if persist_err is not None:
             return persist_err
         return Ok({"cleared": True, "previous_action": previous, "lanlan": lanlan})
@@ -1504,20 +1520,20 @@ class PanelEntriesMixin:
             _review_key(name), _review_stats_key(name),  # 我的日记（0.8.0）：篇目与旧独立 stats key
             _stats_key(name),  # 相处统计（1.1.0）
         ):
-            res = await self.store.delete(key)
-            if isinstance(res, Err):
-                self.logger.warning("prune: delete {} failed: {}", key, res.error)
-                if first_delete_err is None:
-                    first_delete_err = res
+            # 统一删除出口（1.2.2 审查轮 P1）：未通电/真失败都留痕，行为不变
+            res = await self._store_delete(key, f"prune {key}")
+            if isinstance(res, Err) and first_delete_err is None:
+                first_delete_err = res
         self._lanlan_index.remove(name)
         res_index = await self._save_lanlan_index()
         self._shards.pop(name, None)
-        # 孤儿 shard 若还带着生效情绪，引用计数水位需立即自愈
-        await self._maybe_sync_proactive_pause()
+        # 孤儿 shard 若还带着生效情绪，引用计数水位需立即自愈（结果纳入聚合，P2）
+        res_pause = await self._maybe_sync_proactive_pause()
         # 批次2：任一 delete / 索引落盘失败都向用户传播 Err（盘上残留的 key 仍在，
         # 角色数据并未清干净——过去只 warning，面板却显示"已清除"）
         persist_err = self._persist_error(
-            first_delete_err if first_delete_err is not None else Ok(None), res_index,
+            first_delete_err if first_delete_err is not None else Ok(None),
+            res_index, res_pause,
         )
         if persist_err is not None:
             return persist_err

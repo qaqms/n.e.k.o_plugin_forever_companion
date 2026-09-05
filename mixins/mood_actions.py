@@ -93,6 +93,15 @@ class MoodActionsMixin:
         线程锁串行化：定时器线程与入口临时循环可能并发触发——
         引用计数（proactive_state）是全局开关上唯一的并发点，由本锁保护。
         """
+        # 1.2.2 审查轮 P3：不可信载入的自愈门控提上监督步骤第一行。
+        # _ensure_shard 里的同款门控要求"先有人碰分片"才会触发，而 tick 在
+        # 任何 _ensure_shard 之前就有 any_shard_enabled 短路——幻影分片全是关的，
+        # 于是"不可信启动 + store 中途回电 + 用户没碰面板/没调工具"的组合下
+        # 注入与情绪链路整场静默死掉（数据不毁，但没人来救）。tick 第一步就
+        # 是本方法（面板轮询/入口调用同样先经此），把门控放这里即恢复自愈；
+        # 纯属性读取零成本，_retrusting 防重入与 _ensure_shard 门控共享
+        if not self._state_trusted and not self._retrusting and self._store_ready:
+            await self._retrust_state()
         if not self._supervise_lock.acquire(timeout=10):
             return  # 另一个驱动源正在处理，本趟跳过
         try:
@@ -455,15 +464,17 @@ class MoodActionsMixin:
         # 等下一次身体注入捎带的话（默认每 3 条消息）动作早就过期了
         self._push_mood_instruction(name, shard)
         # 情绪动作生效后同步主动搭话暂停（白名单引用计数：只有重度负面动作
-        # 会真正暂停——防小游戏/新闻推送窜台；中间态/正面动作此处为无操作）
-        await self._maybe_sync_proactive_pause()
+        # 会真正暂停——防小游戏/新闻推送窜台；中间态/正面动作此处为无操作）。
+        # 1.2.2 审查轮 P2：水位写失败纳入聚合——"暂停了但水位没存住"是
+        # 总开关卡死的源头，对用户必须可见（内存动作照常生效，重启后自愈）
+        res_pause = await self._maybe_sync_proactive_pause()
         payload: JsonObject = {
             "action": action,
             "duration_minutes": duration_min if timed else 0,
             "reason": shard.mood.reason,
             "lanlan": name,
         }
-        persist_err = self._persist_error(res_mood, res_stats, res_review)
+        persist_err = self._persist_error(res_mood, res_stats, res_review, res_pause)
         if persist_err is not None:
             # 动作已在内存与上下文中生效（降级契约）；只是盘上缺一两笔——
             # 如实报错，让调用它的工具/入口向用户传播

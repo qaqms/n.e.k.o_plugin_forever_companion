@@ -424,6 +424,45 @@ zh-CN / en i18n
   prune_lanlan 部分失败后重试会被"角色不在名单"拒绝（Err 已如实报，残留键可见
   需带外处理）；同轮多 1-2 次本地 SQLite 写（批次1 审计已认可开销可忽略）。
 
+### 1.2.2 审查轮（复核批次1/2 的复审修复，同版未发布故并入 1.2.2）
+
+批次2 的"全链路审计"存在三处漏网与一处文档不实，复核后同轮修复：
+
+- **P1 外观/图库并入统一出口**：图库与外观的全部读写（`gallery_index` /
+  `gallery_img/<id>` / `panel_appearance` / `panel_bg` 迁移读）当年直连
+  `self.store.set/get/delete`，绕过 `_store_write`/`_store_read`——未通电期间
+  导入壁纸/保存外观"面板显示成功、盘上没写"且零 warning（README 却声称
+  "外观也有此预警"）。现状：全部改道统一出口（新增 `_store_delete`：未通电留
+  not-deleted 预警、真失败留痕回传）；未通电仍走"当场生效"降级契约，但自此
+  全键一致留痕。幻影覆写在该块本不成立（图库无内存缓存，每次读盘合并再写）；
+  `gallery_remove` 索引写失败回滚 blob 由入口 Err 传播、blob 删除保持
+  best-effort（索引先除名即对用户不可见，残留 blob 无引用不致错乱）。
+- **P2 主动搭话水位原子化**：`proactive_state` 四处落盘全不检查且顺序为
+  "先翻总开关→后存水位"——水位真失败+强杀留下"开关已关+盘上无水位"，重启
+  被误判"用户本来就没开"，主动搭话永久卡死。修复：新增 `_snapshot_proactive`
+  （纯函数，`core/state.py`）+ `_proactive_persisted` 脏检查快照，
+  `_persist_proactive_state` 成为水位唯一落盘出口（成功才同步快照，失败留脏，
+  监督循环每趟 10s 收尾自动补写）；暂停改为**水位先落盘才准翻开关**（写失败
+  撤销标记、回传 Err、不制造无据可查的关闭），恢复改为**开关先复原再清水位**
+  （清除失败保留记录幂等重试）；`_maybe_sync_proactive_pause` 回传 Err，由
+  `_apply_mood_action`/`lift_mood`/`reset_all`/`prune_lanlan` 纳入
+  `_persist_error` 聚合，对用户可见。存量已卡死用户（修复前产生的状态）无法
+  与"用户自己关的"区分，不做猜测恢复，README 如实记为限制。
+- **P3 tick 自愈门控上提**：`_ensure_shard` 的中途通电门控要求"先有人碰分片"
+  才触发，而 tick 在 `any_shard_enabled` 处即短路（幻影全关），"不可信启动 +
+  store 中途回电 + 用户没碰面板/工具"组合下注入与情绪链路整场静默死掉（数据
+  安全、功能停摆）。修复：同款门控（三行属性判断零成本）提上 `_supervise_once`
+  第一行——tick/面板轮询 dashboard/各入口都先经此，恢复自愈；`_ensure_shard`
+  门控保留（覆盖首条 tick 之前的入口调用）。
+- **P4 随机锚点可信即落盘**：`_refresh_config` 的随机默认锚点过去只写内存、
+  靠"后续任意 cycle 写捎带"，注释却写"立即落盘固化"（自相矛盾）；强杀在首笔
+  cycle 写之前 → 锚点重新随机。修复：可信会话当场 `_save_shard_cycle`；
+  不可信会话仍只写内存（落盘即幻影覆写）。注释按实际行为改写。
+- 回归：`tests/test_save_chain_review.py` 8 条（水位写失败不翻开关+恢复先翻
+  后清/未通电外观留痕/索引写失败回滚 blob/外观真失败传播/tick 自愈/锚点即
+  落盘）；回退源码后 5/8 以正确理由红（其余 3 条锁的是修复前既有的行为面）。
+  全套 294 绿。
+
 ## Out of Scope
 
 - 情绪日记的 LLM 自动总结写入（v1 只提供模型手写日记工具与人工查看）

@@ -99,6 +99,21 @@ def _stats_key(lanlan: str) -> str:
     return f"stats@{lanlan}"
 
 
+def _snapshot_proactive(state: JsonObject) -> JsonObject:
+    """主动搭话水位的深拷贝快照（1.2.2 审查轮 P2）。
+
+    水位 proactive_state 的唯一职责是断电/强杀后恢复宿主总开关的原值，
+    内存 dict 会被就地改（prev/paused_by），落盘与脏检查都必须拿独立拷贝；
+    形状归一（prev 仅 dict|None、paused_by 恒为 list[str]）让"是否变了"
+    能直接 == 比较。
+    """
+    prev = state.get("prev")
+    return {
+        "prev": dict(prev) if isinstance(prev, dict) else None,
+        "paused_by": [str(n) for n in state.get("paused_by") or [] if str(n)],
+    }
+
+
 # 情绪动作统一采用潮汐意象命名（id 即存储键）
 _MOOD_ACTION_LABEL_KEYS = {
     "ebb_tide": "mood.ebb_tide",

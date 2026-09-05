@@ -397,6 +397,9 @@ from .core.state import (
 from .core.state import (
     _review_stats_key as _review_stats_key,
 )
+from .core.state import (  # 水位快照纯函数再导出（1.2.2 审查轮 P2，host_coord/shards 共用）
+    _snapshot_proactive as _snapshot_proactive,
+)
 from .core.state import (
     _stats_key as _stats_key,
 )
@@ -541,6 +544,11 @@ class ForeverCompanionPlugin(
         # 主动搭话暂停的引用计数水位（Store key "proactive_state"）：
         # prev = 暂停前总开关原值（None = 未在暂停中），paused_by = 有生效情绪的角色集
         self._proactive_state: JsonObject = {"prev": None, "paused_by": []}
+        # 水位最近一次成功落盘的快照（1.2.2 审查轮 P2）：_persist_proactive_state
+        # 的脏检查参照——写失败（DB 锁/磁盘满）时内存已改而快照未动，
+        # 监督循环每趟（10s）自动重试直到落稳，把"水位没存住即被强杀"的
+        # 卡死窗口从"整个会话"压缩到"两次写尝试之间"
+        self._proactive_persisted: JsonObject = {"prev": None, "paused_by": []}
         # 当前角色解析缓存（15s TTL）；_last_resolved_lanlan 供同步路径（属性代理）回落
         self._current_lanlan_cache: tuple[str, float] = ("", -1000.0)
         self._last_resolved_lanlan = ""

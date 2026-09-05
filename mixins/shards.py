@@ -44,6 +44,7 @@ from ..core.state import (
     _parse_iso_ts,
     _review_key,
     _review_stats_key,
+    _snapshot_proactive,
     _stats_key,
     _weekly_key,
 )
@@ -350,12 +351,12 @@ class ShardsMixin:
 
         # 锚点缺失（shard 与全局配置都没有）：随机化的默认锚点--反推一个日期
         # 使"今天"落在本轮平稳期的随机位置（见 cycle.randomized_default_anchor）。
-        # 装完前几天必是平稳期、每次安装起点各不相同，且立即落盘固化
-        # （重启不重新随机）；只写内存，随后 shard 落盘/shutdown 会带上
-        #（不写配置文件，见上）
+        # 装完前几天必是平稳期、每次安装起点各不相同。1.2.2 审查轮（P4）起
+        # 可信会话当场落盘固化（重启不重新随机，也不依赖后续任意 cycle 写捎带）；
+        # 不可信会话只写内存——此刻落盘就是幻影覆写（不写配置文件，见上）
         if not str(tide.get("anchor_date") or "").strip():
             today = self._today_str(tide)
-            for shard in self._shards.values():
+            for lanlan, shard in self._shards.items():
                 if shard.loaded and not str(shard.cycle.get("anchor_date") or "").strip():
                     params = self._effective_cycle_settings(shard)
                     anchor = randomized_default_anchor(
@@ -366,6 +367,8 @@ class ShardsMixin:
                         ovulation_window=int(params["ovulation_window"]),
                     )
                     shard.cycle["anchor_date"] = anchor.isoformat()
+                    if self._state_trusted:
+                        await self._save_shard_cycle(lanlan, shard)
                     self.logger.info(
                         "randomized default anchor {} assigned (luteal-phase start)",
                         anchor.isoformat(),
@@ -525,6 +528,9 @@ class ShardsMixin:
                 "prev": dict(prev) if isinstance(prev, dict) else None,
                 "paused_by": [str(n) for n in raw.get("paused_by") or [] if str(n)],
             }
+        # 水位快照与盘上同步起点（1.2.2 审查轮 P2）：此后 _persist_proactive_state
+        # 的脏检查以此为参照，只写真正发生过的变化
+        self._proactive_persisted = _snapshot_proactive(self._proactive_state)
         await self._migrate_legacy_state_if_needed()
         # 载入所有已知角色的 shard：主动搭话引用计数要看全量生效情绪，
         # 只载当前角色会把"别的角色还在冷战"漏算
@@ -584,7 +590,8 @@ class ShardsMixin:
         await self._save_shard_cycle(lanlan, shard)
         await self._save_shard_mood(lanlan, shard)
         await self._save_shard_diary(lanlan, shard)
-        await self._save_proactive_state()
+        # 迁移改过水位（prev 搬入/paused_by 标记）：走脏检查出口，成功后同步快照
+        await self._persist_proactive_state()
         self.logger.info("legacy single-character state migrated to shard {}", lanlan)
 
     # ==========================================
@@ -614,6 +621,18 @@ class ShardsMixin:
         res = await self.store.get(key)
         if not isinstance(res, Ok):
             self.logger.warning("store read failed for {}: {}", key, res.error)
+        return res
+
+    async def _store_delete(self, key: str, label: str) -> Result[Any]:
+        """统一删除出口（1.2.2 审查轮 P1）：与 _store_write 同款语义——未通电
+        留 warning（宿主静默空转返回 Ok(False/None)，不是失败），真失败（Err）
+        留 warning 并原样回传 Result，由调用方决定是否向用户传播。
+        过去 prune 之外的删除（图库删图等）直连 store.delete 全部零留痕。"""
+        if not self._store_ready:
+            self.logger.warning("store not ready: {} not deleted", label)
+        res = await self.store.delete(key)
+        if isinstance(res, Err):
+            self.logger.warning("delete {} failed: {}", label, res.error)
         return res
 
     @staticmethod
