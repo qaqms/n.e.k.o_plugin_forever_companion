@@ -39,6 +39,7 @@ from ..core.cycle import (
     parse_anchor_date,
 )
 from ..core.journal import page_header
+from ..core.onboarding import build_readiness, make_guide_record, wizard_pending
 from ..core.review import new_stats as review_new_stats
 from ..core.review import review_due
 from ..core.state import (
@@ -288,7 +289,32 @@ class PanelEntriesMixin:
             # 相处统计（1.1.0）：数字摘要 + 徽章墙进 5s 轮询（纯本地即时计算，
             # 开销可忽略）；热力图/月报数据量大，走 get_stats 入口按需拉取
             "stats_summary": self._stats_summary_view(shard),
+            # 新手引导 + 就绪清单（1.2.6）：wizard_pending 读内存位（面板关闭
+            # 向导时同步更新，5s 轮询滞后期不会重复弹窗）；清单纯本地即时计算，
+            # 零模型开销、零新增 IO
+            "onboarding": {
+                "wizard_pending": wizard_pending(self._guide),
+                "guide": dict(self._guide),
+                "readiness": build_readiness({
+                    "rhythm": self._enabled(shard),
+                    "anchor": bool(
+                        str(shard.cycle.get("anchor_date") or self._tide_cfg.get("anchor_date") or "")
+                    ),
+                    "mood": bool(self._mood_cfg.get("enabled", True)),
+                    "channels": self._channels_any_live(channel_status),
+                    "together": bool(shard.stats.get("first_seen")),
+                }),
+            },
         }
+
+    @staticmethod
+    def _channels_any_live(channel_status: JsonObject) -> bool:
+        """语气/碎片/成文三条模型通道是否至少一路可用（就绪清单信号）。"""
+        for key in ("tone", "fragments", "review"):
+            item = channel_status.get(key) or {}
+            if item.get("enabled") and not item.get("dormant_reason"):
+                return True
+        return False
 
     def _stats_summary_view(self, shard: _LanlanShard) -> JsonObject:
         """相处统计的轮询轻量视图：数字摘要 + 徽章墙（无热力图/月报本体）。"""
@@ -693,6 +719,41 @@ class PanelEntriesMixin:
             today=self._today_str(),
             **params,
         )
+
+    @ui.action(
+        label=tr("actions.set_onboarding.label", default="记录引导进度"),
+        refresh_context=True,
+    )
+    @plugin_entry(
+        id="set_onboarding",
+        name=tr("entries.set_onboarding.name", default="更新新手引导状态"),
+        description=tr(
+            "entries.set_onboarding.description",
+            default="记录新手引导已完成/已跳过，或重新打开引导（面板专用，不由模型调用）。",
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["done", "skip", "reopen"]},
+            },
+            "required": ["action"],
+        },
+    )
+    async def set_onboarding(self, action: str = "done", **_):
+        """新手引导收尾（1.2.6）：done/skip 后不再自动弹，reopen 清回未引导态。
+
+        先改内存位再落盘：未通电会话里盘写不进去，但本会话内至少不重复打扰
+        （既定"当场生效、重启即丢"降级契约）；真写失败（磁盘满/DB 锁）回传 Err，
+        面板据此提示而不是谎报"引导已保存"。
+        """
+        if action not in ("done", "skip", "reopen"):
+            return Err(SdkError("action 必须是 done/skip/reopen 之一"))
+        self._guide = make_guide_record(action, _now_utc().isoformat(timespec="seconds"))
+        res = await self._save_guide()
+        if isinstance(res, Err):
+            return res
+        self.logger.info("onboarding guide updated: wizard={}", self._guide["wizard"])
+        return Ok(dict(self._guide))
 
     @ui.action(
         label=tr("actions.advance.label", default="快进一天"),

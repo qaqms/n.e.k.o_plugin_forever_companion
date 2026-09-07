@@ -2,9 +2,10 @@
 // + 近况与相处（三本日记速览 + 相处信号）。顶栏瘦身后所有"看状态"的需求都在这页。
 // hosted-tsx 约束：唯一 export 在任何 JSX 闭合标签之前；辅助组件放文件尾部靠函数声明提升
 import { Card, StatusBadge, Tooltip } from "@neko/plugin-ui"
-import type { Mood, ReviewBrief, Settings, Status, TFunc } from "./types"
+import type { Mood, Onboarding, ReviewBrief, Settings, Status, TFunc } from "./types"
 import { arousalColor, arousalScore, moodDotColor, moodWordOf, stripEmoji, valenceBarColor, valenceScore, phaseColorOf } from "./utils"
 import { RingStatus } from "./ring"
+import { GuideCard } from "./guidecard"
 
 export function OverviewPane(props: {
   t: TFunc
@@ -17,11 +18,16 @@ export function OverviewPane(props: {
   journalIndex: Array<{ entry_count?: number }>
   reviewBrief?: ReviewBrief
   weekActivity?: number
+  // 新手引导/就绪清单（1.2.6）：清单数据随 dashboard 即时下发，零新增拉取
+  onboarding?: Onboarding
+  canEnable?: boolean
+  onEnable?: () => void
   onGoto: (tab: string) => void
 }) {
   const {
     t, status, mood, settings, lanlan,
-    diaryTotal, fragmentTotal, journalIndex, reviewBrief, weekActivity, onGoto,
+    diaryTotal, fragmentTotal, journalIndex, reviewBrief, weekActivity,
+    onboarding, canEnable, onEnable, onGoto,
   } = props
 
   const enabled = status.enabled !== false
@@ -31,6 +37,15 @@ export function OverviewPane(props: {
 
   return (
     <div className="tm-pane">
+      {/* 配置引导（1.2.6）：还差什么一直提醒，全就绪自动收起 */}
+      <GuideCard
+        t={t}
+        readiness={onboarding ? onboarding.readiness : undefined}
+        canEnable={canEnable !== false}
+        onEnable={onEnable || (() => {})}
+        onGoto={onGoto}
+      />
+
       {/* ---- 她的现在 ---- */}
       <Card title={t("panel.overview.now", { defaultValue: "她的现在" })}>
         <div className="tm-ov-hero">

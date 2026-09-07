@@ -14,9 +14,11 @@ export function ManagePane(props: {
   lanlan?: string
   canPrune: boolean
   onPruneLanlan: (name: string) => void
+  // 再看一次新手引导（1.2.6）：只清引导记录，不动任何配置
+  onReopenGuide?: () => void
   children?: any
 }) {
-  const { t, form, updateForm, resetAll, lanlanList, lanlan, canPrune, onPruneLanlan } = props
+  const { t, form, updateForm, resetAll, lanlanList, lanlan, canPrune, onPruneLanlan, onReopenGuide } = props
 
   const timezoneOptions = [
     { value: "auto", label: t("panel.settings.tzAuto", { defaultValue: "自动（跟随系统）" }) },
@@ -45,6 +47,12 @@ export function ManagePane(props: {
           label={t("panel.settings.debugMode", { defaultValue: "调试模式（注册 debug_* 调试入口，把内部机制快进到秒级可验证）" })}
           onChange={(value: boolean) => updateForm({ debug_mode: value })}
         />
+        {onReopenGuide ? (
+          <div className="tm-reopen-guide">
+            <span className="tm-reopen-hint">{t("panel.manage.reopenHint", { defaultValue: "想重新走一遍首次配置向导？（不会改动任何设置）" })}</span>
+            <Button onClick={onReopenGuide}>{t("panel.manage.reopenGuide", { defaultValue: "再看一次新手引导" })}</Button>
+          </div>
+        ) : null}
       </Card>
 
       {/* 面板外观由 panel.tsx 以 children 注入（保持背景图状态在顶层管理） */}

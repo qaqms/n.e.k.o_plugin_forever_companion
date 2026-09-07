@@ -608,6 +608,11 @@ export const PANEL_STYLES = `
   .tm-tabs { background: rgba(15, 23, 42, 0.4); border-right-color: rgba(148, 163, 184, 0.12); }
   .tm-lanlan-row { background: rgba(15, 23, 42, 0.45); border-color: rgba(148, 163, 184, 0.16); }
   .tm-lanlan-row[data-orphan="1"] { border-color: rgba(245, 108, 108, 0.3); background: rgba(245, 108, 108, 0.08); }
+  /* 新手引导/就绪清单（1.2.6）暗色变体：与 tm-lanlan-row 同款深空玻璃 */
+  .tm-ob-feat, .tm-ob-state, .tm-ob-chan, .tm-guide-row {
+    background: rgba(15, 23, 42, 0.45); border-color: rgba(148, 163, 184, 0.16);
+  }
+  .tm-guide-must { color: #fbbf24; background: rgba(245, 158, 11, 0.16); }
   .tm-tab-active {
     background: linear-gradient(180deg, rgba(51, 65, 85, 0.8) 0%, rgba(30, 41, 59, 0.6) 100%);
     border-color: rgba(148, 163, 184, 0.22);
@@ -1319,4 +1324,81 @@ export const PANEL_STYLES = `
   width: 4px; height: 4px; margin: -2px 0 0 -2px;
   border-radius: 999px; background: currentColor;
 }
+
+/* ---- 新手引导向导（1.2.6）---- */
+.tm-ob-step { display: grid; gap: 10px; padding: 4px 0 8px; }
+.tm-ob-lead { margin: 0; color: var(--text); font-size: 13.5px; line-height: 1.7; }
+.tm-ob-note { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.tm-ob-feats { display: grid; gap: 8px; }
+.tm-ob-feat {
+  display: grid; gap: 2px; padding: 9px 12px; border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.5); border: 1px solid rgba(255, 255, 255, 0.7);
+}
+.tm-ob-feat-name { font-size: 13px; font-weight: 700; color: var(--text); }
+.tm-ob-feat-sub { font-size: 12px; line-height: 1.55; color: var(--muted); }
+.tm-ob-state {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 12px; border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.5); border: 1px solid rgba(255, 255, 255, 0.7);
+  font-size: 13px; color: var(--text);
+}
+.tm-ob-state-ok { color: #2e9e6b; font-weight: 650; }
+.tm-ob-check { font-weight: 800; }
+.tm-ob-chans { display: grid; gap: 6px; }
+.tm-ob-chan {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.5); border: 1px solid rgba(255, 255, 255, 0.7);
+  font-size: 12.5px; color: var(--text);
+}
+.tm-ob-chan-spacer { flex: 1; }
+.tm-ob-tips { display: grid; gap: 6px; }
+.tm-ob-tip { font-size: 12.5px; line-height: 1.6; color: var(--text); padding-left: 14px; position: relative; }
+.tm-ob-tip::before {
+  content: ""; position: absolute; left: 2px; top: 7px;
+  width: 5px; height: 5px; border-radius: 999px; background: var(--primary);
+}
+.tm-ob-foot { display: flex; align-items: center; gap: 8px; width: 100%; }
+.tm-ob-foot-right { display: flex; gap: 8px; margin-left: auto; }
+.tm-ob-dots { display: flex; gap: 6px; margin: 0 auto; }
+.tm-ob-dot {
+  width: 7px; height: 7px; border-radius: 999px;
+  background: rgba(148, 163, 184, 0.4);
+  transition: background 160ms ease, transform 160ms ease;
+}
+.tm-ob-dot-on { background: var(--primary); transform: scale(1.25); }
+
+/* ---- 就绪清单（1.2.6）---- */
+.tm-guide-progress { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.tm-guide-bar {
+  flex: 1; height: 6px; border-radius: 999px; overflow: hidden;
+  background: rgba(148, 163, 184, 0.22);
+}
+.tm-guide-bar-fill {
+  display: block; height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg, var(--primary), #93c5fd);
+  transition: width 320ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.tm-guide-count { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tm-guide-list { display: grid; gap: 6px; }
+.tm-guide-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 10px; border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.5); border: 1px solid rgba(255, 255, 255, 0.7);
+}
+.tm-guide-row-ok { opacity: 0.62; }
+.tm-guide-dot {
+  flex: 0 0 9px; width: 9px; height: 9px; border-radius: 999px;
+  background: rgba(148, 163, 184, 0.45);
+}
+.tm-guide-dot-ok { background: #34b27b; }
+.tm-guide-text { font-size: 12.5px; color: var(--text); line-height: 1.5; }
+.tm-guide-must {
+  font-size: 10.5px; font-weight: 700; color: #b45309;
+  background: rgba(245, 158, 11, 0.14); border-radius: 999px; padding: 1px 7px;
+}
+.tm-guide-spacer { flex: 1; }
+.tm-guide-foot { margin-top: 8px; font-size: 11.5px; line-height: 1.55; color: var(--muted); }
+.tm-reopen-guide { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.tm-reopen-hint { font-size: 12px; color: var(--muted); }
 `

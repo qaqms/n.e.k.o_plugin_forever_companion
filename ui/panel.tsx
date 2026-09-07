@@ -27,6 +27,7 @@ import { ChannelSettingsCard } from "./settings_tone"
 import { DiarySettingsCard } from "./settings_diary"
 import { SaveBar } from "./savebar"
 import { ManagePane } from "./manage"
+import { OnboardingWizard } from "./onboarding"
 import { DiaryPane } from "./diary"
 import { MomentPane } from "./moment"
 import { AppearanceCard } from "./appearance"
@@ -43,6 +44,9 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   // 默认页签 = 总览；useLocalState 的旧持久化值（0.9.0 前可能是 calendar 等）
   // 会被 VALID_TABS 校验兜回 overview，但初值本身也要指向 overview
   const [tab, setTab] = useLocalState<string>("tide.tab", "overview")
+  // 首次向导（1.2.6）：本会话关闭闸门——服务端 wizard_pending 要等下一次 5s
+  // 轮询才翻转，关闭后到翻转前的窗口全靠这个本地闸不重现
+  const [wizardClosed, setWizardClosed] = useState(false)
   const [form, setForm] = useState<FormValues>(settingsToForm({}))
   // 面板外观（1.2.0）：图库索引/外观参数（saved=生效、draft=实时预览）按需拉取；
   // 图片本体逐条缓存（imgCache），绝不进 5s 轮询载荷
@@ -305,6 +309,29 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     if (!ok) return
     try {
       await props.api.call("toggle")
+      await props.api.refresh()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  // 向导收尾（1.2.6）：done/skip 都先过本地闸再写盘——写失败不重新拦向导
+  // （服务端内存位已改，本会话不再弹）；错误如实弹，不谎报"引导已保存"
+  async function closeWizard(action: "done" | "skip") {
+    setWizardClosed(true)
+    try {
+      await props.api.call("set_onboarding", { action })
+      await props.api.refresh()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  // 设置页"再看一次新手引导"：reopen 只清引导记录，不动任何配置
+  async function reopenGuide() {
+    try {
+      await props.api.call("set_onboarding", { action: "reopen" })
+      setWizardClosed(false)
       await props.api.refresh()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
@@ -634,6 +661,9 @@ export default function Panel(props: PluginSurfaceProps<State>) {
               journalIndex={state.journal_index || []}
               reviewBrief={state.review_brief}
               weekActivity={state.week_activity}
+              onboarding={state.onboarding}
+              canEnable={!!toggle}
+              onEnable={onToggle}
               onGoto={(id: string) => setTab(id)}
             />
           ) : null}
@@ -728,6 +758,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
               lanlan={state.lanlan}
               canPrune={!!pruneLanlan}
               onPruneLanlan={onPruneLanlan}
+              onReopenGuide={reopenGuide}
             >
               <AppearanceCard
                 t={t}
@@ -746,6 +777,16 @@ export default function Panel(props: PluginSurfaceProps<State>) {
           ) : null}
         </div>
       </div>
+
+      <OnboardingWizard
+        t={t}
+        open={!!(state.onboarding && state.onboarding.wizard_pending) && !wizardClosed}
+        status={status}
+        channelStatus={state.channel_status}
+        canToggle={!!toggle}
+        onEnableRhythm={() => { onToggle() }}
+        onFinish={(action: "done" | "skip") => { closeWizard(action) }}
+      />
       </div>
     </Page>
   )

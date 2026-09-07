@@ -21,6 +21,7 @@ JsonObject = dict[str, Any]
 _STORE_SETTINGS = "settings"          # 全局覆盖层：{tide: {...}, mood: {...}}
 _STORE_LANLAN_INDEX = "lanlan_index"  # 已知角色名列表（PluginStore 无 list-keys 能力，面板只读角色列表数据源）
 _STORE_PROACTIVE = "proactive_state"  # 主动搭话协调：{prev: {master: bool} | None, paused_by: [lanlan, ...]}
+_STORE_GUIDE = "guide"               # 新手引导（1.2.6）：安装级一次性 {wizard: ""|done|skip, at, version}
 # 旧版单角色 key：仅用于启动时一次性迁移读取，之后不再写入（保留作备份，回滚 0.4.0 不丢数据）
 _STORE_CYCLE = "cycle_state"
 _STORE_MOOD = "mood_state"

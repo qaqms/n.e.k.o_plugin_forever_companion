@@ -252,6 +252,18 @@ export type State = {
   channel_status?: ChannelStatus
   week_activity?: number
   stats_summary?: StatsState
+  // 新手引导 + 就绪清单（1.2.6）
+  onboarding?: Onboarding
+}
+
+// ---- 新手引导与配置引导（1.2.6）----
+// 就绪清单项：level = must（必办）/ suggest（建议）；tab = 直达页签（"" = 无动作项）
+export type GuideItem = { id?: string; ok?: boolean; level?: string; tab?: string }
+export type Readiness = { items?: GuideItem[]; must_ok?: boolean; all_ok?: boolean; pending?: number }
+export type Onboarding = {
+  wizard_pending?: boolean
+  guide?: { wizard?: string; at?: string; version?: string }
+  readiness?: Readiness
 }
 
 export type FormValues = {

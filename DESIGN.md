@@ -654,6 +654,39 @@ zh-CN / en i18n
   「真盲区」，下个版本应优先补）。
 - **验证**：esbuild 转译通过；`neko-plugin check` 0 错误；Python 侧零改动。
 
+### 1.2.6：新手引导 + 配置引导（首次向导 + 就绪清单）
+
+解决"装完插件不知道从哪开始"：新宿主装完只有 fail-closed 的关闭态，
+用户面对满页签不知道第一步是什么。两块能力：
+
+- **首次向导（OnboardingWizard，Modal 分步）**：仅**安装后从未完成/跳过**时
+  自动弹出（全局 store key `guide`，`wizard ∈ ""/done/skip`）。四步：
+  ①欢迎与能力全貌（情绪/节律/三本日记/时光统计）→ ②开启陪伴（读当前
+  enabled，就地调 toggle）→ ③模型通道体检（channel_status 三色灯，缺失只
+  说明"该功能休眠、核心不受影响"，不阻塞）→ ④完成指引（就绪清单在总览、
+  深度设置在各页签）。"稍后再说"= skip，同样不再自动弹；管理页可"再看一次
+  新手引导"（reopen 把 wizard 清回 ""）。
+  向导**不改任何配置**（除用户主动点的 toggle），锚点策略沿 1.1.0 的
+  randomized_default_anchor（"她早就有节律，只是今天开始被观测"），向导只
+  解释这一点，不要求用户设锚点。
+- **配置引导（就绪清单 GuideCard，总览页常驻）**：把散落的健康信号收敛成
+  一张清单，纯本地即时计算进 dashboard 轮询（零模型开销、零新增 IO）：
+  ①开启她的节律（must）②周期起点已确认（must：anchor 非空）③情绪系统已
+  开启（suggest）④至少一个模型通道在线（suggest：碎片/成文/语气任一可用）
+  ⑤你们已开始相处（suggest：stats.first_seen 存在，仅展示无动作）。每项带
+  直达页签跳转；must 全过且无 suggest 欠账时整卡收起。`readiness_ok` 一并
+  进 dashboard（供未来 HUD/提示复用）。
+- **数据**：`guide` 一个全局 key `{wizard, at, version}`（不 per-lanlan——向导
+  是安装级一次性事件；角色级欠账由就绪清单实时算，无状态）。经 `_load_state`
+  载入（`_retrust_state` 一并重置），写走 `_store_write/_read` 统一出口；
+  未通电会话按"当场生效、重启即丢"的既定降级契约。入口 `set_onboarding`
+  （action ∈ done/skip/reopen）为面板专用 `@ui.action`，写失败传播 Err。
+- **UI**：新文件 `ui/onboarding.tsx`（OnboardingWizard + GuideCard 两个 export，
+  遵守 hosted-tsx：export 先于 JSX 闭合标签、无 SVG、步骤点用 div）；
+  panel.tsx 挂 Modal（`wizard_pending && 本会话未关过` 双闸——5s 轮询滞后期
+  不靠 server state 关闭弹窗）；overview.tsx 顶部插 GuideCard；manage.tsx 加
+  reopen 按钮。i18n 新增 `onboarding.*` / `panel.guide.*` 约 40 键 ×8 语言。
+
 ## Out of Scope
 
 - 情绪日记的 LLM 自动总结写入（v1 只提供模型手写日记工具与人工查看）

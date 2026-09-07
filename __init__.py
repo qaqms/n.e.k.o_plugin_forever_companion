@@ -181,6 +181,21 @@ from .core.journal import (
 from .core.journal import (
     page_header as page_header,
 )
+from .core.onboarding import (
+    _GUIDE_VERSION as _GUIDE_VERSION,
+)
+from .core.onboarding import (
+    build_readiness as build_readiness,
+)
+from .core.onboarding import (
+    make_guide_record as make_guide_record,
+)
+from .core.onboarding import (
+    norm_guide_record as norm_guide_record,
+)
+from .core.onboarding import (
+    wizard_pending as wizard_pending,
+)
 from .core.review import (
     append_review as append_review,
 )
@@ -320,6 +335,7 @@ from .core.state import (
     _STORE_GALLERY_INDEX as _STORE_GALLERY_INDEX,
 )
 from .core.state import (
+    _STORE_GUIDE,
     _STORE_LANLAN_INDEX,
     _STORE_PROACTIVE,
     _STORE_SETTINGS,
@@ -549,6 +565,10 @@ class ForeverCompanionPlugin(
         # 监督循环每趟（10s）自动重试直到落稳，把"水位没存住即被强杀"的
         # 卡死窗口从"整个会话"压缩到"两次写尝试之间"
         self._proactive_persisted: JsonObject = {"prev": None, "paused_by": []}
+        # 新手引导（1.2.6）：安装级一次性记录 {wizard: ""|done|skip, at, version}
+        # （Store key "guide"，全局一份不按角色分片：向导是装完只经一次的事，
+        # 角色级欠账由就绪清单从当前状态即时算，无持久化）
+        self._guide: JsonObject = {"wizard": "", "at": "", "version": ""}
         # 当前角色解析缓存（15s TTL）；_last_resolved_lanlan 供同步路径（属性代理）回落
         self._current_lanlan_cache: tuple[str, float] = ("", -1000.0)
         self._last_resolved_lanlan = ""
@@ -736,6 +756,9 @@ class ForeverCompanionPlugin(
         return await self._store_write(
             _STORE_PROACTIVE, dict(self._proactive_state), "proactive_state",
         )
+
+    async def _save_guide(self) -> Result[None]:
+        return await self._store_write(_STORE_GUIDE, dict(self._guide), "guide")
 
     # ==========================================
     # 生命周期

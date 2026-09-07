@@ -23,6 +23,7 @@ from ..core.cycle import (
     randomized_default_anchor,
 )
 from ..core.journal import migrate_weekly_to_pages
+from ..core.onboarding import norm_guide_record
 from ..core.state import (
     _CURRENT_LANLAN_CACHE_TTL,
     _DIARY_MAX_ENTRIES,
@@ -30,6 +31,7 @@ from ..core.state import (
     _KNOWN_CATGIRLS_CACHE_TTL,
     _STORE_CYCLE,
     _STORE_DIARY,
+    _STORE_GUIDE,
     _STORE_LANLAN_INDEX,
     _STORE_MOOD,
     _STORE_PROACTIVE,
@@ -507,6 +509,7 @@ class ShardsMixin:
             self._lanlan_index = []
             self._settings_override = {}
             self._proactive_state = {"prev": None, "paused_by": []}
+            self._guide = {"wizard": "", "at": "", "version": ""}
             await self._load_state()
             await self._refresh_config()
         finally:
@@ -531,6 +534,13 @@ class ShardsMixin:
         # 水位快照与盘上同步起点（1.2.2 审查轮 P2）：此后 _persist_proactive_state
         # 的脏检查以此为参照，只写真正发生过的变化
         self._proactive_persisted = _snapshot_proactive(self._proactive_state)
+        # 新手引导（1.2.6）：全局一份，宽容载入（坏字段自愈为未引导态）；
+        # 未通电会话读到空→向导会弹，用户在向导里完成/跳过后改内存位
+        # 并经入口写盘（当场生效、未通电则重启重弹，既定降级契约）
+        guide_res = await self._store_read(_STORE_GUIDE)
+        self._guide = norm_guide_record(
+            guide_res.value if isinstance(guide_res, Ok) else None
+        )
         await self._migrate_legacy_state_if_needed()
         # 载入所有已知角色的 shard：主动搭话引用计数要看全量生效情绪，
         # 只载当前角色会把"别的角色还在冷战"漏算
