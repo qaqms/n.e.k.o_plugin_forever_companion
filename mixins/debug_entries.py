@@ -317,11 +317,17 @@ class DebugEntriesMixin:
         }
         if force:
             shard.last_journal_invite_ts = 0.0
-            # 清零节流水位 → 必走 respond 当面递到档；deliver 回显投递方式（1.2.3）
-            invited, deliver = await self._maybe_journal_invite(name, shard)
+            # 必须带 force：非 force 档还有一道 journal_due（距上次落笔满 interval_days）
+            # 闸，昨天刚写过日记的机器上 debug_journal(force=true) 会静默 invited=false，
+            # 与 README"立即推一次邀请"和 1.2.3 注释"必走 respond 当面递到档"都不符。
+            # 1.2.4 审查修复：force 跳过节奏与节流，只保留 _journal_enabled 三道闸
+            invited, deliver = await self._maybe_journal_invite(name, shard, force=True)
             payload["invited"] = invited
             payload["deliver"] = deliver
-            payload["note"] = "已清零节流并尝试推送邀请（资格/开关不满足则 invited=false）。"
+            payload["note"] = (
+                "已清零节流并强制推送邀请（invited=false 时看 deliver："
+                "空=开关未开，failed=传输拒收）。"
+            )
         return Ok(payload)
 
     async def _debug_capture_fragment(self, lanlan: str = "", **_: Any):

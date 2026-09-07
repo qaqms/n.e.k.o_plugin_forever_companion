@@ -108,6 +108,7 @@
   "panel.journal.entryCount": "{n} entries",
   "panel.journal.hint": "A journal she writes herself every so often, just for you; flip through the pages to see what she has been thinking.",
   "panel.journal.invite": "Ask her to write",
+  "panel.journal.inviteFailed": "The invitation didn't reach her (message channel busy or unavailable); try again",
   "panel.journal.inviteOff": "Personal journal is disabled; invitation not sent",
   "panel.journal.invitePending": "The invitation is with her — she'll write when she feels like it, and the next page will appear here on its own.",
   "panel.journal.invited": "Invitation sent — whether she writes is up to her",

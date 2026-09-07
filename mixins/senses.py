@@ -537,7 +537,8 @@ class SensesMixin:
         真正的成文由本方法在下一趟 tick 起跑，结果写进 shard.review_write_result
         供面板轮询取用。放在 tick 的 enabled 拦截之前："我的日记"只认
         [review].enabled，不受潮汐总开关 fail-closed 牵连（否则默认安装态
-        队列永远不会被消费）。同角色成文在飞时跳过本趟、pending 留在队里下趟重试。
+        队列永远不会被消费）。同角色成文在飞时跳过本趟、pending 留在队里下趟重试；
+        成文抛出未预期异常时也必须写一条失败结论（1.2.4），绝不让排队请求静默消失。
         """
         for lanlan, shard in list(self._shards.items()):
             if not shard.pending_review_write:
@@ -545,7 +546,17 @@ class SensesMixin:
             if lanlan in self._review_writing:
                 continue
             shard.pending_review_write = 0.0
-            written, reason = await self._maybe_write_review(lanlan, shard, force=True)
+            try:
+                written, reason = await self._maybe_write_review(lanlan, shard, force=True)
+            except Exception as exc:  # noqa: BLE001 - 队列成文失败必须变成可见结论
+                # 1.2.4 审查修复：pending 在 await 之前就已清零，异常若一路冒到
+                # tick 顶层，结果位永远不写——用户点了"立即写一篇"得到"已开始写"，
+                # 之后按钮变回可点、不弹任何东西，这一篇石沉大海（1.2.2 的同步链路
+                # 至少还会以 api.call 失败的形式弹出来）。兜住并如实写失败结论。
+                self.logger.warning(
+                    "queued review compose raised for {}: {}: {}", lanlan, type(exc).__name__, exc
+                )
+                written, reason = False, "compose_raised"
             if not written and reason == "in_flight":
                 # 门后竞态（调试入口刚好抢先进飞）：放回队列，不作失败上报
                 shard.pending_review_write = time.time()

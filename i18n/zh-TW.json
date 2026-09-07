@@ -108,6 +108,7 @@
   "panel.journal.entryCount": "{n} 段",
   "panel.journal.hint": "她每隔一段時間自己寫的一篇日記，只給你看；翻頁看看她這段時間在想什麼。",
   "panel.journal.invite": "請她寫一篇",
+  "panel.journal.inviteFailed": "邀請沒能送到她手上（訊息通道正忙或不可用），再按一次試試",
   "panel.journal.inviteOff": "個人日記開關未開啟，邀請未發送",
   "panel.journal.invitePending": "邀請已遞出，正等她落筆——她說寫就寫、說緩就緩，下一頁會自己出現在這裡。",
   "panel.journal.invited": "邀請已遞出，寫不寫由她自己決定",

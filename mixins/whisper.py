@@ -479,6 +479,10 @@ class WhisperMixin:
     ) -> tuple[bool, str]:
         """个人日记邀请：递一条写日记的邀请（附素材）。返回 (是否递出, 投递方式)。
 
+        投递方式（第二个返回值）取值：``""`` 未递出（开关未开 / 周期未到节奏）；
+        ``"failed"`` 传输层拒收（宿主背压等，面板应如实报"没递到"）；
+        ``"respond"`` 当面递到；``"read"`` 安静流进上下文。
+
         与 drift_bottle 同构——插件只递邀请，写不写、怎么写由她自己决定。
         24h 内存节流防刷屏；重度负面情绪期间不拦截——把委屈写进日记是合理叙事。
         0.7.0 起替代潮汐周记邀请：不再要求"攒够 N 条手记"，节奏只看距上次落笔的天数
@@ -508,6 +512,7 @@ class WhisperMixin:
         else:
             # 冷却判定用同一节流水位：距上一次递出（周期或手动）满 10 分钟才起轮
             deliver = "respond" if now - shard.last_journal_invite_ts >= _JOURNAL_RESPOND_COOLDOWN_SEC else "read"
+        prev_invite_ts = shard.last_journal_invite_ts
         shard.last_journal_invite_ts = now
         # ---- 写作素材：自上次落笔以来的心情词频（top3）与新碎片数 ----
         last_ts = None
@@ -558,7 +563,7 @@ class WhisperMixin:
         else:
             text = f"（内心状态提醒）{body}"
             push_kwargs = {"visibility": [], "ai_behavior": "read"}
-        self.push_message(
+        pushed = self.push_message(
             parts=[{"type": "text", "text": text}],
             source=self.plugin_id,
             target_lanlan=lanlan,
@@ -570,6 +575,21 @@ class WhisperMixin:
             },
             **push_kwargs,
         )
+        # 提交结果必须看（1.2.4 审查修复）：submitted=False 表示这条邀请根本没上线
+        # （宿主背压/传输不可用/超大），而 1.2.3 起面板把话说到"已当面递到她手上"，
+        # 还会挂"正等她落笔"挂到她写出新页为止——递空了就变成挂着几天的假提示。
+        # 手动按钮当场回滚水位（用户可立刻重按）；tick 周期递邀不回滚，
+        # 否则传输一直坏时会每趟监督重推一次刷屏，让它按 24h 节流等下一轮。
+        # 只把显式 submitted=False 判为失败：桩/旧返回按成功处理
+        if isinstance(pushed, dict) and pushed.get("submitted") is False:
+            reason = str(pushed.get("reason") or "unknown")
+            self.logger.warning(
+                "journal invite NOT submitted for {} via {} (force={}): {}",
+                lanlan, deliver, force, reason,
+            )
+            if force:
+                shard.last_journal_invite_ts = prev_invite_ts
+            return False, "failed"
         self.logger.info(
             "journal invite pushed for {} via {} ({} pages, force={})",
             lanlan, deliver, len(shard.journal), force,

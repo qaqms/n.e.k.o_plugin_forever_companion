@@ -1212,10 +1212,16 @@ class PanelEntriesMixin:
         input_schema={"type": "object", "properties": {}},
     )
     async def invite_journal(self, **_: Any):
-        # 返回 (invited, deliver)：deliver ∈ ""(未递出) / respond(当面递到，
-        # 她当场收到并可当场落笔) / read(冷却内静默补递)。三种结果三种 note
+        # 返回 (invited, deliver)：deliver ∈ ""(未递出：开关未开) / failed(传输拒收) /
+        # respond(当面递到，她当场收到并可当场落笔) / read(冷却内静默补递)。
+        # 四种结果四种 note——传输被拒时绝不沿用"已递出"的措辞（1.2.4 审查修复）
         lanlan, shard = await self._current_shard_async()
         invited, deliver = await self._maybe_journal_invite(lanlan, shard, force=True)
+        if not invited and deliver == "failed":
+            return Ok({
+                "invited": False, "mode": deliver, "lanlan": lanlan,
+                "note": "刚才这条邀请没能送到她手上（消息通道正忙或不可用），再按一次试试。",
+            })
         if not invited:
             return Ok({
                 "invited": False,

@@ -376,7 +376,11 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       const payload = unwrapCallResult(await props.api.call("invite_journal", {}))
       await props.api.refresh()
       const r = (payload || {}) as Record<string, any>
-      if (r.invited === false) {
+      if (r.invited === false && r.mode === "failed") {
+        // 传输拒收是真错误，不能与"开关未开启"共用一条 info 软提示（1.2.4）：
+        // 后端已回滚水位，这一支的语义就是"再按一次"
+        toast.error(String(r.note || t("panel.journal.inviteFailed", { defaultValue: "邀请没能送到她手上（消息通道正忙或不可用），再按一次试试" })))
+      } else if (r.invited === false) {
         toast.info(String(r.note || t("panel.journal.inviteOff", { defaultValue: "个人日记开关未开启，邀请未发送" })))
       } else {
         // note 由服务端按投递方式给三态文案（当面递到 / 冷却内静默补递，1.2.3）
@@ -419,11 +423,22 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   }
 
   // 队列成文的完成反馈（1.2.3）：last_result 的 ts 变化 = 刚有一篇写完/写失败。
-  // 挂载时先认领当前值——旧结论不补弹（新开面板直接看见篇目即可）
+  // 挂载时先认领当前值——旧结论不补弹（新开面板直接看见篇目即可）。
+  // 角色切换同样按"挂载"处理（1.2.4）：last_result 是**按角色**存的内存位，
+  // 只看 ts 的话，切到另一个角色时会把她上一轮会话里早已看过的旧结论当成刚写完
+  // 补弹一次。复位必须写在本 effect 内：面板的 [state.lanlan] effect 声明在之后，
+  // 同一轮 render 里它跑到时本 effect 已经把 toast 弹出去了
   const reviewResultSeen = useRef<number>(0)
+  const reviewResultRole = useRef<string | null>(null)
   useEffect(() => {
     const result = state.review_brief && state.review_brief.last_result
     if (!result || !result.ts) return
+    const role = state.lanlan || ""
+    if (reviewResultRole.current !== role) {
+      reviewResultRole.current = role
+      reviewResultSeen.current = result.ts
+      return
+    }
     if (reviewResultSeen.current === 0) {
       reviewResultSeen.current = result.ts
       return
@@ -438,7 +453,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       toast.info(t("panel.review.writeFailed", { defaultValue: "这一篇还没写成，稍后再试" }))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.review_brief && state.review_brief.last_result && state.review_brief.last_result.ts])
+  }, [state.review_brief && state.review_brief.last_result && state.review_brief.last_result.ts, state.lanlan])
 
   async function onClearReview() {
     const ok = await confirmDialog({

@@ -635,3 +635,30 @@ def test_dashboard_channel_status_custom_slot_ok(plugin_factory, tm) -> None:
         assert cs["review"]["dormant_reason"] == ""
     finally:
         monkey.undo()
+
+
+def test_drain_surfaces_compose_exception(plugin_factory) -> None:
+    """队列成文的异常也必须变成可见结论（1.2.4 审查修复）：pending 在 await 之前就
+    清零了，异常若一路冒到 tick 顶层，结果位永远不写——用户点了「立即写一篇」收到
+    "已开始写"，随后按钮变回可点、不弹任何东西，这一篇石沉大海（1.2.2 的同步链路
+    至少还会以 api.call 失败的形式弹出来）。"""
+    p = _with_turns(plugin_factory(), 20)
+    monkey = pytest.MonkeyPatch()
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("socket exploded")
+
+    _stub_model(p, monkey, reply="不该被调到")
+    monkey.setattr(p, "_post_chat_completion", boom)
+    try:
+        assert run(p.write_review_now()).value["accepted"] is True
+        run(p._drain_pending_review_writes())  # 关键：异常不得冒出 tick
+        shard = p._get_shard("default")
+        assert shard.pending_review_write == 0
+        result = shard.review_write_result
+        assert result is not None and result["written"] is False
+        assert result["reason"] == "compose_raised"
+        assert "default" not in p._review_writing, "异常路径也要释放在飞锁"
+        assert len(shard.review) == 0 and shard.review_stats["turns"] == 20, "异常不得动篇目与素材"
+    finally:
+        monkey.undo()

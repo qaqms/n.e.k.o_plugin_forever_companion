@@ -108,6 +108,7 @@
   "panel.journal.entryCount": "{n} párrafos",
   "panel.journal.hint": "Un diario que ella escribe de vez en cuando, solo para ti; pasa las páginas para ver en qué ha estado pensando.",
   "panel.journal.invite": "Pedirle que escriba",
+  "panel.journal.inviteFailed": "La invitación no llegó a ella (canal de mensajes ocupado o no disponible); inténtalo de nuevo",
   "panel.journal.inviteOff": "El diario personal está desactivado; no se envió la invitación",
   "panel.journal.invitePending": "La invitación está enviada, esperando a que escriba — cuando quiera, la próxima página aparecerá aquí sola.",
   "panel.journal.invited": "Invitación enviada; si escribe es decisión suya",

@@ -108,6 +108,7 @@
   "panel.journal.entryCount": "{n}문단",
   "panel.journal.hint": "그녀가 가끔 스스로 쓰는 일기입니다. 당신만 볼 수 있어요. 페이지를 넘기며 그동안 그녀가 무엇을 생각했는지 들여다보세요.",
   "panel.journal.invite": "쓰기를 권하기",
+  "panel.journal.inviteFailed": "초대가 그녀에게 전달되지 않았어요 (메시지 경로가 바쁘거나 사용할 수 없어요). 다시 눌러보세요",
   "panel.journal.inviteOff": "개인 일기가 꺼져 있어 보내지 않았어요",
   "panel.journal.invitePending": "초대를 보냈어요. 그녀가 마음 내킬 때 써요——언젠가 다음 페이지가 여기에 나타날 거예요.",
   "panel.journal.invited": "초대를 보냈습니다. 쓸지는 그녀가 결정해요",

@@ -108,6 +108,7 @@
   "panel.journal.entryCount": "{n} 段",
   "panel.journal.hint": "她每隔一段时间自己写的一篇日记，只给你看；翻页看看她这段时间在想什么。",
   "panel.journal.invite": "请她写一篇",
+  "panel.journal.inviteFailed": "邀请没能送到她手上（消息通道正忙或不可用），再按一次试试",
   "panel.journal.inviteOff": "个人日记开关未开启，邀请未发送",
   "panel.journal.invitePending": "邀请已递出，正等她落笔——她说写就写、说缓就缓，下一页会自己出现在这里。",
   "panel.journal.invited": "邀请已递出，写不写由她自己决定",

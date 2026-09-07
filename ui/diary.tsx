@@ -3,7 +3,9 @@
 // hosted-tsx 约束：唯一 export 在任何 JSX 闭合标签之前；辅助组件放文件尾部靠函数声明提升被引用
 import { Button, Card, EmptyState, Tabs } from "@neko/plugin-ui"
 import { useEffect, useLocalState, useRef, useState } from "@neko/plugin-ui"
-import type { DiaryItem, JournalPage, JournalPageHeader, ReviewEntry, ReviewProgress, TFunc } from "./types"
+import type {
+  DiaryItem, JournalPage, JournalPageHeader, ReviewBrief, ReviewEntry, ReviewProgress, TFunc,
+} from "./types"
 import { fragmentKindKey, journalTrendKey, moodDotColor } from "./utils"
 
 export function DiaryPane(props: {
@@ -14,7 +16,9 @@ export function DiaryPane(props: {
   journalIndex: JournalPageHeader[]
   invitePending?: boolean
   lanlan?: string
-  reviewBrief?: { enabled?: boolean; entries?: number; progress_turns?: number; turns_threshold?: number }
+  // 用 types.ts 的 ReviewBrief（含 1.2.3 的 writing/last_result）：内联复刻一份
+  // 窄类型会让 reviewBrief.writing 过不了 hosted-tsx 的类型检查（TS2339）
+  reviewBrief?: ReviewBrief
   onClearDiary: () => void
   onDeleteFragment: (ts: string) => void
   onLoadJournal: () => Promise<JournalPage[]>

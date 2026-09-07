@@ -254,3 +254,58 @@ def test_invite_journal_entry_reports_mode(plugin_factory) -> None:
     assert "当面" in v["note"]
     res2 = run(p.invite_journal())
     assert res2.value["mode"] == "read" and "悄悄" in res2.value["note"]
+
+
+# ---------- 1.2.4 审查修复：递邀的提交结果必须看 ----------
+
+
+def test_forced_invite_reports_transport_failure(plugin_factory) -> None:
+    """传输拒收时不得报「已递到」：返回 (False, failed)、手动档回滚水位可立刻重按，
+    且不挂「正等她落笔」的假提示（面板文案与挂起态都由水位驱动）。"""
+    p = plugin_factory()
+    shard = run(p._ensure_shard("default"))
+    p.push_message = lambda **kw: {"submitted": False, "reason": "backpressure"}
+    assert run(p._maybe_journal_invite("default", shard, force=True)) == (False, "failed")
+    assert shard.last_journal_invite_ts == 0.0, "手动档失败要回滚水位，用户可以立刻重按"
+    assert p._journal_invite_pending(shard) is False
+
+    v = run(p.invite_journal()).value
+    assert v["invited"] is False and v["mode"] == "failed"
+    assert "没能送到" in v["note"]
+    assert "开关未开启" not in v["note"], "不能把传输失败误报成开关问题"
+
+
+def test_periodic_invite_failure_keeps_watermark(plugin_factory) -> None:
+    """tick 周期档传输拒收：如实报 failed，但水位不回滚——通道一直坏时
+    每趟监督都重推会刷屏，让它按 24h 节流等下一轮。"""
+    p = plugin_factory()
+    shard = run(p._ensure_shard("default"))
+    p.push_message = lambda **kw: {"submitted": False, "reason": "transport_unavailable"}
+    assert run(p._maybe_journal_invite("default", shard)) == (False, "failed")
+    assert shard.last_journal_invite_ts > 0.0, "周期档失败保留水位，按 24h 节流重试"
+
+
+def test_push_stub_without_submitted_counts_as_success(plugin_factory) -> None:
+    """只有显式 submitted=False 才算失败：返回 None 或不含该键的旧形状按成功，
+    避免桩实现/未来 SDK 变更把正常递邀误判成传输故障。"""
+    p = plugin_factory()
+    shard = run(p._ensure_shard("default"))
+    p.push_message = lambda **kw: None
+    assert run(p._maybe_journal_invite("default", shard, force=True)) == (True, "respond")
+    p.push_message = lambda **kw: {}
+    shard.last_journal_invite_ts = 0.0
+    assert run(p._maybe_journal_invite("default", shard, force=True)) == (True, "respond")
+
+
+def test_debug_journal_force_ignores_cadence(plugin_factory) -> None:
+    """debug_journal(force=true) 必须真能强制递出：旧实现漏传 force，走非 force 档
+    还有一道 journal_due（距上次落笔满 interval_days）闸，昨天刚写过日记的机器上
+    静默 invited=false，与 README「立即推一次邀请」和 1.2.3 注释都不符。"""
+    p = plugin_factory()
+    shard = run(p._ensure_shard("default"))
+    recent = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(timespec="seconds")
+    shard.journal = [{"page_no": 1, "started_at": recent, "entries": [{"ts": recent, "text": "昨天写过"}]}]
+    v = run(p._debug_journal(force=True)).value
+    assert v["due"] is False, "前置条件：按节奏她还不该被邀请"
+    assert v["invited"] is True, "force 档要跳过 7 天节奏，立即递一次"
+    assert v["deliver"] == "respond"

@@ -108,6 +108,7 @@
   "panel.journal.entryCount": "{n} 段落",
   "panel.journal.hint": "彼女が定期的に自分で書く日記です。あなただけが読めます。ページをめくって、彼女の考えていたことをのぞいてみて。",
   "panel.journal.invite": "書いてみようと誘う",
+  "panel.journal.inviteFailed": "招待が彼女に届きませんでした（メッセージ経路が混雑または利用不可）。もう一度押してみてください",
   "panel.journal.inviteOff": "個人日記がオフのため送信しませんでした",
   "panel.journal.invitePending": "招待は届けました。彼女の気まぐれに任せてください——そのうち次のページがここに現れます。",
   "panel.journal.invited": "招待を送りました。書くかどうかは彼女次第です",
