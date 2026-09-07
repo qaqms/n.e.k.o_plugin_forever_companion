@@ -66,7 +66,7 @@ export function DiaryPane(props: {
   const visibleReview = openReviewTs === null ? null
     : (reviewEntries.find((item) => String(item.ts || "") === openReviewTs) || null)
 
-  // 重拉我的日记（挂载/切角色/写完新篇/手动刷新共用）
+  // 重拉我的日记（挂载/切角色/轮询发现写完新篇时自动共用）
   async function reloadReview() {
     if (reviewLoading) return
     setReviewLoading(true)
@@ -83,7 +83,7 @@ export function DiaryPane(props: {
     }
   }
 
-  // 重拉个人日记整本（挂载/切角色/"她写了新页"/手动刷新共用）
+  // 重拉个人日记整本（挂载/切角色/轮询发现她写了新页或续写时自动共用）
   async function reloadBook() {
     if (bookLoading) return
     setBookLoading(true)
@@ -210,9 +210,8 @@ export function DiaryPane(props: {
                     {t("panel.journal.count", { defaultValue: "共 {n} 页" }).replace("{n}", String(pages.length || journalIndex.length))}
                   </span>
                   <span className="tm-journal-actions">
-                    <Button onClick={() => { reloadBook() }} disabled={bookLoading}>
-                      {t("panel.journal.refresh", { defaultValue: "刷新" })}
-                    </Button>
+                    {/* 刷新按钮已移除（1.2.5）：书页指纹（页码:段数:末笔时刻）随 5s
+                        轮询自动检测，新页/续写都会自动重拉整本，无需手动刷新 */}
                     <Button tone="primary" onClick={onInviteJournal}>
                       {t("panel.journal.invite", { defaultValue: "请她写一篇" })}
                     </Button>
@@ -258,9 +257,8 @@ export function DiaryPane(props: {
                     {t("panel.review.count", { defaultValue: "共 {n} 篇" }).replace("{n}", String(reviewEntries.length))}
                   </span>
                   <span className="tm-journal-actions">
-                    <Button onClick={() => { reloadReview() }} disabled={reviewLoading}>
-                      {t("panel.journal.refresh", { defaultValue: "刷新" })}
-                    </Button>
+                    {/* 刷新按钮已移除（1.2.5）：review_brief 篇数随 5s 轮询自动检测，
+                        写完新篇会自动重拉全部篇目，无需手动刷新 */}
                     <Button
                       tone="primary"
                       onClick={onWriteReviewNow}
