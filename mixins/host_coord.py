@@ -115,7 +115,12 @@ class HostCoordMixin:
         notify = getattr(self, "_notify_llm_tool_registered", None)
         if not isinstance(llm_tools, dict) or not callable(notify):
             return
+        # 能力中心（1.2.7）：被高级选项故意摘除的工具不在重挂范围——它们在
+        # 宿主侧本就该缺席，巡检若补挂会把[关闭即隐]每 5 分钟抵消一次
+        hidden = getattr(self, "_cap_hidden_tools", None) or set()
         for name in missing:
+            if name in hidden:
+                continue
             meta = llm_tools.get(name)
             if meta is None:
                 continue

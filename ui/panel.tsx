@@ -27,6 +27,7 @@ import { ChannelSettingsCard } from "./settings_tone"
 import { DiarySettingsCard } from "./settings_diary"
 import { SaveBar } from "./savebar"
 import { ManagePane } from "./manage"
+import { FeaturesPane } from "./features"
 import { OnboardingWizard } from "./onboarding"
 import { DiaryPane } from "./diary"
 import { MomentPane } from "./moment"
@@ -64,6 +65,9 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   const [monthData, setMonthData] = useState<MonthReport | null>(null)
   const [monthList, setMonthList] = useState<string[]>([])
   const [statsLoading, setStatsLoading] = useState(false)
+  // 功能管理页（1.2.7）：能力清单随 dashboard 5s 轮询下发（state.capabilities），
+  // 与总开关/其它页设置同帧一致；本页只留"操作在飞"禁用态防连点
+  const [capsBusyId, setCapsBusyId] = useState("")
 
   function updateForm(patch: Partial<FormValues>) {
     setForm((prev) => ({ ...prev, ...patch }))
@@ -533,6 +537,47 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, heatData])
 
+  // 功能管理（1.2.7）：清单数据随 dashboard 轮询到达（后端 _cap_view）；
+  // 开关操作后 await props.api.refresh() 拉回最新帧——总开关在状态条拨了，
+  // 功能页横幅与行开关 ≤ 下一帧自动跟上，不再有"拉一次就定格"的陈旧窗口
+
+  async function onToggleCap(id: string, enabled: boolean) {
+    setCapsBusyId(id)
+    try {
+      const payload = unwrapCallResult(await props.api.call("set_capability", { capability_id: id, enabled }))
+      const r = (payload || {}) as Record<string, any>
+      if (r.note === "reverted_to_default") {
+        toast.info(t("panel.features.reverted", { defaultValue: "该功能在功能配置里是关着的（或被依赖的功能挡住），这里无法强行点亮" }))
+      } else if (r.persist_error) {
+        // 既定契约：内存当场生效、盘上保持原样，如实报错可重试
+        toast.error(String(r.persist_error))
+      }
+      await props.api.refresh()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setCapsBusyId("")
+    }
+  }
+
+  async function onToggleHideTools(value: boolean) {
+    setCapsBusyId("__flags__")
+    try {
+      const payload = unwrapCallResult(await props.api.call("set_capability_flags", { hide_disabled_tools: value }))
+      const r = (payload || {}) as Record<string, any>
+      toast.success(
+        r.hide_disabled_tools
+          ? t("panel.features.hideToolsOn", { defaultValue: "已开启：不再生效的功能会把她看不见的工具一并摘除" })
+          : t("panel.features.hideToolsOff", { defaultValue: "已回到温和模式：工具始终在位，调用时才拒绝" }),
+      )
+      await props.api.refresh()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setCapsBusyId("")
+    }
+  }
+
   async function onPruneLanlan(name: string) {
     if (!pruneLanlan) {
       toast.error(t("panel.errors.actionUnavailable", { defaultValue: "操作不可用（插件可能未运行）" }))
@@ -585,7 +630,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     }
   }
 
-  const VALID_TABS = ["overview", "calendar", "cycle", "mood", "diary", "moment", "settings"]
+  const VALID_TABS = ["overview", "calendar", "cycle", "mood", "diary", "moment", "features", "settings"]
   const activeTab = VALID_TABS.indexOf(tab) >= 0 ? tab : "overview"
 
   // 面板始终跟随宿主当前角色（5 秒轮询自动跟上切卡），lanlan_list 提供全部已知角色的状态摘要
@@ -599,6 +644,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     { id: "mood", label: t("panel.tab.mood", { defaultValue: "情绪" }) },
     { id: "diary", label: t("panel.tab.diary", { defaultValue: "日记" }) },
     { id: "moment", label: t("panel.tab.moment", { defaultValue: "时光" }) },
+    { id: "features", label: t("panel.tab.features", { defaultValue: "功能" }) },
     { id: "settings", label: t("panel.tab.settings", { defaultValue: "设置" }) },
   ]
 
@@ -746,6 +792,16 @@ export default function Panel(props: PluginSurfaceProps<State>) {
               onPickYear={(year: string) =>
                 onLoadStats(String((monthData && monthData.month) || "") || undefined, year)
               }
+            />
+          ) : null}
+          {activeTab === "features" ? (
+            <FeaturesPane
+              t={t}
+              caps={state.capabilities}
+              loading={!state.capabilities}
+              busyId={capsBusyId}
+              onToggleCap={onToggleCap}
+              onToggleHideTools={onToggleHideTools}
             />
           ) : null}
           {activeTab === "settings" ? (

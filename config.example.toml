@@ -68,3 +68,11 @@ enabled = true
 slot = "summary"                   # 成文模型槽位（碎片同款直连通道）；槽位无模型时自动休眠
 turns_threshold = 50               # 成文门槛：攒满 N 轮互动（与天数门槛先到先写）
 days_threshold = 7                 # 成文门槛：距统计起点满 N 天且期间有聊天（挂机不写空篇）
+
+[capabilities]
+# 能力中心（1.2.7）：面板「功能」页的统一开关体系——按角色否决任意能力
+# （关=写 Store 否决集 caps@<角色>，开=回落本文件各段默认，绝不强行点亮）。
+# hide_disabled_tools：关闭的能力是否把它的 LLM 工具从模型可见面摘除
+# （false=温和模式：工具在位、调用时才拒；true=对所有角色都不生效的能力
+# 真正对模型隐藏工具，恢复生效自动重挂）。全局一份。
+hide_disabled_tools = false

@@ -29,6 +29,7 @@ from ..core.state import (
     _DIARY_MAX_ENTRIES,
     _JOURNAL_MAX_PAGES,
     _KNOWN_CATGIRLS_CACHE_TTL,
+    _STORE_CAPS_GLOBAL,
     _STORE_CYCLE,
     _STORE_DIARY,
     _STORE_GUIDE,
@@ -91,6 +92,7 @@ class ShardsMixin:
         shard = self._shards.get(lanlan)
         if shard is None:
             shard = self._shards[lanlan] = _LanlanShard()
+        shard.lanlan = lanlan  # 1.2.7：能力中心按角色解析否决集需 shard 自报家门
         return shard
 
     async def _ensure_shard(self, lanlan: str) -> _LanlanShard:
@@ -103,6 +105,11 @@ class ShardsMixin:
         # tick、工具归因）都先过本方法，挂这里即全覆盖。
         if not self._state_trusted and not self._retrusting and self._store_ready:
             await self._retrust_state()
+        # 能力否决集（1.2.7）：首次接触该角色时载入（幂等：载入过即命中键）。
+        # 不挂在 shard.loaded 早退之后：旧版迁移路径会直接把 shard 标 loaded，
+        # 挂 loaded 分支上会让迁移角色的 caps 永不落载
+        if lanlan not in self._caps_off:
+            await self._cap_load(lanlan)
         shard = self._get_shard(lanlan)
         if shard.loaded:
             return shard
@@ -329,6 +336,7 @@ class ShardsMixin:
         review = _cfg_section(cfg.get("review"))
         emotion_sense = _cfg_section(cfg.get("emotion_sense"))
         stats_cfg = _cfg_section(cfg.get("stats"))
+        capabilities = _cfg_section(cfg.get("capabilities"))
 
         # Store 全局覆盖层：面板保存过的全局字段优先于 toml 默认
         tide.update(_cfg_section(self._settings_override.get("tide")))
@@ -338,6 +346,7 @@ class ShardsMixin:
         review.update(_cfg_section(self._settings_override.get("review")))
         emotion_sense.update(_cfg_section(self._settings_override.get("emotion_sense")))
         stats_cfg.update(_cfg_section(self._settings_override.get("stats")))
+        capabilities.update(_cfg_section(self._settings_override.get("capabilities")))
 
         self._tide_cfg = tide
         phases = _cfg_section(tide.get("phases"))
@@ -350,6 +359,7 @@ class ShardsMixin:
         self._review_cfg = review
         self._emotion_sense_cfg = emotion_sense
         self._stats_cfg = stats_cfg
+        self._caps_cfg = capabilities
 
         # 锚点缺失（shard 与全局配置都没有）：随机化的默认锚点--反推一个日期
         # 使"今天"落在本轮平稳期的随机位置（见 cycle.randomized_default_anchor）。
@@ -508,6 +518,7 @@ class ShardsMixin:
                 shard.loaded = False
             self._lanlan_index = []
             self._settings_override = {}
+            self._caps_off = {}  # 能力否决集重载：不可信期的改动的同构降级（_load_state/_ensure_shard 重填）
             self._proactive_state = {"prev": None, "paused_by": []}
             self._guide = {"wizard": "", "at": "", "version": ""}
             await self._load_state()
@@ -540,6 +551,11 @@ class ShardsMixin:
         guide_res = await self._store_read(_STORE_GUIDE)
         self._guide = norm_guide_record(
             guide_res.value if isinstance(guide_res, Ok) else None
+        )
+        # 能力否决集（1.2.7）：全局份 caps@*（角色份随 _ensure_shard 懒载）
+        caps_res = await self._store_read(_STORE_CAPS_GLOBAL)
+        self._caps_off["*"] = self._cap_norm_off(
+            caps_res.value if isinstance(caps_res, Ok) else None
         )
         await self._migrate_legacy_state_if_needed()
         # 载入所有已知角色的 shard：主动搭话引用计数要看全量生效情绪，

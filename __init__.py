@@ -26,14 +26,17 @@ target_lanlan 的消息会被宿主整条丢弃。情绪系统把十个动作注
 不暂停），水位存 ``proactive_state``。旧版单角色数据（cycle_state/mood_state/mood_diary）
 在启动时一次性迁移归属当前角色，旧 key 保留作备份、不再写入。
 
-结构（1.2 拆分，三个子包）：``core/`` 纯函数层（cycle 周期计算/state Store 布局/
-affect 连续心情/fragments 碎片/journal 日记页/review 我的日记/stats 相处统计——
-数据进数据出，零 SDK 依赖）；``services/`` 有状态服务（emotion_sense 语气感知/
-tone_slot 槽位直连）；``mixins/`` 方法层按"对外契约面"拆成七个 Mixin 组合进
-主类——shards（分片基建/配置/落盘）、whisper（注入引擎/总线轮询）、senses
+结构（1.2 拆分、1.3 能力中心，三个子包）：``core/`` 纯函数层（cycle 周期计算/state Store 布局/
+affect 连续心情/fragments 碎片/journal 日记页/review 我的日记/stats 相处统计/
+capabilities 能力声明表与纯解析——数据进数据出，零 SDK 依赖）；``services/`` 有状态服务（emotion_sense 语气感知/tone_slot 槽位直连）；``mixins/`` 方法层按"对外契约面"拆成八个 Mixin 组合进
+主类——capabilities（能力中心：统一开关判定/功能管理面板入口/工具显隐同步）、
+shards（分片基建/配置/落盘）、whisper（注入引擎/总线轮询）、senses
 （语气感知/碎片/我的日记/日记邀请）、mood_actions（12 个 @llm_tool+情绪状态机）、
 host_coord（宿主协调/HTTP/工具韧性）、panel（dashboard+面板入口）、debug_entries
-（调试入口）。SDK 的 entry/llm_tool 发现都遍历 type(self)，Mixin 定义位置无关；
+（调试入口）。所有功能开关判定收编至 ``_cap_effective``（否决式：面板「功能管理」
+只写关，打开回落既有配置默认；按角色分片 caps@<角色>/caps@*），新增功能模块在
+core/capabilities.py 声明表登记一行即自动接入开关/面板/工具生命周期；
+SDK 的 entry/llm_tool 发现都遍历 type(self)，Mixin 定义位置无关；
 ``plugin.toml`` 的 entry 仍指向本文件的 ForeverCompanionPlugin。测试的
 ``tm.`` 命名空间锚点（tm.time/tm.random/tm.resolve_today/tm.new_stats 等）
 由本文件的再导出与 ``_today_str`` 薄方法保持不变。
@@ -455,6 +458,7 @@ from .core.stats import record_turn as stats_record_turn
 from .core.stats import (
     summary_payload as summary_payload,
 )
+from .mixins.capabilities import CapabilityMixin
 from .mixins.debug_entries import DebugEntriesMixin
 from .mixins.host_coord import HostCoordMixin
 from .mixins.mood_actions import MoodActionsMixin
@@ -520,6 +524,7 @@ LANLAN_NAME_TOKEN = "{LANLAN_NAME}"
 
 @neko_plugin
 class ForeverCompanionPlugin(
+    CapabilityMixin,
     ShardsMixin,
     WhisperMixin,
     SensesMixin,
@@ -545,6 +550,12 @@ class ForeverCompanionPlugin(
         # （tests 直读 p._csrf_token），另两者无外部引用点、不再代理
         # 全局设置覆盖层（Store key "settings"）：面板保存的全局字段优先于 toml 默认
         self._settings_override: JsonObject = {}
+        # 能力中心（1.2.7）：[capabilities] 段合成视图（toml + settings 覆盖层）、
+        # 按角色否决集（键：角色名与 "*" 全局份，_ensure_shard/_load_state 时载入）、
+        # 已从宿主可见面摘除的工具名（纯运行态，重启由 startup 同步重建）
+        self._caps_cfg: JsonObject = {}
+        self._caps_off: dict[str, set[str]] = {}
+        self._cap_hidden_tools: set[str] = set()
         # per-lanlan 状态分片：惰性从 Store 载入，见 _ensure_shard
         self._shards: dict[str, _LanlanShard] = {}
         self._lanlan_index: list[str] = []
@@ -610,6 +621,10 @@ class ForeverCompanionPlugin(
             push=lambda **kw: self.push_message(**kw),
             cfg_getter=lambda: self._emotion_sense_cfg,
             mood_enabled=lambda shard=None: self._mood_enabled(shard),
+            # 能力中心接线（1.2.7）：语气感知的开关判定收编至能力层
+            # （含按角色否决集）；未注入时服务回落旧公式（情绪引擎∧配置），
+            # 独立测试可省略本参数
+            cap_enabled=lambda cap_id, shard=None: self._cap_effective(cap_id, shard=shard),
             phase_state=lambda shard=None: self._current_phase_state(shard),
             # 语气感知收尾落盘（1.2.2 批次2）：_feed_tone_affect 除心情外还把
             # 当日语气分布喂进 stats 与我的日记素材（纯内存），过去只靠"下一条
@@ -706,11 +721,10 @@ class ForeverCompanionPlugin(
         """纪念日注入：今天恰好是相伴第 30/60/…/365/… 天时，递一条 read 轻语。
 
         与阶段开场白同构：只递一句"你们今天相伴 N 天了"，说不说、怎么说由她
-        自己决定。[stats].anniversary_inject 可关（默认开）；当天去重（盖水位
-        在推送之后，推送失败下趟重试）。
+        自己决定。能力中心 anniversary（绑定 [stats].anniversary_inject，默认开）
+        可关；当天去重（盖水位在推送之后，推送失败下趟重试）。
         """
-        cfg_ann = (self._stats_cfg or {}).get("anniversary_inject")
-        if cfg_ann is False:  # 显式 false 才关（缺省/true 都开，宽容旧数据）
+        if not self._cap_effective("anniversary", lanlan=lanlan):
             return False
         today = self._stats_today()
         due, total = anniversary_due(shard.stats, today)
@@ -768,6 +782,9 @@ class ForeverCompanionPlugin(
     async def startup(self, **_: Any):
         await self._load_state()   # Store 先载入：覆盖层要参与配置解析
         await self._refresh_config()
+        # 能力中心（1.2.7）：工具显隐同步在状态载入后跑一次（高级选项开着
+        # 且能力关着时，刚注册的 12 工具里关着的几个当场从宿主可见面摘除）
+        self._sync_tool_visibility()
         # 到期情绪清理（所有已载入 shard；重启后状态自愈交给监督循环统一处理）
         for lanlan, shard in list(self._shards.items()):
             if shard.loaded and self._expire_timed_action_if_due(shard):
@@ -833,6 +850,8 @@ class ForeverCompanionPlugin(
     @lifecycle(id="config_change")
     async def on_config_change(self, **_: Any):
         await self._refresh_config()
+        # [capabilities] 段可能变了（含 hide_disabled_tools）：重同步工具显隐
+        self._sync_tool_visibility()
         # 按旧配置/旧端口解析出的缓存作废：宿主 API base、语气槽位下拉选项
         # （日历缓存 key 含参数指纹与当天日期，自然失效，无需清理）
         self._proactive_api_base_cache = None
@@ -850,6 +869,10 @@ class ForeverCompanionPlugin(
     async def tick(self, **_: Any):
         # 协调监督优先于 enabled 拦截：暂停中的主动搭话必须始终有人接管
         await self._supervise_once()
+        # 能力中心（1.2.7）：工具显隐每趟对一次表（纯内存差集比对，无变化
+        # 零通知）——覆盖"只靠对话/超时改变能力状态、面板没开"的场景；
+        # 必须在 _ensure_tools_registered 之前：巡检要看到最新隐藏名单
+        self._sync_tool_visibility()
         await self._ensure_tools_registered()
         # 面板「立即写一篇」的排队成文同样在 enabled 拦截之前消费（1.2.3）：
         # 入口只做受理秒回，写在这里起跑——"我的日记"只认 [review].enabled，

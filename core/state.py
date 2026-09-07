@@ -22,6 +22,7 @@ _STORE_SETTINGS = "settings"          # 全局覆盖层：{tide: {...}, mood: {.
 _STORE_LANLAN_INDEX = "lanlan_index"  # 已知角色名列表（PluginStore 无 list-keys 能力，面板只读角色列表数据源）
 _STORE_PROACTIVE = "proactive_state"  # 主动搭话协调：{prev: {master: bool} | None, paused_by: [lanlan, ...]}
 _STORE_GUIDE = "guide"               # 新手引导（1.2.6）：安装级一次性 {wizard: ""|done|skip, at, version}
+_STORE_CAPS_GLOBAL = "caps@*"        # 功能能力否决集（1.2.7 能力中心）：全局份，对所有角色生效
 # 旧版单角色 key：仅用于启动时一次性迁移读取，之后不再写入（保留作备份，回滚 0.4.0 不丢数据）
 _STORE_CYCLE = "cycle_state"
 _STORE_MOOD = "mood_state"
@@ -77,6 +78,15 @@ def _weekly_key(lanlan: str) -> str:
 
 def _journal_key(lanlan: str) -> str:
     return f"journal@{lanlan}"
+
+
+def _caps_key(lanlan: str) -> str:
+    """能力否决集（1.2.7 能力中心）：按角色分片；{cap_id: true} 表示被用户关闭。
+
+    只记否决（off）：重新打开 = 移除条目、回落既有配置默认——不存在
+    "配置关着但功能页硬点亮"的两张皮（详见 core/capabilities.py 模块注释）。
+    """
+    return f"caps@{lanlan}"
 
 
 def _review_key(lanlan: str) -> str:
@@ -460,6 +470,7 @@ class _LanlanShard:
 
     __slots__ = (
         "loaded",
+        "lanlan",  # 归属角色名（1.2.7：能力中心按角色解析否决集需要 shard 自报家门）
         "cycle",
         "mood",
         "diary",
@@ -494,6 +505,7 @@ class _LanlanShard:
     def __init__(self) -> None:
         # loaded=False 表示尚未从 Store 载入（_get_shard 同步建空壳，_ensure_shard 才真正落数据）
         self.loaded = False
+        self.lanlan = ""  # _get_shard 建立/取回时由调用侧写入（键名即角色名）
         self.cycle: JsonObject = {}
         self.mood = _MoodState()
         self.diary: list[JsonObject] = []

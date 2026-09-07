@@ -171,7 +171,10 @@ class MoodActionsMixin:
     # ==========================================
 
     def _mood_enabled(self, shard: _LanlanShard | None = None) -> bool:
-        return bool(self._enabled(shard) and self._mood_cfg.get("enabled", True))
+        # 1.2.7 能力中心收编：总开关 ∧ [mood].enabled ∧ 用户否决集，
+        # 判定逻辑统一进 core.capabilities.evaluate（方法名与签名不变，
+        # 既有调用面/测试猴补丁路径全部不动）
+        return self._cap_effective("mood_engine", shard=shard)
 
     def _mood_active_lanlans(self) -> list[str]:
         """有"需暂停主动搭话"的情绪动作生效中的角色集：引用计数的数据源（每次现算，自愈）。

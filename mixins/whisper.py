@@ -264,7 +264,7 @@ class WhisperMixin:
         结果缓存为指纹（per-shard）参与变化门控，上下文不变不重复注入。
         """
         shard = shard or self._current_shard()
-        if not bool(self._tide_cfg.get("activity_context", True)):
+        if not self._cap_effective("activity_sense", shard=shard):
             shard.last_activity_context_key = ""
             return ""
         override = self._activity_override
@@ -358,6 +358,12 @@ class WhisperMixin:
         """执行注入（定向到归属角色）；返回实际推送的 parts（空列表 = 未注入）。"""
         name = str(lanlan or "").strip() or self._current_shard_name()
         shard = shard or self._get_shard(name)
+        # 能力中心（1.2.7）：身体轻语独立否决闸——关掉后统计/情绪/感知链路
+        # 照跑，只是不再往上下文递身体感受（变化水位同步清零，重新打开后
+        # 即使内容未变也会重新递一次）
+        if not self._cap_effective("whisper", shard=shard):
+            shard.last_injected_whisper_key = ""
+            return []
         try:
             state = self._current_phase_state(shard)
         except TideConfigError:
@@ -432,7 +438,7 @@ class WhisperMixin:
         """
         name = str(lanlan or "").strip() or self._current_shard_name()
         shard = shard or self._get_shard(name)
-        if not self._tide_cfg.get("phase_openers", True):
+        if not self._cap_effective("phase_openers", shard=shard):
             return False
         if state.phase == "before_start":
             return False
@@ -465,8 +471,10 @@ class WhisperMixin:
         return True
 
     def _journal_enabled(self, shard: _LanlanShard | None = None) -> bool:
-        """个人日记开关：跟随总开关与情绪系统开关，另有 [journal].enabled 独立闸。"""
-        return bool(self._mood_enabled(shard) and self._journal_cfg.get("enabled", True))
+        """个人日记开关（1.2.7 起走能力中心）：总开关 ∧ 情绪引擎 ∧
+        [journal].enabled ∧ 用户否决。管"递邀请"这条主动链路；写日记工具
+        仍只认情绪引擎闸（关掉后她自愿写仍可写，既有语义不变）。"""
+        return self._cap_effective("journal", shard=shard)
 
     def _journal_int_cfg(self, key: str, default: int) -> int:
         try:

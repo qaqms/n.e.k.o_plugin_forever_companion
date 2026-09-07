@@ -53,6 +53,7 @@ from ..core.state import (
     _TIMED_ACTIONS,
     _TONE_SLOT_OPTIONS_CACHE_TTL,
     _TONE_SLOT_PREFIXES,
+    _caps_key,
     _cfg_section,
     _cycle_key,
     _diary_key,
@@ -140,7 +141,9 @@ class PanelEntriesMixin:
         valence, arousal = self._current_affect(shard)
         mood_payload: JsonObject = {
             "active": mood_active,
-            "system_enabled": bool(self._mood_cfg.get("enabled", True)),
+            # 系统级开关态（忽略总开关，防双重提示）：配置 ∧ 能力否决集
+            # （1.2.7 能力中心：功能页关掉情绪引擎，状态条提示也要如实跟上）
+            "system_enabled": self._cap_config_on("mood_engine", lanlan),
             "affect": {
                 "valence": round(valence, 2),
                 "arousal": round(arousal, 2),
@@ -284,6 +287,10 @@ class PanelEntriesMixin:
             },
             # 模型通道状态灯（情绪页"模型通道"卡）：ok / free_route / no_model / disabled
             "channel_status": channel_status,
+            # 能力中心总览（1.2.7）：功能页数据源随 5s 轮询下发（纯内存小载荷）。
+            # 与总开关/设置页/后台变化同帧一致——"按需拉一次就定格"的窗口不存在；
+            # list_capabilities 入口保留（API/调试），同一构建器口径唯一
+            "capabilities": self._cap_view(lanlan),
             # 近 7 天相处活跃度（总览"相处信号"卡）：时光日记近 7 天条目数
             "week_activity": week_turns,
             # 相处统计（1.1.0）：数字摘要 + 徽章墙进 5s 轮询（纯本地即时计算，
@@ -300,7 +307,7 @@ class PanelEntriesMixin:
                     "anchor": bool(
                         str(shard.cycle.get("anchor_date") or self._tide_cfg.get("anchor_date") or "")
                     ),
-                    "mood": bool(self._mood_cfg.get("enabled", True)),
+                    "mood": self._cap_config_on("mood_engine", lanlan),
                     "channels": self._channels_any_live(channel_status),
                     "together": bool(shard.stats.get("first_seen")),
                 }),
@@ -1616,6 +1623,7 @@ class PanelEntriesMixin:
             _journal_key(name), _weekly_key(name),  # weekly@ 为 0.7.0 前的旧周记 key，一并清
             _review_key(name), _review_stats_key(name),  # 我的日记（0.8.0）：篇目与旧独立 stats key
             _stats_key(name),  # 相处统计（1.1.0）
+            _caps_key(name),  # 能力否决集（1.2.7）：角色份一并清，不留残留开关
         ):
             # 统一删除出口（1.2.2 审查轮 P1）：未通电/真失败都留痕，行为不变
             res = await self._store_delete(key, f"prune {key}")
@@ -1624,6 +1632,8 @@ class PanelEntriesMixin:
         self._lanlan_index.remove(name)
         res_index = await self._save_lanlan_index()
         self._shards.pop(name, None)
+        # 能力否决集（1.2.7）：内存 shard 之外的 caps 位同步清掉，防同名重建串档
+        self._caps_off.pop(name, None)
         # 孤儿 shard 若还带着生效情绪，引用计数水位需立即自愈（结果纳入聚合，P2）
         res_pause = await self._maybe_sync_proactive_pause()
         # 批次2：任一 delete / 索引落盘失败都向用户传播 Err（盘上残留的 key 仍在，

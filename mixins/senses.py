@@ -246,8 +246,9 @@ class SensesMixin:
             return default
 
     def _fragments_enabled(self, shard: _LanlanShard | None = None) -> bool:
-        """碎片捕获开关：跟随总开关与情绪系统开关，另有 [fragments].enabled 独立闸。"""
-        return bool(self._mood_enabled(shard) and self._fragments_cfg.get("enabled", True))
+        """碎片捕获开关（1.2.7 起走能力中心）：总开关 ∧ 情绪引擎 ∧
+        [fragments].enabled ∧ 用户否决，依赖链在声明表里显式化。"""
+        return self._cap_effective("fragments", shard=shard)
 
     async def _maybe_capture_fragments(self, lanlan: str, shard: _LanlanShard) -> bool:
         """碎片捕获主入口（tick 驱动，只对当前角色 shard）。
@@ -371,9 +372,9 @@ class SensesMixin:
     # ==========================================
 
     def _review_enabled(self, shard: _LanlanShard | None = None) -> bool:
-        """我的日记开关：跟随总开关与情绪系统开关（素材来自语气感知/碎片等
-        情绪链路），另有 [review].enabled 独立闸。"""
-        return bool(self._mood_enabled(shard) and self._review_cfg.get("enabled", True))
+        """我的日记开关（1.2.7 起走能力中心）：总开关 ∧ 情绪引擎（素材来自
+        语气感知/碎片等情绪链路）∧ [review].enabled ∧ 用户否决。"""
+        return self._cap_effective("review", shard=shard)
 
     def _review_int_cfg(self, key: str, default: int) -> int:
         try:

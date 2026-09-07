@@ -56,7 +56,7 @@ export function arousalColor(arousal: number): string {
   return `rgb(${mix(from[0], to[0])}, ${mix(from[1], to[1])}, ${mix(from[2], to[2])})`
 }
 
-// api.call 的返回值是宿主信封 {plugin_id, action_id, result: <入口载荷>}，
+// props.api.call 的返回值是宿主信封 {plugin_id, action_id, result: <入口载荷>}，
 // iframe 侧不做解包；这里兼容两种形态取出真实载荷（信封判据：同时带 action_id 与 result 键）
 export function unwrapCallResult<T = Record<string, any>>(payload: any): T {
   if (payload && typeof payload === "object" && "result" in payload && "action_id" in payload) {

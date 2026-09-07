@@ -687,6 +687,45 @@ zh-CN / en i18n
   不靠 server state 关闭弹窗）；overview.tsx 顶部插 GuideCard；manage.tsx 加
   reopen 按钮。i18n 新增 `onboarding.*` / `panel.guide.*` 约 40 键 ×8 语言。
 
+### 1.2.7：能力中心（功能模块解耦与统一开关体系）
+
+背景：功能闸散落各 mixin（`_mood_enabled`/`_fragments_enabled`/…各写各的），
+闸与闸之间隐式层级无单一事实源；新 LLM 功能接入要改 tick/面板/配置/日志/测试
+五处。本版本把"模块开关"抽成一层薄地基：
+
+- **声明层 `core/capabilities.py`（纯数据零 SDK）**：九项能力（whisper/
+  phase_openers/activity_sense/anniversary/mood_engine/tone_sense/fragments/
+  journal/review）各登记：分组、依赖链、**绑定的既有配置键**（toml 段不迁移
+  不重排）、占用工具（共 12）、LLM 触点类型（injection/tool/direct/host_http/
+  none）；`evaluate_capabilities(root, config_flags, overrides)` 按声明序
+  （拓扑序）解析出每能力的生效态与**不生效原因**（master_off/user_off/
+  config_off/upstream_off），原因一路传到面板。
+- **运行层 `mixins/capabilities.py`**：`_cap_effective(cap_id, shard/lanlan)`
+  唯一判定入口；既有闸（_mood_enabled/_fragments_enabled/_review_enabled/
+  _journal_enabled/_emotion_sense_enabled、whisper/opener/activity/anniversary
+  注入点）全部改为一行转发——**方法名与语义不变**，收编零行为变化
+  （无否决时与 1.2.x 完全等价，旧测试 321 个全绿不改）。
+- **否决式覆盖层（按角色）**：面板开关只写 `caps@<角色>` / 全局 `caps@*` 的
+  "关"集合；打开 = 撤否决回落配置默认，绝不存在"设置页关、功能页硬开"两张皮；
+  强行点亮失败时入口回 `note=reverted_to_default`，面板如实回弹。旧设置页/
+  toml 路径零改动；prune 孤儿角色一并清 caps@。未知名宽容放行（拼错 id
+  不得悄悄关掉功能）。
+- **工具显隐（高级选项，全局 `[capabilities].hide_disabled_tools`）**：默认
+  温和模式（在位、调用拒，既有语义）；开启后对所有已登记角色都不生效的能力，
+  其工具经官方 `LLM_TOOL_UNREGISTER/REGISTER` IPC 摘挂——**只动宿主可见性，
+  本地 `_llm_tools`/动态入口/运行闸全部不变**；每趟 tick 纯内存差集比对，
+  `_reemit_missing_tools` 巡检跳过隐藏名单防抵消；宿主工具注册无角色通道，
+  故显隐按"任一角色生效即留"的并集口径。
+- **面板**：新「功能」页签 `ui/features.tsx`——清单由声明表自动渲染
+  （开关 + LLM 徽标 + 不生效原因）；**数据源随 dashboard 5s 轮询下发**
+  （后端 `_cap_view` 小载荷纯内存计算，与总开关/其它页设置同帧一致——
+  首版"进页按需拉一次"会让状态条拨了总开关后功能页横幅停在旧态，
+  发布前实测定为陈旧窗口不可接受而改此方案）；`list_capabilities` 入口
+  保留（API/调试，与轮询共用同一构建器口径唯一）；i18n 新增 47 键 ×8 语言；
+  `@ui.action` 三入口 list_capabilities/set_capability/set_capability_flags。
+- **后续新 LLM 模块接入成本**：写 service + 声明表一行 + 闸走 `_cap_effective`，
+  开关/面板/持久化/工具生命周期/多角色全自动。
+
 ## Out of Scope
 
 - 情绪日记的 LLM 自动总结写入（v1 只提供模型手写日记工具与人工查看）

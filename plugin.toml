@@ -3,7 +3,7 @@ name = "永远的陪伴"
 description = "赋予 AI 更全面的陪伴能力：她有真实的身体节律（潮汐周期）、会起伏的情绪（十二个自主情绪工具）、属于自己的三本日记（时光日记/个人日记/我的日记），以及能看见你们相处痕迹的总览仪表盘。插件只递状态与工具，如何回应由她自己决定。"
 short_description = "Full companionship for your AI companion: body rhythm, self-directed moods, her own diaries, and a dashboard of your time together."
 keywords = ["陪伴", "companion", "companionship", "情绪", "mood", "emotion", "周期", "period", "身体", "body", "潮汐", "tide", "日历", "calendar", "日记", "diary", "journal", "记忆", "memory"]
-version = "1.2.6"
+version = "1.2.7"
 id = "forever_companion"
 type = "plugin"
 entry = "plugin.plugins.forever_companion:ForeverCompanionPlugin"
@@ -179,6 +179,19 @@ days_threshold = 7
 # 纪念日注入：今天恰好是相伴第 30/60/…/365/… 天时递一条 read 轻语
 #（说不说由她决定）；false 关闭
 anniversary_inject = true
+
+[capabilities]
+# 能力中心（1.2.7）：全部功能模块的统一开关体系——面板「功能管理」页可按角色
+# 否决任意能力（关掉只写否决集 caps@<角色>，重新打开回落本文件各段默认，
+# 绝不强行点亮配置里关着的项）。本段只放能力层自身的全局选项，
+# 各能力的业务开关仍在各自段（[mood]/[fragments]/[review]/[emotion_sense] 等）。
+# 高级选项：关闭的能力是否把它的 LLM 工具从模型可见面摘除。
+# false（默认，温和模式）= 工具始终在位，调用时被运行时闸门拒绝
+# （沿用 [mood].enabled 既有语义，零行为变化）；
+# true = 对"所有已登记角色都不生效"的能力，其工具经官方 LLM_TOOL_UNREGISTER
+# 通道从宿主摘除（模型不再看见、不再占上下文），恢复生效时自动重挂。
+# 注意：宿主工具注册没有按角色隐藏的通道，显隐是全局的；按角色的拒绝闸不受影响。
+hide_disabled_tools = false
 
 [emotion_sense]
 # 语气感知总开关：在她回复完成后异步分析这轮互动的情绪（零延迟，不挡生成链路）。

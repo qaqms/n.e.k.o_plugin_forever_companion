@@ -89,6 +89,9 @@ class EmotionSenseService:
         screen_check: Callable[..., bool],
         plugin_id: Callable[[], str],
         logger: Callable[[], Any],
+        # 能力中心接线（1.2.7）：开关判定经主类 _cap_effective（含按角色否决集）；
+        # 未注入时回落旧公式（情绪引擎 ∧ 配置），保留服务单独可测性
+        cap_enabled: Callable[..., bool] | None = None,
     ) -> None:
         self._http = http
         self._push = push
@@ -109,6 +112,7 @@ class EmotionSenseService:
         # plugin_id 同为延迟解析回调：与其他回调保持同一纪律，杜绝构造期快照
         self._plugin_id = plugin_id
         self._logger = logger
+        self._cap_enabled = cap_enabled
         # 宿主 CSRF token 缓存（GET /health 的 instance_id）；None = 未获取/已失效
         self._csrf_token: str | None = None
         # 分析端点 error 休眠的节流水位：哨兵 -1000.0 而非 0.0——防 time.monotonic()
@@ -138,6 +142,10 @@ class EmotionSenseService:
     # ---- 开关与生效阈值 ----
 
     def _emotion_sense_enabled(self, shard: _LanlanShard | None = None) -> bool:
+        # 1.2.7 能力中心：tone_sense 闸统一经主类判定（总开关 ∧ 情绪引擎 ∧
+        # [emotion_sense].enabled ∧ 用户否决）；无回调时保持旧公式
+        if self._cap_enabled is not None:
+            return bool(self._cap_enabled("tone_sense", shard=shard))
         return bool(self._mood_enabled(shard) and self._cfg_getter().get("enabled", True))
 
     def _effective_tone_threshold(self, shard: _LanlanShard) -> float:

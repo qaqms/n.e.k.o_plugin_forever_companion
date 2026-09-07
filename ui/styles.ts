@@ -808,6 +808,20 @@ export const PANEL_STYLES = `
     linear-gradient(currentColor, currentColor) 50% 35% / 25% 1.5px no-repeat,
     linear-gradient(currentColor, currentColor) 35% 50% / 1.5px 30% no-repeat;
 }
+/* 功能管理（1.2.7）：两行开关意象（轨道 + 错位的旋钮） */
+.tm-ico-features {
+  background:
+    linear-gradient(currentColor, currentColor) 0 25% / 100% 1.5px no-repeat,
+    linear-gradient(currentColor, currentColor) 0 75% / 100% 1.5px no-repeat;
+}
+.tm-ico-features::before {
+  content: ""; position: absolute; left: 2px; top: 19%;
+  width: 4px; height: 4px; border-radius: 999px; background: currentColor;
+}
+.tm-ico-features::after {
+  content: ""; position: absolute; right: 2px; top: 69%;
+  width: 4px; height: 4px; border-radius: 999px; background: currentColor;
+}
 /* 设置：齿轮意象（外圈 + 中心圆点） */
 .tm-ico-settings { border: 1.5px solid currentColor; border-radius: 999px; }
 .tm-ico-settings::after {
@@ -1401,4 +1415,9 @@ export const PANEL_STYLES = `
 .tm-guide-foot { margin-top: 8px; font-size: 11.5px; line-height: 1.55; color: var(--muted); }
 .tm-reopen-guide { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
 .tm-reopen-hint { font-size: 12px; color: var(--muted); }
+/* 功能管理页（1.2.7）：能力行列表 + LLM 徽标侧栏 + 高级选项说明 */
+.tm-feat-list { display: flex; flex-direction: column; gap: 6px; }
+.tm-feat-row .tm-field { margin-bottom: 0; }
+.tm-feat-side { display: inline-flex; align-items: center; gap: 10px; }
+.tm-feat-note { font-size: 12px; line-height: 1.6; color: var(--muted); margin-top: 8px; }
 `

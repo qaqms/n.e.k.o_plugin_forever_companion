@@ -254,6 +254,29 @@ export type State = {
   stats_summary?: StatsState
   // 新手引导 + 就绪清单（1.2.6）
   onboarding?: Onboarding
+  // 能力中心总览（1.2.7）：功能页数据源随 5s 轮询下发（纯内存小载荷）
+  capabilities?: CapabilitiesPayload
+}
+
+// ---- 能力中心（1.2.7）----
+// source：on / user_off（功能页否决）/ config_off（设置里关）/
+// upstream_off（被依赖挡住，blocked_by 给上游 id）/ master_off（总开关）
+export type CapItem = {
+  id: string
+  group: string
+  llm: string
+  tools?: string[]
+  enabled: boolean
+  source: string
+  blocked_by?: string[]
+  user_off?: boolean
+}
+
+export type CapabilitiesPayload = {
+  lanlan?: string
+  master_enabled?: boolean
+  hide_disabled_tools?: boolean
+  capabilities?: CapItem[]
 }
 
 // ---- 新手引导与配置引导（1.2.6）----
