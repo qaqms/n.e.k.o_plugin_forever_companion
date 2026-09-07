@@ -472,6 +472,77 @@ zh-CN / en i18n
   落盘/成文失败留痕两分支/直连 warning 升级）；回退源码后 7/10 以正确理由红
   （其余 3 条锁修复前既有行为面）。全套 296 绿。
 
+### 1.2.3：面板日记体验修复（排队成文 + 邀请当面递到 + 续写自动刷新）
+
+用户实测反馈：日记页点「立即写一篇」后卡住无反馈，过一会才凭空刷出一篇。
+调查确认属实，根因是**同步等待模型成文**挂在了面板动作的请求-响应链上：
+
+- `write_review_now` 入口 `await _maybe_write_review(force=True)`，整条链
+  （角色解析 HTTP ≤4s + 素材摘样 + 直连成文 urlopen ≤15s + 落盘）要 5～20 秒；
+- 前端按钮无 pending 态（裸 Button + async onClick），toast 与刷新都要等
+  `api.call` resolve——等待期界面一片寂静；
+- 超时链压线：浏览器 axios 默认 30s 与宿主 hosted action 的
+  `PLUGIN_EXECUTION_TIMEOUT=30s` 几乎同时到期，模型稍慢即"先报超时、后出文章"
+  （文章照常落盘、由 5s 轮询自己冒出来），关面板断连更会走 499 取消路径把
+  写到一半的 await 掐死、篇目连同落盘一起丢失；
+- 无并发防抖：等待期连点每次都过素材门槛，可并发跑多趟模型写多篇。
+
+修法（方案 A：异步队列 + 轮询回流，插件无常驻事件循环，tick 是唯一可靠执行体）：
+
+- **入口改受理式**：只做秒级门控预检（开关/素材 ≥10 轮/槽位可解析——与成文
+  共用新抽的 `_review_write_gate`，口径唯一），通过即在 shard 上打
+  `pending_review_write` 排队标记并秒回 `accepted:true`；当场拒绝沿用旧
+  written=False+note 形状。队列只有一个槽位：pending 或在飞时重复点击回
+  `already_writing`，不叠加。
+- **tick 头部消费队列**：`_drain_pending_review_writes` 放在 tick 的 enabled
+  拦截**之前**（"我的日记"只认 `[review].enabled`，潮汐总开关 fail-closed
+  时队列也必须能被写掉，与 `_supervise_once`/`_ensure_tools_registered` 同
+  先例）；清标记→跑成文→结果写 `shard.review_write_result`
+  （`{ts, written, reason}`）。撞上在飞锁则放回 pending 下趟重试，不记失败。
+- **在飞锁**：`_maybe_write_review` 外层包 `_review_writing: set[str]`，
+  同角色成文期间再入立即 `(False, "in_flight")`——封死队列写/tick 自动写/
+  调试强写并发跑两趟模型互踩"追加+素材清零"快照的路。主体更名
+  `_review_compose`（语义不变）。
+- **回流通道**：dashboard `review_brief` 新增 `writing`（按钮禁用态+
+  "正在写…"文案）与 `last_result`；`ui/panel.tsx` 按 `last_result.ts` 去重弹
+  一次完成 toast（挂载时先认领当前值，旧结论不补弹；persist_failed 按
+  1.2.2 口径弹 error）。新篇目进目录由既有的 `entries` 变化自动重拉承接。
+- **代价与边界**：点击到开写最多多等一拍（≤10s，有"正在写…"提示兜着）；
+  pending/result 都是内存位——插件重启即弃（面板写作态消失、用户可重按），
+  断连不再丢篇（成文与客户端死活无关）。入口不再回 Err，
+  `persist_failed` 改由结果通道如实上报。
+- **个人日记邀请可见性（顺带）**：递邀后到她落笔前是纯静默（read 注入、
+  她完全自主），面板同样显得"没反馈、凭空多一页"。新增
+  `_journal_invite_pending`：比较节流水位 `last_journal_invite_ts` 与书页
+  末段 ts（零新增持久字段），dashboard 下发 `journal_invite_pending`，
+  日记页挂"正等她落笔"提示，她写出新页自动解除。
+
+**第二轮（同版本）：个人日记的"点了但她不知道"与"续写看不见"**——调查显示
+个人日记没有长等待问题（递邀/落笔工具全内存毫秒级），但有两处体验断层：
+
+- **F1 续写刷新检测面错位（bug）**：`ui/diary.tsx` 的自动重拉条件是**页数**
+  变化，而 `mood_journal_write` 默认续写在当前页——页数不变，她连写几段面板
+  毫无动静（旧注释"页数不变内容变极少、手动刷新兜底"低估了：续写是默认路径）。
+  修法：检测面换成"页码:段数:末笔时刻"逐页拼接的**书指纹**（journal_index
+  本就下发这两个字段，后端零改动），指纹变即重拉；切角色时基线作废重认。
+  阅读页翻开态按 page_no 定位，重拉后仍停在原页并显示新内容。
+- **F2 手动递邀改当面递到（行为变化，经用户确认）**：read 邀请要等用户**下一次
+  开口**才流进上下文——按钮点完"邀请已递出"，她其实还不知道，等待时长完全
+  取决于用户何时再聊，是"点了没反馈"在个人日记侧的根源。参照阶段开场白先例
+  （`ai_behavior="respond"` 立即起轮）把投递分双档：**面板 force 递邀走
+  respond**，点击当场起轮、她即刻收到并自主决定（落笔则写；不想写按提示"轻轻
+  放下"，不必硬找话说）；**tick 周期递邀保持 read**（安静的生命节律，每 7 天
+  不该起轮打扰）。respond 档带 10 分钟冷却（`_JOURNAL_RESPOND_COOLDOWN_SEC`，
+  复用节流水位判龄）：刚递过再按回落为 read 补递、note 如实说明"悄悄提醒"，
+  防连点成骚扰；同 `coalesce_key` 在宿主主动队列里还会折叠只留最新一条。
+  `_maybe_journal_invite` 返回改为 `(invited, deliver)`，`deliver ∈
+  ""/respond/read`，面板入口按三态给 note；supervise 周期调用忽略返回值，
+  调试入口回显 `deliver`。fail-closed 复核：`_journal_enabled` 是
+  潮汐 ∧ 情绪系统 ∧ `[journal].enabled` 三道闸，respond 档同样受辖，
+  总开关关着当面递邀也绝不起轮。
+- **验证**：`tests/test_journal.py` 新增 4 条（首递 respond→冷却回落 read→
+  水位拨旧恢复 respond；周期恒 read；三闸拒绝；入口三态 note）。全套 305 绿。
+
 ## Out of Scope
 
 - 情绪日记的 LLM 自动总结写入（v1 只提供模型手写日记工具与人工查看）

@@ -226,6 +226,9 @@ _JOURNAL_ENTRY_MAX_CHARS = 900
 # 邀请节奏（[journal].interval_days 可覆盖）与邀请节流（内存，per-shard）
 _JOURNAL_DEFAULT_INTERVAL_DAYS = 7
 _JOURNAL_INVITE_THROTTLE_SEC = 24 * 3600
+# 面板手动递邀的 respond 冷却（1.2.3）：距上一次递出（周期或手动）不满此值时，
+# 手动按钮回落为 read 补递——当面起轮的打扰更贵，给连点留一个缓冲
+_JOURNAL_RESPOND_COOLDOWN_SEC = 10 * 60
 
 # ---- 我的日记（0.8.0）：关于主人的互动评价 ----
 # 成文模板槽位：与碎片提取同款"可自定义 prompt 的直连通道"，summary 槽与宿主
@@ -483,6 +486,8 @@ class _LanlanShard:
         "affect_extreme_since",
         "affect_extreme_side",
         "last_extreme_invite_ts",
+        "pending_review_write",
+        "review_write_result",
     )
 
     def __init__(self) -> None:
@@ -496,6 +501,11 @@ class _LanlanShard:
         # 重新累计，见 review.py）；review = 已成文的评价篇目（时间正序列表）
         self.review_stats: JsonObject = {}
         self.review: list[JsonObject] = []
+        # 面板「立即写一篇」异步队列（1.2.3）：pending_review_write = 排队时刻
+        # （0 = 无待写）；成文结果 {ts, written, reason} 供面板轮询弹完成 toast。
+        # 都只存内存：插件重启即弃，面板写作中态随之消失，用户可重新点击
+        self.pending_review_write = 0.0
+        self.review_write_result: JsonObject | None = None
         # 相处统计（1.1.0，stats.py）：按天聚合的长期累计（徽章/热力图/月报），
         # 只增不清零、不受 [review].enabled 闸控制，纯本地纯统计零模型开销
         self.stats: JsonObject = {}

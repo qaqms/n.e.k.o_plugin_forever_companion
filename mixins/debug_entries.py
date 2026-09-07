@@ -317,7 +317,10 @@ class DebugEntriesMixin:
         }
         if force:
             shard.last_journal_invite_ts = 0.0
-            payload["invited"] = await self._maybe_journal_invite(name, shard)
+            # 清零节流水位 → 必走 respond 当面递到档；deliver 回显投递方式（1.2.3）
+            invited, deliver = await self._maybe_journal_invite(name, shard)
+            payload["invited"] = invited
+            payload["deliver"] = deliver
             payload["note"] = "已清零节流并尝试推送邀请（资格/开关不满足则 invited=false）。"
         return Ok(payload)
 

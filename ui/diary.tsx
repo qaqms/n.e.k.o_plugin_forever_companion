@@ -2,7 +2,7 @@
 // / 我的日记（关于主人的互动评价：目录 + 单篇阅读 + 素材进度）
 // hosted-tsx 约束：唯一 export 在任何 JSX 闭合标签之前；辅助组件放文件尾部靠函数声明提升被引用
 import { Button, Card, EmptyState, Tabs } from "@neko/plugin-ui"
-import { useEffect, useLocalState, useState } from "@neko/plugin-ui"
+import { useEffect, useLocalState, useRef, useState } from "@neko/plugin-ui"
 import type { DiaryItem, JournalPage, JournalPageHeader, ReviewEntry, ReviewProgress, TFunc } from "./types"
 import { fragmentKindKey, journalTrendKey, moodDotColor } from "./utils"
 
@@ -12,6 +12,7 @@ export function DiaryPane(props: {
   diaryTotal: number
   fragmentTotal: number
   journalIndex: JournalPageHeader[]
+  invitePending?: boolean
   lanlan?: string
   reviewBrief?: { enabled?: boolean; entries?: number; progress_turns?: number; turns_threshold?: number }
   onClearDiary: () => void
@@ -25,7 +26,7 @@ export function DiaryPane(props: {
   settingsChildren?: any
 }) {
   const {
-    t, diary, diaryTotal, fragmentTotal, journalIndex, lanlan, reviewBrief,
+    t, diary, diaryTotal, fragmentTotal, journalIndex, invitePending, lanlan, reviewBrief,
     onClearDiary, onDeleteFragment, onLoadJournal, onLoadMoreDiary, onInviteJournal,
     onLoadReview, onWriteReviewNow, onClearReview, settingsChildren,
   } = props
@@ -45,6 +46,13 @@ export function DiaryPane(props: {
   const [openPageNo, setOpenPageNo] = useState<number | null>(null)
   const openIdx = openPageNo === null ? null : pages.findIndex((p) => (p.page_no || 0) === openPageNo)
   const visiblePage = openIdx !== null && openIdx >= 0 ? pages[openIdx] : null
+  // 书页指纹（1.2.3）：页码:段数:末笔时刻 逐页拼接。mood_journal_write 默认
+  // 续写在当前页——页数不变，只看页数的旧检测让她续写的段落永远等不到自动
+  // 刷新；指纹把"段数/末笔时刻"也纳入观察面
+  const bookFingerprint = journalIndex
+    .map((p) => `${p.page_no || 0}:${p.entry_count || 0}:${p.last_ts || ""}`)
+    .join("|")
+  const bookFpSeen = useRef<string | null>(null)
   // ---- 我的日记：全部篇目（倒序）+ 素材进度 + 当前翻开篇（null = 目录视图）----
   const [reviewEntries, setReviewEntries] = useState<ReviewEntry[]>([])
   const [reviewProgress, setReviewProgress] = useState<ReviewProgress>({})
@@ -94,19 +102,26 @@ export function DiaryPane(props: {
     setDiaryHasMore(false)
     setOpenPageNo(null)
     setOpenReviewTs(null)
+    bookFpSeen.current = null  // 指纹基线作废，按新角色的书重认（1.2.3）
     reloadBook()
     reloadReview()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lanlan])
 
-  // 她在面板开着的时候写了新页：dashboard 的 journal_index 页数变化 → 自动重拉整本
-  //（页数不变内容变的情况极少——52 页淘汰后才可能，手动刷新兜底）
+  // 她在面板开着的时候写了/续写了：journal_index 指纹变化 → 自动重拉整本
+  //（1.2.3：检测面从页数升级为 页码:段数:末笔时刻 指纹——续写不动页数，
+  // 旧逻辑下她连写几段面板毫无动静，只能手动刷新）
   useEffect(() => {
-    if (bookLoaded && journalIndex.length !== pages.length) {
-      reloadBook()
+    if (bookFpSeen.current === null) {
+      bookFpSeen.current = bookFingerprint
+      return
+    }
+    if (bookFingerprint !== bookFpSeen.current) {
+      bookFpSeen.current = bookFingerprint
+      if (bookLoaded) reloadBook()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [journalIndex.length])
+  }, [bookFingerprint])
 
   // 我的日记写了新篇：dashboard 的 review_brief 篇数变化 → 自动重拉全部篇目
   useEffect(() => {
@@ -199,6 +214,11 @@ export function DiaryPane(props: {
                     </Button>
                   </span>
                 </div>
+                {invitePending ? (
+                  <div className="tm-derived">
+                    {t("panel.journal.invitePending", { defaultValue: "邀请已递出，正等她落笔——她说写就写、说缓就缓，下一页会自己出现在这里。" })}
+                  </div>
+                ) : null}
                 <div className="tm-derived">
                   {t("panel.journal.hint", { defaultValue: "她每隔一段时间自己写的一篇日记，只给你看；翻页看看她这段时间在想什么。" })}
                 </div>
@@ -237,14 +257,25 @@ export function DiaryPane(props: {
                     <Button onClick={() => { reloadReview() }} disabled={reviewLoading}>
                       {t("panel.journal.refresh", { defaultValue: "刷新" })}
                     </Button>
-                    <Button tone="primary" onClick={onWriteReviewNow}>
-                      {t("panel.review.writeNow", { defaultValue: "立即写一篇" })}
+                    <Button
+                      tone="primary"
+                      onClick={onWriteReviewNow}
+                      disabled={reviewLoading || !!(reviewBrief && reviewBrief.writing)}
+                    >
+                      {reviewBrief && reviewBrief.writing
+                        ? t("panel.review.writing", { defaultValue: "正在写…" })
+                        : t("panel.review.writeNow", { defaultValue: "立即写一篇" })}
                     </Button>
                     <Button tone="danger" onClick={onClearReview}>
                       {t("panel.review.clear", { defaultValue: "清空" })}
                     </Button>
                   </span>
                 </div>
+                {reviewBrief && reviewBrief.writing ? (
+                  <div className="tm-derived">
+                    {t("panel.review.writingHint", { defaultValue: "她正把这段时间写下来，写完会自动出现在这里，不用守着。" })}
+                  </div>
+                ) : null}
                 <div className="tm-derived">
                   {t("panel.review.hint", { defaultValue: "对我的记录" })}
                 </div>

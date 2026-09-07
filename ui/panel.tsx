@@ -379,7 +379,8 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       if (r.invited === false) {
         toast.info(String(r.note || t("panel.journal.inviteOff", { defaultValue: "个人日记开关未开启，邀请未发送" })))
       } else {
-        toast.success(t("panel.journal.invited", { defaultValue: "邀请已递出，写不写由她自己决定" }))
+        // note 由服务端按投递方式给三态文案（当面递到 / 冷却内静默补递，1.2.3）
+        toast.success(String(r.note || t("panel.journal.invited", { defaultValue: "邀请已递出，写不写由她自己决定" })))
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
@@ -402,18 +403,42 @@ export default function Panel(props: PluginSurfaceProps<State>) {
 
   async function onWriteReviewNow() {
     try {
+      // 受理式入口（1.2.3）：后端秒回"已开始写"，真正的成文在后台一拍内起跑；
+      // 成败结论经 dashboard review_brief.last_result 由下方 effect 弹完成 toast
       const payload = unwrapCallResult(await props.api.call("write_review_now", {}))
       await props.api.refresh()
       const r = (payload || {}) as Record<string, any>
-      if (r.written === false) {
-        toast.info(String(r.note || t("panel.review.writeFailed", { defaultValue: "这一篇还没写成，稍后再试" })))
+      if (r.accepted) {
+        toast.info(String(r.note || t("panel.review.accepted", { defaultValue: "已开始写这一篇，写完会自动出现在这里，不用守着" })))
       } else {
-        toast.success(t("panel.review.written", { defaultValue: "这一篇已经写好了，翻开看看吧" }))
+        toast.info(String(r.note || t("panel.review.writeFailed", { defaultValue: "这一篇还没写成，稍后再试" })))
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
     }
   }
+
+  // 队列成文的完成反馈（1.2.3）：last_result 的 ts 变化 = 刚有一篇写完/写失败。
+  // 挂载时先认领当前值——旧结论不补弹（新开面板直接看见篇目即可）
+  const reviewResultSeen = useRef<number>(0)
+  useEffect(() => {
+    const result = state.review_brief && state.review_brief.last_result
+    if (!result || !result.ts) return
+    if (reviewResultSeen.current === 0) {
+      reviewResultSeen.current = result.ts
+      return
+    }
+    if (reviewResultSeen.current === result.ts) return
+    reviewResultSeen.current = result.ts
+    if (result.written) {
+      toast.success(t("panel.review.written", { defaultValue: "这一篇已经写好了，翻开看看吧" }))
+    } else if (result.reason === "persist_failed") {
+      toast.error(t("panel.review.persistFailed", { defaultValue: "这一篇写成了但没存住，素材还留着，可以再点一次" }))
+    } else {
+      toast.info(t("panel.review.writeFailed", { defaultValue: "这一篇还没写成，稍后再试" }))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.review_brief && state.review_brief.last_result && state.review_brief.last_result.ts])
 
   async function onClearReview() {
     const ok = await confirmDialog({
@@ -642,6 +667,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
               diaryTotal={state.diary_total || 0}
               fragmentTotal={state.fragment_total || 0}
               journalIndex={state.journal_index || []}
+              invitePending={!!state.journal_invite_pending}
               lanlan={state.lanlan}
               reviewBrief={state.review_brief}
               onClearDiary={onClearDiary}

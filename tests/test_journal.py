@@ -187,3 +187,71 @@ def test_has_journal_content() -> None:
     assert has_journal_content("", "有内容", "", "") is True
     assert has_journal_content("   ", "", "", "") is False
     assert has_journal_content() is False
+
+
+# ---------- 1.2.3：递邀双模式（手动 respond 当面递到 / 周期与冷却 read 静默） ----------
+
+import asyncio  # noqa: E402
+
+
+def run(coro):
+    return asyncio.run(coro)
+
+
+def test_forced_invite_delivers_respond_then_cooldown_read(plugin_factory) -> None:
+    """面板 force 首递走 respond（当场起轮她立刻收到）；10 分钟内再按回落 read 补递。"""
+    p = plugin_factory()
+    shard = run(p._ensure_shard("default"))
+    invited, deliver = run(p._maybe_journal_invite("default", shard, force=True))
+    assert (invited, deliver) == (True, "respond")
+    push = p._pushed[-1]
+    assert push["ai_behavior"] == "respond"
+    assert push["visibility"] == []
+    text = push["parts"][0]["text"]
+    assert "[潮汐·日记邀请]" in text and "{MASTER_NAME}" in text
+    assert push["coalesce_key"] == "forever_companion.journal_invite"
+    assert push["metadata"]["deliver"] == "respond"
+    assert p._journal_invite_pending(shard) is True, "递出即挂起，她落笔才解除"
+
+    # 冷却窗口内（刚递出）：再 force 不重复起轮，改 read 补递
+    invited2, deliver2 = run(p._maybe_journal_invite("default", shard, force=True))
+    assert (invited2, deliver2) == (True, "read")
+    assert p._pushed[-1]["ai_behavior"] == "read"
+    assert "（内心状态提醒）" in p._pushed[-1]["parts"][0]["text"]
+
+    # 手动把水位拨回 11 分钟前 → 冷却已过，又回到 respond 档
+    shard.last_journal_invite_ts -= 11 * 60
+    invited3, deliver3 = run(p._maybe_journal_invite("default", shard, force=True))
+    assert (invited3, deliver3) == (True, "respond")
+
+
+def test_periodic_invite_stays_read(plugin_factory) -> None:
+    """tick 周期递邀保持 read：安静的生命节律不该起轮打扰。"""
+    p = plugin_factory()
+    run(p._ensure_shard("default"))
+    invited, deliver = run(p._maybe_journal_invite("default", p._get_shard("default")))
+    assert (invited, deliver) == (True, "read")
+    assert p._pushed[-1]["ai_behavior"] == "read"
+
+
+def test_invite_gated_by_switches(plugin_factory) -> None:
+    """三道闸任一关闭都拒绝递邀（fail-closed 不破）。"""
+    p = plugin_factory()
+    shard = run(p._ensure_shard("default"))
+    p._journal_cfg["enabled"] = False
+    assert run(p._maybe_journal_invite("default", shard, force=True)) == (False, "")
+    p._journal_cfg["enabled"] = True
+    p._mood_cfg["enabled"] = False
+    assert run(p._maybe_journal_invite("default", shard, force=True)) == (False, "")
+
+
+def test_invite_journal_entry_reports_mode(plugin_factory) -> None:
+    """面板入口三态 note：respond 当面递到 / 冷却内悄悄提醒。"""
+    p = plugin_factory()
+    run(p._ensure_shard("default"))
+    res = run(p.invite_journal())
+    v = res.value
+    assert v["invited"] is True and v["mode"] == "respond"
+    assert "当面" in v["note"]
+    res2 = run(p.invite_journal())
+    assert res2.value["mode"] == "read" and "悄悄" in res2.value["note"]

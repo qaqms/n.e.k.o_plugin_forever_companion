@@ -420,20 +420,21 @@ class SensesMixin:
             return
         shard.review_stats = record_fragment(shard.review_stats, str(record.get("kind") or ""), str(record.get("quote") or ""))
 
-    async def _maybe_write_review(self, lanlan: str, shard: _LanlanShard, *, force: bool = False) -> tuple[bool, str]:
-        """我的日记主入口（tick 驱动 + 面板「立即写一篇」共用）。
+    def _review_write_gate(self, shard: _LanlanShard, *, force: bool) -> tuple[bool, str, Any]:
+        """成文前置门控（纯同步、零模型零 IO 等待）：开关 → 门槛 → 直连槽位解析。
 
-        门控链：开关 → （force 时最小素材量 / 平时双门槛）→ 直连槽位成文 →
-        解析截断 → 篇目追加 + stats 原子清零落盘。槽位解析不出 key 时功能
-        休眠（节流 warning），失败静默降级绝不拖垮 tick。返回 (是否写了, 原因)。
+        面板「立即写一篇」受理预检与 _review_compose 共用本函数——口径唯一，
+        不会两处漂移。返回 (是否放行, 原因, 槽位解析结果)：原因沿用历史词表
+        （disabled / not_enough_material / slot_unresolved / review_due 的
+        no_activity 等），未放行时解析结果为 None。
+        门槛先于槽位休眠判定：素材不足/未到期时无论槽位状态都该报"未到节奏"，
+        面板调试时才不会被休眠日志误导。
         """
         if not self._review_enabled(shard):
-            return False, "disabled"
-        # 门槛先于槽位休眠判定：素材不足/未到期时无论槽位状态都该报"未到节奏"，
-        # 面板调试时才不会被休眠日志误导
+            return False, "disabled", None
         if force:
             if not can_force_write(shard.review_stats):
-                return False, "not_enough_material"
+                return False, "not_enough_material", None
         else:
             due, reason = review_due(
                 shard.review_stats,
@@ -441,7 +442,7 @@ class SensesMixin:
                 days_threshold=self._review_days_threshold(),
             )
             if not due:
-                return False, reason
+                return False, reason, None
         slot = str(self._review_cfg.get("slot") or "").strip() or _REVIEW_DEFAULT_SLOT
         core_cfg = self._load_core_config()
         resolved = self._resolve_tone_slot(core_cfg, slot)
@@ -453,7 +454,35 @@ class SensesMixin:
                     "review compose dormant: slot {} unresolved in host core_config ({}), (throttled 5min)",
                     slot, _slot_dormancy_hint(core_cfg, slot),
                 )
-            return False, "slot_unresolved"
+            return False, "slot_unresolved", None
+        return True, "", resolved
+
+    async def _maybe_write_review(self, lanlan: str, shard: _LanlanShard, *, force: bool = False) -> tuple[bool, str]:
+        """我的日记成文唯一入口（tick 自动 / tick 队列消费 / 调试入口都走这里）。
+
+        在飞锁（1.2.3）：同角色成文期间再次进入直接返回 False, "in_flight"——
+        队列写与自动双门槛写、调试强写不能对同一角色并发跑两趟模型、互踩
+        "追加+素材清零"的快照。"in_flight" 由消费方（_drain_pending_review_writes）
+        按"放回队列下趟重试"处理，不记成失败。
+        """
+        if lanlan in self._review_writing:
+            return False, "in_flight"
+        self._review_writing.add(lanlan)
+        try:
+            return await self._review_compose(lanlan, shard, force=force)
+        finally:
+            self._review_writing.discard(lanlan)
+
+    async def _review_compose(self, lanlan: str, shard: _LanlanShard, *, force: bool = False) -> tuple[bool, str]:
+        """成文主体（调用方一律先经 _maybe_write_review 拿在飞锁，勿直接进）。
+
+        门控链：_review_write_gate（开关/门槛/槽位）→ 摘样 + prompt →
+        直连成文 → 解析截断 → 篇目追加 + stats 原子清零落盘。槽位解析不出 key
+        时功能休眠（节流 warning），失败静默降级绝不拖垮 tick。返回 (是否写了, 原因)。
+        """
+        passed, reason, resolved = self._review_write_gate(shard, force=force)
+        if not passed or resolved is None:
+            return False, reason or "gate_rejected"
         # 成文素材：累计统计 + 最近几轮对话摘样（一次性拉取宿主 recent 窗口）
         sample_turns = await self._collect_review_sample_turns(shard, lanlan)
         prompt = build_review_prompt(shard.review_stats, sample_turns=sample_turns)
@@ -498,6 +527,34 @@ class SensesMixin:
             "review composed for {} (turns={}, entries={})", lanlan, record["turns"], len(shard.review)
         )
         return True, "written"
+
+    async def _drain_pending_review_writes(self) -> None:
+        """消费面板「立即写一篇」的排队请求（1.2.3，tick 链路头部调用）。
+
+        成文是 5～20 秒的模型慢操作，过去挂在面板入口的请求-响应链上：
+        点击即无反馈干等、浏览器 30s 与服务端 30s 压线、关面板断连还会把
+        写了一半的篇目连同落盘一起取消。现在入口只做受理（标记 pending、秒回），
+        真正的成文由本方法在下一趟 tick 起跑，结果写进 shard.review_write_result
+        供面板轮询取用。放在 tick 的 enabled 拦截之前："我的日记"只认
+        [review].enabled，不受潮汐总开关 fail-closed 牵连（否则默认安装态
+        队列永远不会被消费）。同角色成文在飞时跳过本趟、pending 留在队里下趟重试。
+        """
+        for lanlan, shard in list(self._shards.items()):
+            if not shard.pending_review_write:
+                continue
+            if lanlan in self._review_writing:
+                continue
+            shard.pending_review_write = 0.0
+            written, reason = await self._maybe_write_review(lanlan, shard, force=True)
+            if not written and reason == "in_flight":
+                # 门后竞态（调试入口刚好抢先进飞）：放回队列，不作失败上报
+                shard.pending_review_write = time.time()
+                continue
+            shard.review_write_result = {
+                "ts": time.time(),
+                "written": written,
+                "reason": reason,
+            }
 
     async def _collect_review_sample_turns(
         self, shard: _LanlanShard, lanlan: str

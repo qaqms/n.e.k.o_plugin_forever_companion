@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import timedelta
 
 import pytest
@@ -345,17 +346,158 @@ def test_mood_action_origins_recorded(plugin_factory) -> None:
         monkey.undo()
 
 
-def test_write_review_now_entry(plugin_factory) -> None:
+def _stub_model(p, monkey, reply="这段时间他常来陪她聊天。"):
+    monkey.setattr(p, "_resolve_tone_slot", lambda cfg, slot: {"base_url": "http://x", "api_key": "k", "model": "m"})
+    monkey.setattr(p, "_post_chat_completion", lambda *a, **k: reply)
+
+
+def test_write_review_now_entry_queues_then_drain_composes(plugin_factory) -> None:
+    """受理式入口（1.2.3）：点击秒回 accepted，模型成文延后到队列消费。"""
     p = _with_turns(plugin_factory(), 20)
     monkey = pytest.MonkeyPatch()
-    monkey.setattr(p, "_resolve_tone_slot", lambda cfg, slot: {"base_url": "http://x", "api_key": "k", "model": "m"})
-    monkey.setattr(p, "_post_chat_completion", lambda *a, **k: "这段时间他常来陪她聊天。")
+    _stub_model(p, monkey)
     try:
         res = run(p.write_review_now())
-        assert res.value["written"] is True
-        assert len(p._get_shard("default").review) == 1
+        v = res.value
+        assert v["accepted"] is True and v["queued"] is True
+        assert v["written"] is False
+        shard = p._get_shard("default")
+        assert shard.pending_review_write > 0
+        assert len(shard.review) == 0, "受理阶段绝不同步成文（这正是旧版卡面板的根因）"
+        assert shard.review_stats["turns"] == 20, "受理不动素材"
+
+        # tick 队列消费：真成文 + 结果回流（面板按 ts 弹完成 toast 的数据源）
+        run(p._drain_pending_review_writes())
+        assert shard.pending_review_write == 0
+        assert len(shard.review) == 1
+        assert shard.review_write_result["written"] is True
+        assert shard.review_write_result["reason"] == "written"
+        assert shard.review_write_result["ts"] > 0
+        assert shard.review_stats["turns"] == 0
     finally:
         monkey.undo()
+
+
+def test_write_review_now_gate_rejects_at_click(plugin_factory) -> None:
+    """门槛拒绝在点击时同步给出（不等队列）：素材不足/开关未开当场 note。"""
+    p = _with_turns(plugin_factory(), 3)
+    monkey = pytest.MonkeyPatch()
+    _stub_model(p, monkey)
+    try:
+        res = run(p.write_review_now())
+        v = res.value
+        assert v["accepted"] is False and v["queued"] is False
+        assert v["reason"] == "not_enough_material"
+        assert "再聊聊" in v["note"]
+        assert p._get_shard("default").pending_review_write == 0, "拒绝不得入队"
+    finally:
+        monkey.undo()
+
+    p2 = _with_turns(plugin_factory(), 20)
+    p2._review_cfg["enabled"] = False
+    res2 = run(p2.write_review_now())
+    assert res2.value["reason"] == "disabled"
+
+
+def test_write_review_now_duplicate_click_rejected(plugin_factory) -> None:
+    """队列槽位只有一个：上一篇还在写/还排着时，重复点击不叠加。"""
+    p = _with_turns(plugin_factory(), 20)
+    monkey = pytest.MonkeyPatch()
+    _stub_model(p, monkey)
+    try:
+        first = run(p.write_review_now()).value
+        assert first["accepted"] is True
+        pending_mark = p._get_shard("default").pending_review_write
+        again = run(p.write_review_now()).value
+        assert again["accepted"] is False
+        assert again["reason"] == "already_writing"
+        assert p._get_shard("default").pending_review_write == pending_mark, "重复点击不得重置排队时刻"
+
+        # 队列消费跑完（成文落盘、素材清零）：没重新攒够素材前不能再点，
+        # 重新喂素材后恢复受理
+        run(p._drain_pending_review_writes())
+        blocked = run(p.write_review_now()).value
+        assert blocked["accepted"] is False and blocked["reason"] == "not_enough_material"
+        _with_turns(p, 20)
+        third = run(p.write_review_now()).value
+        assert third["accepted"] is True
+    finally:
+        monkey.undo()
+
+
+def test_maybe_write_review_inflight_lock(plugin_factory) -> None:
+    """在飞锁（1.2.3）：同角色成文期间再入立即 in_flight，不并跑两趟模型。"""
+    p = _with_turns(plugin_factory(), 20)
+    monkey = pytest.MonkeyPatch()
+    calls = {"n": 0}
+
+    def counting_post(*a, **k):
+        calls["n"] += 1
+        return "正文"
+
+    monkey.setattr(p, "_resolve_tone_slot", lambda cfg, slot: {"base_url": "http://x", "api_key": "k", "model": "m"})
+    monkey.setattr(p, "_post_chat_completion", counting_post)
+    try:
+        p._review_writing.add("default")
+        written, reason = run(p._maybe_write_review("default", p._get_shard("default"), force=True))
+        assert (written, reason) == (False, "in_flight")
+        assert calls["n"] == 0, "在飞时不得再进模型"
+        p._review_writing.discard("default")
+
+        # 队列消费撞上在飞：pending 放回队里，不记失败结果
+        shard = p._get_shard("default")
+        shard.pending_review_write = 123.0
+        p._review_writing.add("default")
+        run(p._drain_pending_review_writes())
+        assert shard.pending_review_write == 123.0
+        assert shard.review_write_result is None
+        p._review_writing.discard("default")
+
+        # 正常一趟跑完后锁必须释放（finally 清理，不留残余）
+        run(p._drain_pending_review_writes())
+        assert "default" not in p._review_writing
+        assert len(shard.review) == 1
+    finally:
+        monkey.undo()
+
+
+def test_journal_invite_pending_state(plugin_factory, tm) -> None:
+    """邀请挂起态（1.2.3）：递邀晚于末笔即挂起，她落笔（新页新段）即解除。"""
+    from datetime import datetime, timedelta, timezone
+
+    p = plugin_factory()
+    shard = run(p._ensure_shard("default"))
+    assert p._journal_invite_pending(shard) is False, "没递过邀不挂起"
+
+    # 模拟 _maybe_journal_invite 递出（force 路径会写节流位）：空日记本 → 挂起
+    shard.last_journal_invite_ts = time.time()
+    assert p._journal_invite_pending(shard) is True, "递过邀、一个字没落笔 → 挂起"
+
+    # 她写了新的一页（段 ts 晚于邀请）→ 解除
+    newer = (datetime.now(timezone.utc) + timedelta(seconds=5)).isoformat(timespec="seconds")
+    shard.journal = [{"page_no": 1, "started_at": newer, "entries": [{"ts": newer, "text": "今天他陪我聊了很久"}]}]
+    assert p._journal_invite_pending(shard) is False
+
+    # 再次递邀（新邀请晚于末笔）→ 重新挂起
+    shard.last_journal_invite_ts = time.time() + 60
+    assert p._journal_invite_pending(shard) is True
+
+
+def test_dashboard_exposes_review_writing_and_invite_pending(plugin_factory) -> None:
+    """dashboard 回流通道：writing 点亮按钮禁用态、last_result 驱动完成 toast、
+    journal_invite_pending 驱动日记页挂起提示。"""
+    p = _with_turns(plugin_factory(), 20)
+    run(p._ensure_shard("default"))
+    shard = p._get_shard("default")
+    shard.pending_review_write = 1.0
+    shard.review_write_result = {"ts": 2.0, "written": True, "reason": "written"}
+    payload = run(p.dashboard())
+    brief = payload["review_brief"]
+    assert brief["writing"] is True
+    assert brief["last_result"]["written"] is True
+    # dashboard 头部先跑 _supervise_once：空日记本的周期邀请节奏判定为 due，
+    # 一趟例行递邀后挂起位会被点亮——顺带证明回流通道活着
+    assert payload["journal_invite_pending"] is True
 
 
 

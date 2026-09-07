@@ -19,6 +19,7 @@ from ..core.journal import journal_due
 from ..core.state import (
     _JOURNAL_DEFAULT_INTERVAL_DAYS,
     _JOURNAL_INVITE_THROTTLE_SEC,
+    _JOURNAL_RESPOND_COOLDOWN_SEC,
     _LanlanShard,
     _parse_iso_ts,
 )
@@ -473,26 +474,40 @@ class WhisperMixin:
         except (TypeError, ValueError):
             return default
 
-    async def _maybe_journal_invite(self, lanlan: str, shard: _LanlanShard, force: bool = False) -> bool:
-        """个人日记邀请：距她上一篇日记落笔已满一个节奏周期，递一条 read 邀请。
+    async def _maybe_journal_invite(
+        self, lanlan: str, shard: _LanlanShard, force: bool = False
+    ) -> tuple[bool, str]:
+        """个人日记邀请：递一条写日记的邀请（附素材）。返回 (是否递出, 投递方式)。
 
         与 drift_bottle 同构——插件只递邀请，写不写、怎么写由她自己决定。
         24h 内存节流防刷屏；重度负面情绪期间不拦截——把委屈写进日记是合理叙事。
         0.7.0 起替代潮汐周记邀请：不再要求"攒够 N 条手记"，节奏只看距上次落笔的天数
         （续写同样重置计时）。邀请附带写作素材（自上次落笔以来的心情词频 + 新碎片数），
-        让她下笔有东西可写；面板「请她写一篇」按钮走 force=True（跳过节奏与节流，
-        仍尊重 [journal].enabled 开关）。
+        让她下笔有东西可写。
+
+        投递方式分两档（1.2.3）：
+        - tick 周期递邀 → read（安静流进上下文，等她下次开口自然想起，不打扰）；
+        - 面板「请她写一篇」(force) → respond 当面递到她手上：点击即起一轮，
+          她当场收到邀请、当场决定（写就调用工具；不想写也可以只是心里记下，
+          或由着她回一句什么——回应什么仍由她决定）。read 的旧问题：按钮点完
+          邀请要等用户下一次开口才"寄到"，用户体感是"点了但她不知道"。
+        - respond 带 10 分钟冷却：刚递过再按则回落为 read 补递（note 说明"给她
+          留点考虑空间"），防连点成骚扰；同 coalesce_key 下队列内只留最新一条。
         """
         if not self._journal_enabled(shard):
-            return False
+            return False, ""
         interval = self._journal_int_cfg("interval_days", _JOURNAL_DEFAULT_INTERVAL_DAYS)
         due, _reason = journal_due(shard.journal, interval_days=interval)
         now = time.time()
         if not force:
             if not due:
-                return False
+                return False, ""
             if now - shard.last_journal_invite_ts < _JOURNAL_INVITE_THROTTLE_SEC:
-                return False
+                return False, ""
+            deliver = "read"
+        else:
+            # 冷却判定用同一节流水位：距上一次递出（周期或手动）满 10 分钟才起轮
+            deliver = "respond" if now - shard.last_journal_invite_ts >= _JOURNAL_RESPOND_COOLDOWN_SEC else "read"
         shard.last_journal_invite_ts = now
         # ---- 写作素材：自上次落笔以来的心情词频（top3）与新碎片数 ----
         last_ts = None
@@ -520,21 +535,70 @@ class WhisperMixin:
         if new_fragments:
             hints.append(f"心里还新记了 {new_fragments} 笔关于他的片段（可调 mood_recall_fragments 翻翻）")
         material = f"（{'；'.join(hints)}）" if hints else ""
+        body = (
+            f"距你上一篇日记已经有些日子了（这篇会写进你的第 "
+            f"{len(shard.journal) + 1} 页）。{material}"
+            "如果你愿意，可以调用 mood_journal_write 工具写一篇日记——"
+            "按「这段时间/我在想/对他的感觉」几个栏目，用你自己的话写连贯的几段。"
+            "不想写也完全没关系，由你自己决定。"
+        )
+        if deliver == "respond":
+            # 当面递到（respond 起轮）：她此刻就"意识到"这份邀请。落笔则写；
+            # 不想写就先轻轻放下，不必为它硬找话说
+            text = (
+                f"[潮汐·日记邀请]（仅给你看的内部提示）你忽然想起该写日记了。{body}"
+                f"如果决定写，写完可以对 {MASTER_NAME_TOKEN} 说一句“刚写了点日记，记得翻翻”之类的话；"
+                "如果暂时不想写，就把它先轻轻放下，不用刻意提起这件事。"
+            )
+            push_kwargs: JsonObject = {
+                "visibility": [],
+                "ai_behavior": "respond",
+                "priority": 3,
+            }
+        else:
+            text = f"（内心状态提醒）{body}"
+            push_kwargs = {"visibility": [], "ai_behavior": "read"}
         self.push_message(
-            visibility=[],
-            ai_behavior="read",
-            parts=[{"type": "text", "text": (
-                f"（内心状态提醒）距你上一篇日记已经有些日子了（这篇会写进你的第 "
-                f"{len(shard.journal) + 1} 页）。{material}"
-                "如果你愿意，可以调用 mood_journal_write 工具写一篇日记——"
-                "按「这段时间/我在想/对他的感觉」几个栏目，用你自己的话写连贯的几段。"
-                "不想写也完全没关系，由你自己决定。"
-            )}],
+            parts=[{"type": "text", "text": text}],
             source=self.plugin_id,
             target_lanlan=lanlan,
             coalesce_key=f"{self.plugin_id}.journal_invite",
-            metadata={"message_type": f"{self.plugin_id}.journal_invite", "pages": len(shard.journal)},
+            metadata={
+                "message_type": f"{self.plugin_id}.journal_invite",
+                "pages": len(shard.journal),
+                "deliver": deliver,
+            },
+            **push_kwargs,
         )
-        self.logger.info("journal invite pushed for {} ({} pages, force={})", lanlan, len(shard.journal), force)
-        return True
+        self.logger.info(
+            "journal invite pushed for {} via {} ({} pages, force={})",
+            lanlan, deliver, len(shard.journal), force,
+        )
+        return True, deliver
+
+    def _journal_invite_pending(self, shard: _LanlanShard) -> bool:
+        """「邀请已递出，等她落笔」面板挂起态判定（1.2.3）。
+
+        最近一次递邀晚于全部日记段落的末笔时刻即为挂起——read 邀请只进上下文
+        不打断对话，她什么时候落笔完全自主，过去面板上这段时间是纯静默，
+        用户体感"点了没反应、过一会凭空多一页"。判定不新增持久字段：邀请时刻
+        就是内存节流水位 last_journal_invite_ts（重启即弃，状态随之消失，
+        最多重新递邀一次），落笔时刻取书页里最新一段的 ts；没写过日记本就没有
+        页，递过邀请即挂起。
+        """
+        if not shard.last_journal_invite_ts:
+            return False
+        last_write_epoch = 0.0
+        for page in shard.journal:
+            entries = page.get("entries") if isinstance(page, dict) else None
+            if not isinstance(entries, list):
+                continue
+            for item in entries:
+                parsed = _parse_iso_ts(item.get("ts") if isinstance(item, dict) else None)
+                if parsed is None:
+                    continue
+                epoch = parsed.timestamp()
+                if epoch > last_write_epoch:
+                    last_write_epoch = epoch
+        return shard.last_journal_invite_ts > last_write_epoch
 

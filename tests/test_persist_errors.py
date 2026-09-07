@@ -157,8 +157,10 @@ def test_write_review_persist_failure_rolls_back_and_retries(tm, boot_factory, m
     assert store.data["stats@default"]["milestones"]["first_review"]
 
 
-def test_write_review_now_entry_maps_persist_failed_to_err(tm, boot_factory, monkeypatch):
-    """面板「立即写一篇」：persist_failed 必须回 Err，而不是 written=False 的软提示。"""
+def test_write_review_now_queue_reports_persist_failed(tm, boot_factory, monkeypatch):
+    """面板队列成文（1.2.3）：persist_failed 不再由入口回 Err——入口只做受理，
+    失败结论经 tick 队列消费落到 review_write_result 回流面板（弹"没存住"错误、
+    素材保留可重试）。1.2.2 的"如实上报、不假成功、不写脏盘"语义原样带进队列路径。"""
     store = _ErrStore(
         tm,
         initial={"review@default": {"entries": [], "stats": {"turns": 60}}},
@@ -171,10 +173,16 @@ def test_write_review_now_entry_maps_persist_failed_to_err(tm, boot_factory, mon
     monkeypatch.setattr(p, "_post_chat_completion", lambda *a, **k: "这阵子他每天都来陪她。")
 
     res = run(p.write_review_now())
+    assert isinstance(res, tm.Ok)
+    assert res.value["accepted"] is True
 
-    assert isinstance(res, tm.Err)
-    assert "persist failed" in str(res.error)
+    run(p._drain_pending_review_writes())
+    shard = p._get_shard("default")
+    result = shard.review_write_result
+    assert result is not None and result["written"] is False
+    assert result["reason"] == "persist_failed", "写失败必须如实进结果回流，不得假成功"
     assert store.data["review@default"]["entries"] == [], "失败不写脏盘"
+    assert shard.review_stats["turns"] == 60, "素材清零随回滚撤销，留着可重试"
 
 
 # ---------------------------------------------------------------------------

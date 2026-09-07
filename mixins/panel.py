@@ -265,13 +265,21 @@ class PanelEntriesMixin:
             # 个人日记（书页式）：index 供面板展示页数概览（极轻量，进 5s 轮询）；
             # 全量翻阅走 get_journal 入口按需拉取，不进轮询
             "journal_index": [page_header(page) for page in shard.journal],
+            # 邀请挂起态（1.2.3）：递过邀请、她还没落笔——日记页显示"等她"提示，
+            # 免得"点了没反应、过一会凭空多一页"
+            "journal_invite_pending": self._journal_invite_pending(shard),
             # 我的日记（0.8.0）：篇数 + 素材进度（极轻量）；全量翻阅走
-            # get_review 入口按需拉取，成文正文不进 5s 轮询
+            # get_review 入口按需拉取，成文正文不进 5s 轮询。
+            # writing / last_result（1.2.3）：面板「立即写一篇」改排队成文后的
+            # 回流通道——写作中点亮按钮禁用态；last_result={ts,written,reason}
+            # 是队列成文的成败结论，面板按 ts 去重弹一次 toast（内存即弃）
             "review_brief": {
                 "enabled": self._review_enabled(shard),
                 "entries": len(shard.review),
                 "progress_turns": int(shard.review_stats.get("turns") or 0),
                 "turns_threshold": self._review_turns_threshold(),
+                "writing": bool(shard.pending_review_write) or lanlan in self._review_writing,
+                "last_result": shard.review_write_result,
             },
             # 模型通道状态灯（情绪页"模型通道"卡）：ok / free_route / no_model / disabled
             "channel_status": channel_status,
@@ -1199,20 +1207,30 @@ class PanelEntriesMixin:
         name=tr("entries.invite_journal.name", default="递一次个人日记邀请"),
         description=tr(
             "entries.invite_journal.description",
-            default="立即向她递一条写日记的邀请（带写作素材）。写不写仍由她自己决定。仅作用于当前角色。",
+            default="立即向她递一条写日记的邀请（带写作素材）：当面递到她手上，她当场收到、自己决定写不写；10 分钟内刚递过时改为安静补递。仅作用于当前角色。",
         ),
         input_schema={"type": "object", "properties": {}},
     )
     async def invite_journal(self, **_: Any):
+        # 返回 (invited, deliver)：deliver ∈ ""(未递出) / respond(当面递到，
+        # 她当场收到并可当场落笔) / read(冷却内静默补递)。三种结果三种 note
         lanlan, shard = await self._current_shard_async()
-        invited = await self._maybe_journal_invite(lanlan, shard, force=True)
+        invited, deliver = await self._maybe_journal_invite(lanlan, shard, force=True)
         if not invited:
             return Ok({
                 "invited": False,
                 "lanlan": lanlan,
                 "note": "个人日记开关未开启（[journal].enabled），邀请未发送。",
             })
-        return Ok({"invited": True, "lanlan": lanlan, "note": "邀请已递出，写不写由她自己决定。"})
+        if deliver == "respond":
+            return Ok({
+                "invited": True, "mode": deliver, "lanlan": lanlan,
+                "note": "邀请已当面递到她手上，她这会儿正想着呢——写不写由她自己决定。",
+            })
+        return Ok({
+            "invited": True, "mode": deliver, "lanlan": lanlan,
+            "note": "她刚收到过邀请，这次改成悄悄提醒——给她留点考虑的空间。",
+        })
 
     @ui.action(
         label=tr("actions.delete_diary_item.label", default="删除这条碎片"),
@@ -1314,18 +1332,19 @@ class PanelEntriesMixin:
         name=tr("entries.write_review_now.name", default="立即写一篇我的日记"),
         description=tr(
             "entries.write_review_now.description",
-            default="跳过双门槛立即成文一篇「我的日记」（素材不足 10 轮时会拒绝）。仅作用于当前角色。",
+            default="排队成文一篇「我的日记」：跳过双门槛，秒回受理，实际写作在后台一拍内开始并自动落盘（素材不足 10 轮时会当场拒绝）。仅作用于当前角色。",
         ),
         input_schema={"type": "object", "properties": {}},
     )
     async def write_review_now(self, **_: Any):
+        # 受理式入口（1.2.3）：过去在这里同步等 5～20 秒的模型成文——点击干等
+        # 无反馈、浏览器 30s 与服务端 30s 超时压线、关面板断连还会取消丢篇。
+        # 现在只做秒级门控预检（与成文共用 _review_write_gate，口径唯一），
+        # 通过就打排队标记立即返回；成文由 tick 的 _drain_pending_review_writes
+        # 执行，结果经 dashboard 的 review_brief.writing / last_result 回流面板。
         lanlan, shard = await self._current_shard_async()
-        written, reason = await self._maybe_write_review(lanlan, shard, force=True)
-        if not written and reason == "persist_failed":
-            # 成文成功但落盘失败（批次2 回滚路径）：篇目与素材已还原、可重试，
-            # 对用户如实报写失败而非"没写成"的软提示
-            return Err(SdkError("persist failed: review entry not saved, material kept for retry"))
-        if not written:
+        passed, reason, _resolved = self._review_write_gate(shard, force=True)
+        if not passed:
             notes = {
                 "disabled": "我的日记开关未开启（[review].enabled）。",
                 "not_enough_material": (
@@ -1333,10 +1352,21 @@ class PanelEntriesMixin:
                     f"至少 {_REVIEW_MIN_TURNS_FORCED} 轮才值得写一篇），再聊聊吧。"
                 ),
                 "slot_unresolved": _slot_dormancy_hint(self._load_core_config(), str(self._review_cfg.get("slot") or "").strip() or _REVIEW_DEFAULT_SLOT),
-                "compose_failed": "模型调用失败或回复为空，稍后再试（详见插件日志）。",
             }
-            return Ok({"written": False, "lanlan": lanlan, "reason": reason, "note": notes.get(reason, reason)})
-        return Ok({"written": True, "lanlan": lanlan, "note": "这一篇已经写好，翻开「我的日记」看看吧。"})
+            return Ok({"written": False, "queued": False, "accepted": False, "lanlan": lanlan, "reason": reason, "note": notes.get(reason, reason)})
+        if shard.pending_review_write or lanlan in self._review_writing:
+            # 队列槽位只有一个：上一篇还在写/还在队里，重复点击不再叠加
+            return Ok({
+                "written": False, "queued": False, "accepted": False, "lanlan": lanlan,
+                "reason": "already_writing",
+                "note": "上一篇还在写，写完会自动出现在这里，稍等一下。",
+            })
+        shard.pending_review_write = time.time()
+        shard.review_write_result = None  # 上一次的成败结论作废，面板不再重复弹
+        return Ok({
+            "written": False, "queued": True, "accepted": True, "lanlan": lanlan,
+            "note": "已开始写这一篇，写完会自动出现在「我的日记」里，不用守着。",
+        })
 
     @ui.action(
         label=tr("actions.clear_review.label", default="清空我的日记"),
