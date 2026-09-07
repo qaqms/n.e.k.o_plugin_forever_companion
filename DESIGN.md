@@ -373,6 +373,8 @@ zh-CN / en i18n
   开发源码树布局下确实分离，所以这个差异只在安装版显现。已把 README 相应三条改为
   如实描述（升级前不得假定记录保留；Market 路径待验证）。1.2.1 只修"读不回"，
   不修"被清掉"——后者属宿主侧安装布局，不在插件工作区内改。
+  **（2026-09-07 再确认：本条的宿主布局前提已被推翻——#2943 起代码/状态已物理
+  分离，升级/卸载不再清数据；见文末「2026-09-07 复核」条目。）**
 - **残留风险**：若宿主是靠 startup 返回后才处理的 `CONFIG_UPDATE` 推送通电（startup
   期间下行消息被缓冲），则本次读配置唤不醒 store，走降级分支——症状当次仍在但数据
   不再受损，日志会明确留痕；根治需宿主在绑定 `ctx._instance` 后即刷新 runtime config，
@@ -542,6 +544,99 @@ zh-CN / en i18n
   总开关关着当面递邀也绝不起轮。
 - **验证**：`tests/test_journal.py` 新增 4 条（首递 respond→冷却回落 read→
   水位拨旧恢复 respond；周期恒 read；三闸拒绝；入口三态 note）。全套 305 绿。
+
+### 1.2.4：v1.2.3 回归审查修复（提交门禁 / 队列异常 / 递邀回执）
+
+对 v1.2.2→v1.2.3 逐项复审的结果：五处修复 + 一处文档补述，全部不改 1.2.3 的产品语义。
+
+- **A1 hosted-tsx 门禁染红（工具链破口，运行时不炸）**：`ui/diary.tsx` 的
+  `DiaryPane` props 里 `reviewBrief` 是内联复刻的窄类型
+  （`{enabled, entries, progress_turns, turns_threshold}`），而 1.2.3 新读的
+  `reviewBrief.writing` 只声明在 `ui/types.ts` 的 `ReviewBrief` 上。
+  `frontend/plugin-manager/scripts/check-hosted-tsx.mjs:878-899` 是**建 TS program
+  收 pre-emit 诊断**的（`strict:false` 也拦不住未知属性访问），于是三处 TS2339 把
+  DESIGN 自己承诺的提交前门禁弄成红的。市场 CI 不跑这个门禁（只有 ruff + `check -r`），
+  所以 v1.2.3 的 Release 照样产出成功——**"门禁存在但不在发布链上"就是这次的漏网**。
+  修法：props 直接用 `ReviewBrief`。对照实测（同一套 compilerOptions）：v1.2.2 exit 0、
+  v1.2.3 exit 2 三条红、修后 exit 0。运行时一直是对的（类型擦除，后端确实下发
+  `writing`），所以这属提交纪律而非面板故障。
+- **A2 队列成文的异常石沉大海**：`_drain_pending_review_writes` 在 `await` 之前就把
+  pending 清零（防一条队列卡住两趟 tick），于是成文抛出未预期异常时结果位永远不写——
+  用户已收到"已开始写"，随后按钮自己变回可点、什么都不弹，比 1.2.2 的同步链路
+  （api.call 失败至少弹 error）更不可见。修法：drain 内兜住异常、warning 留痕、写
+  `{written:false, reason:"compose_raised"}` 走既有回流通道；在飞锁由
+  `_maybe_write_review` 的 `finally` 释放，篇目与素材一分未动。
+- **A3 切角色补弹陈旧结果**：`reviewResultSeen` 只按 ts 去重，但 `last_result` 与
+  pending 都是**按角色**存的内存位——从 A 切到 B 时，B 上一轮会话里早已看过的旧结论
+  ts 与 seen 不等，会被当成"刚写完"补弹一次。复位必须写在 effect 内部（新增
+  `reviewResultRole`：角色变即按挂载语义认领当前值、不弹），因为面板那个
+  `[state.lanlan]` effect 声明在它之后，同一轮 render 里等它跑完 toast 已经弹出去了。
+  证据是同版 diary.tsx 的书指纹 ref 就正确复位了（`[lanlan]` effect 里
+  `bookFpSeen.current = null`）——一处做了一处漏了的不对称。
+- **A4 递邀不看提交回执**：`push_message` 返回 `submitted`，插件四处推送都不看。
+  1.2.3 把话从"悄悄流进上下文"升到"已当面递到她手上"，并挂"正等她落笔"直到她写出
+  新页——通道拒收（宿主背压/不可用）时递空的那一次会让假提示一直挂到下一个 7 天节奏。
+  修法：只有**显式** `submitted=False` 判失败（返回 None 或不含该键的旧形状不误伤）；
+  手动档回滚水位，用户可立刻重按；周期档**不回滚**，免得通道一直坏时每趟监督重推
+  刷屏（按 24h 节流等下一轮）；入口按 `mode="failed"` 给独立文案，不再与"开关未开启"
+  共用一句。面板同步分色：`mode="failed"` 走 `toast.error`，与"开关未开启"的 info
+  软提示分开（新增 `panel.journal.inviteFailed` 键 ×8 语言，i18n 净增 1 键 → 402）。
+- **A5 `debug_journal(force=true)` 漏传 force（1.2.3 顺带照出的旧账）**：调试入口调的
+  是非 force 档，除 24h 节流外还压着 `journal_due` 的 7 天节奏闸——昨天刚写过日记的
+  机器上它静默 `invited=false`，与 README 承诺的"立即推一次邀请"以及 1.2.3 自己新写的
+  注释"必走 respond 当面递到档"都不符（行为自 0.7.0 起如此，注释是这次写错的）。
+  修法：传 `force=True`（只保留 `_journal_enabled` 三道闸），note 说明 `deliver` 语义。
+- **文档补述（不改行为）**：README「平台机制」的排队成文条补上真实代价——成文那一趟
+  会占住后台轮询约 20 秒（模型直连 ≤15s + 素材摘样一次），期间只在 tick 里跑的用户
+  消息注入/语气感知/碎片捕获顺延一拍；限时情绪到期解除与主动搭话恢复不受牵连
+  （面板 5s 轮询也驱动 `_supervise_once`）。这是"把慢操作交给唯一可靠执行体"的必然
+  代价，不为此另开成文线程。
+- **测试**：`test_review.py` +1（异常必须变成可见结论、锁必须释放、篇目与素材不得动）、
+  `test_journal.py` +4（手动档回滚 / 周期档不回滚 / 无 submitted 键不误伤 / debug 档
+  真能强制）。反向验证：四个源文件退回 1.2.3 后 5 条里 4 条以正确理由红（第五条锁的
+  正是"旧形状不误伤"的容忍面，两版都绿）。全套 310 绿。
+- **有意不动**：A2 只兜住异常、不给 pending 加 TTL——队列唯一消费者是 tick，而 tick
+  头两步（`_supervise_once` 全量 try/except、`_ensure_tools_registered` 用返回标志
+  不抛）都不会挡住它，且 pending 是内存位、插件重启即清，加 TTL 只换来一条新漂移面。
+  A1 未顺手把 `check-hosted-tsx` 接进插件仓库 CI（那是平台侧 workflow 的事，越界）。
+
+### 2026-09-07 复核：升级/卸载链路的记录安全（宿主代码/状态分离）
+
+- **宿主布局**（#2943 起，2026-08-27 合入，09-03 安装版构建已覆盖）：
+  代码根 `get_user_plugin_exec_root()` → `<数据根>/.neko-plugin-installations/plugins/<id>/`；
+  状态根 `get_plugin_state_root()` → `<数据根>/plugins/<id>/`（`config/data/cache`
+  三件套，`store.db` 在其中）。`plugin/settings.py` 两处 docstring 明文规定
+  安装/升级/回滚/卸载不得把状态根当包替换目标；
+  `ensure_plugin_exec_state_roots_separated` 对两根重合 fail-closed；升级事务的
+  `_validate_replacement_targets` 硬拒任何与状态根重叠的替换目标。
+- **升级事务**（`installation_transactions/replace.py`）：代码目录整体 rename →
+  `.upgrade-backups/<id>.bak.<ts>` → 装新包 → 身份校验 → 只并回 manifest 邻接
+  profiles → 成功清备份 / 失败原子回滚 + 重启。rename 与 preserve 的目标全部在
+  代码根内，`data/` 根本不在被操作树里。Market 更新（market_bridge
+  `_replace_market_plugin_transaction`）与本地 `.neko-plugin` 覆盖导入（plugin_cli
+  service）共用这套 `replace_plugin`——1.2.1 勘误里"Market 路径待验证"就此收口：
+  两条路径的保留语义一致。
+- **卸载**（`installation_transactions/uninstall.py`）：代码目录同盘 rename 进
+  `.uninstall-backups` 做提交式删除（rmtree 只发生在 staged 副本上）；所有触及
+  状态根的路径判断都是保护性护栏（目标落在状态根内即拒绝），用户偏好标
+  `preserved`。`store.db` 卸载后原地留存、重装读回——**此为代码审查结论，
+  卸载+重装尚未真机实测**（升级路径有 2026-09-07 实证，见下）。
+- **布局迁移**（`layout_migration.py`）：新宿主首启把状态根内的代码一次性拷到
+  代码根（`_copy_legacy_plugin_tree` 排除 `config/data/cache`），写账本
+  `.neko-plugin-layout-v1.json`，账本条目使旧拷贝被"已迁移"跳过、防止复活。
+  **残留注意**：状态根内旧代码副本不会被删除（本机 `plugins/forever_companion/`
+  下留有 v1.2.2 的 .py 文件，与数据目录同居），靠账本压制；账本文件丢失或被
+  手动搬动数据目录时，旧代码有被重新扫描顶掉新版的可能，操作时要留意。
+- **实证（本机 2026-09-07）**：14:04 布局迁移（账本生成、代码入 exec 根）；
+  14:36:45 旧实例停止 → 14:36:57 v1.2.3 启动，插件日志
+  `plugin store ready after 1 attempts` + `startup ok: enabled=True phase=luteal
+  day=24`（与升级前逐项一致）→ 14:38:36 `store.db` 继续写入。迁移与升级全程未
+  碰记录；当日全部日志 `store not ready`/`persist failed`/`untrusted` 危险行零条。
+  1.1.0 那条"更新不丢"断言在 1.2.1 勘误一轮反转后，最终由宿主 #2943 落地成立。
+- **README 同步**：「⚠ 覆盖导入目前会清掉全部记录」改写为「升级与卸载后记录保留
+  （2026-09-07 复核更新）」，清记录风险仅保留在 2026-08-27 之前的旧宿主构建。
+- **残留缺口**：记录保护依赖宿主布局，插件自身仍无用户侧导出/备份通道
+  （`store.db` 单点），列为后续功能候选。
 
 ## Out of Scope
 
