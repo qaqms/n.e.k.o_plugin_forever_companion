@@ -5,6 +5,7 @@
 不依赖系统时钟。运行方式：uv run python -m pytest tests -q
 """
 
+import asyncio
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -190,8 +191,6 @@ def test_has_journal_content() -> None:
 
 
 # ---------- 1.2.3：递邀双模式（手动 respond 当面递到 / 周期与冷却 read 静默） ----------
-
-import asyncio  # noqa: E402
 
 
 def run(coro):
