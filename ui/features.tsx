@@ -3,15 +3,16 @@
 // 数据源 = dashboard 轮询同源下发的 capabilities（按宿主当前角色解析）；
 // 开关经 set_capability 写"否决集"——关闭即否决、打开回落既有配置默认（不会
 // 强行点亮配置里关着的项）。
-// 介绍卡（1.2.7）：点按钮拉一次 get_capability_intro（前端缓存、不轮询），
-// 居中 Modal 单页展示作用/场景/依赖/限制/原理图（文案源 core/intros.py，
-// 渲染与排版全在 ui/capintro.tsx）。
+// 介绍子页（1.2.7 二轮修订）：点按钮拉一次 get_capability_intro（前端缓存、
+// 不轮询），在功能页内切换到介绍子页展示作用/场景/依赖/限制/原理图（文案源
+// core/intros.py，渲染与排版全在 ui/capintro.tsx）。不再是居中 Modal：
+// 子页直接吃面板内容区自然宽度，刚好贴合外框、随窗口伸缩。
 // 高级选项 hide_disabled_tools 全局一份：开启后，对所有角色都不生效的能力，
 // 其 LLM 工具从模型可见面摘除（面板保存后经 props 上的 api.refresh 拉回最新状态）。
 import { Card, Field, StatusBadge, Switch, Alert } from "@neko/plugin-ui"
 import { useState } from "@neko/plugin-ui"
 import type { CapabilitiesPayload, CapItem, TFunc } from "./types"
-import { CapIntroModal, LLM_BADGES } from "./capintro"
+import { CapIntroView, LLM_BADGES } from "./capintro"
 import type { CapIntroPayload } from "./capintro"
 
 const GROUP_ORDER = ["rhythm", "mood", "diary"]
@@ -29,8 +30,8 @@ export function FeaturesPane(props: {
   const items = (caps && caps.capabilities) || []
   const masterOn = !!caps && caps.master_enabled !== false
 
-  // 介绍卡：introId 空串 = 关；introCache 一次拉取长期复用（文案静态，
-  // 开关态/依赖态由本行实时数据现场叠展示，不依赖缓存新鲜度）
+  // 介绍子页：introId 空串 = 列表视图；非空 = 整页切到介绍子页（前端缓存，
+  // 返回列表不重复拉取；文案静态，开关态/依赖态由子页头部现场叠展示）
   const [introId, setIntroId] = useState("")
   const [introCache, setIntroCache] = useState<Record<string, CapIntroPayload>>({})
   const [introLoading, setIntroLoading] = useState(false)
@@ -46,7 +47,7 @@ export function FeaturesPane(props: {
         if (payload) setIntroCache({ ...introCache, [item.id]: payload })
       })
       .catch(() => {
-        setIntroError(t("panel.capintro.loadError", { defaultValue: "介绍加载失败，请确认插件在运行后重试" }))
+        setIntroError(t("panel.capintro.loadError", { defaultValue: "介绍加载失败，请返回列表重试；若反复失败，重启插件服务后即可生效" }))
       })
       .finally(() => setIntroLoading(false))
   }
@@ -77,6 +78,23 @@ export function FeaturesPane(props: {
   }
 
   const introItem = introId ? items.find((item) => item.id === introId) : null
+
+  // 页内子页导航：已进入介绍态就整页切换（不叠弹窗），返回即回列表；
+  // 能力被卸下线（理论上不会：introId 来自当前 items）时自动回落列表
+  if (introItem) {
+    return (
+      <CapIntroView
+        t={t}
+        item={introItem}
+        capLabel={capLabel}
+        statusHint={offHint(introItem)}
+        intro={introCache[introItem.id] || null}
+        loading={introLoading}
+        error={introError}
+        onBack={() => setIntroId("")}
+      />
+    )
+  }
 
   return (
     <div className="tm-pane">
@@ -162,19 +180,6 @@ export function FeaturesPane(props: {
             : t("panel.features.hideToolsOff", { defaultValue: "温和模式：工具在位、调用时才拒" })}
         </span>
       </div>
-
-      {introItem ? (
-        <CapIntroModal
-          t={t}
-          item={introItem}
-          capLabel={capLabel}
-          statusHint={offHint(introItem)}
-          intro={introCache[introItem.id] || null}
-          loading={introLoading}
-          error={introError}
-          onClose={() => setIntroId("")}
-        />
-      ) : null}
     </div>
   )
 }

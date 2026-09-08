@@ -814,6 +814,34 @@ zh-CN / en i18n
   面板布局改动后必跑。
 
 
+### 1.2.7（增补三）：介绍卡 → 页内子页 + 链接检查门固化（发版前真机反馈）
+
+- **两轮反馈收敛到载体**：① 默认窗口出横向滚动条（“突兀且麻烦”）——居中弹窗
+   的 95vw 与 backdrop 的 2×20px 留白/滚动条互不计账，双栏断点又看 iframe
+   视口而非弹窗宽；② “卡过大且被压缩”——弹窗与面板框体脱节。**根因是载体
+   选错**：改页内子页——`features.tsx` 在 introItem 置位时早返回整页切换，
+   `capintro.tsx` 导出 `CapIntroView`（头部一行：返回+功能名+LLM 徽标+生效态），
+   正文直接内嵌 `.tm-content` 自然宽度；双栏→单栏用
+   `auto-fit minmax(min(330px,100%),1fr)` 按可用宽度折行，长文本全线
+   `overflow-wrap: anywhere` 兜底；`.tm-ci-modal`/`.tm-ci-foot` 时代样式与视口级
+   media query 全部删除，横向溢出物理上不存在。
+- **白屏二进宫（踩坑记录①复发，实锤）**：重写时把 `IntroFlow`（带 JSX、
+   不导出）提到 `CapIntroView` 之前 → 扫描器撞漂吞掉其后 export → 裸 export
+   残留 → 整面白屏。用宿主同源 scanner 双向复现（HEAD 版提前置 FAIL /
+   移回尾部 OK）证明坑记①“带 JSX 的函数不分导出不导出”成立；问题在纪律
+   未机器化成门、靠人肉自觉。IntroFlow 固定文件末尾，函数声明提升保前向引用。
+- **检查门固化**：`tools/check_hosted_link.mjs`（宿主同源 `hostedTsxModule.mjs`
+   真链接；入口从 plugin.toml 动态解析；scanner 路径支持 env/宿主挂载/并排
+   仓三种布局；丢导出 exit 1、环境缺失 exit 2）+ `tests/test_hosted_link.py`
+   （pytest 主链封装，降级 skip）；反向对照＝临时仓复刻白屏布局，门正确 FAIL。
+   `tools/` 进 pyproject `[tool.neko.build]` 排除，发行包零混入。
+- **i18n**：新增 `panel.capintro.back`、更新 `loadError` 文案（提示重启插件
+   服务），按 chrome key 惯例只登记 en + zh-CN（其余语种 default 兜底）；
+   test_intros 孤儿白名单加 `back`。
+- **验证**：pytest 363 全绿（含链接门）；反向对照（白屏布局）门 exit 1；
+   `neko-plugin check` 0 错误；发行包内容抽查不含 tools/、IntroFlow 在尾布局。
+
+
 ## Out of Scope
 
 - 情绪日记的 LLM 自动总结写入（v1 只提供模型手写日记工具与人工查看）

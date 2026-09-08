@@ -33,6 +33,9 @@ exclude_dirs = [
     ".benchmarks",
     "__pycache__",
     "tests",
+    # 开发期工具（hosted 链接自检门等）：依赖仓外宿主 scanner，运行时零引用，
+    # 不进发行包
+    "tools",
 ]
 exclude_files = [
     ".gitignore",

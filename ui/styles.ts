@@ -1436,8 +1436,8 @@ export const PANEL_STYLES = `
 }
 @media (max-width: 900px) { .tm-feat-cols { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 620px) { .tm-feat-cols { grid-template-columns: 1fr; } }
-/* 功能介绍（1.2.7）：行内虚线胶囊按钮 + 居中 Modal 双栏网格（单页不滚）
-   + 纯 CSS 流程图（无图标，配色即类型；hosted 无 SVG 命名空间） */
+/* 功能介绍（1.2.7 二轮修订）：行内虚线胶囊按钮 + 页内介绍子页（贴合外框、
+   随窗口自适应）+ 纯 CSS 流程图（无图标，配色即类型；hosted 无 SVG 命名空间） */
 .tm-feat-label { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tm-ci-open {
   font-size: 11px; line-height: 1.4; padding: 1px 9px; border-radius: 999px;
@@ -1445,27 +1445,38 @@ export const PANEL_STYLES = `
   color: var(--primary); cursor: pointer; transition: background 0.15s ease, border-color 0.15s ease;
 }
 .tm-ci-open:hover { background: rgba(96, 165, 250, 0.12); border-color: rgba(96, 165, 250, 0.9); }
-/* Modal 的 className 挂在 backdrop 上：宽度从这层选择器下钻到面板；
-   1.2.7 单页化：加宽 980px + 双栏网格 + 紧化留白，典型窗口一屏读完 */
-.tm-ci-modal .neko-modal { width: min(980px, 95vw); max-width: 980px; }
-.tm-ci-modal .neko-modal-body { padding: 12px 18px; }
+/* 功能介绍子页（1.2.7 二轮修订）：不再是居中 Modal——旧的 980px/95vw 弹窗
+   宽高按视口算、与面板实际框体脱节，默认窗口下要么压迫要么挤出横向滚动。
+   子页直接内嵌进 .tm-content（自然宽度 100%、overflow-y 自动），刚好贴合
+   外框且随窗口伸缩；头部一行：返回按钮 + 功能名 + LLM 徽标 + 生效态 */
+.tm-ci-page { display: flex; flex-direction: column; gap: 12px; }
+.tm-ci-back {
+  font-size: 12px; line-height: 1.4; padding: 3px 10px; border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.45); background: rgba(255, 255, 255, 0.55);
+  color: var(--muted); cursor: pointer; transition: background 0.15s ease, color 0.15s ease;
+}
+.tm-ci-back:hover { background: rgba(96, 165, 250, 0.12); color: var(--primary); }
+.tm-ci-title { margin: 0; font-size: 15px; font-weight: 760; color: var(--text); }
+.tm-ci-head-spacer { flex: 1; }
 .tm-ci { display: flex; flex-direction: column; gap: 10px; }
 .tm-ci-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.tm-ci-head-hint { font-size: 12px; color: #b45309; }
 .tm-ci-h {
   margin: 0 0 3px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
   color: var(--primary); text-transform: none;
 }
-/* 双栏网格：左列作用+场景 / 右列限制+依赖 */
-.tm-ci-grid { display: grid; grid-template-columns: 1.05fr 1fr; gap: 0 18px; align-items: start; }
+/* 自适应网格：容器够宽时双栏，窄面板由 auto-fit 自动回落单栏；
+   min(330px,100%) 保证极窄时不溢出（旧视口 media query 已移除，
+   尺寸判断全部基于子页实际可用宽度） */
+.tm-ci-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(330px, 100%), 1fr)); gap: 0 18px; align-items: start; }
 .tm-ci-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.tm-ci-purpose { margin: 0; font-size: 12px; line-height: 1.66; color: var(--text); }
+.tm-ci-purpose { margin: 0; font-size: 12px; line-height: 1.66; color: var(--text); overflow-wrap: anywhere; }
 .tm-ci-list { margin: 0; padding-left: 16px; }
-.tm-ci-list li { font-size: 11.5px; line-height: 1.55; color: var(--text); margin: 2px 0; }
+.tm-ci-list li { font-size: 11.5px; line-height: 1.55; color: var(--text); margin: 2px 0; overflow-wrap: anywhere; }
 .tm-ci-list-warn li { color: #92610c; }
 .tm-ci-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .tm-ci-chip {
-  font-size: 11px; padding: 2px 9px; border-radius: 999px;
+  font-size: 11px; padding: 2px 9px; border-radius: 999px; max-width: 100%;
+  overflow-wrap: anywhere;
   border: 1px solid rgba(148, 163, 184, 0.35); background: rgba(255, 255, 255, 0.55); color: var(--muted);
 }
 .tm-ci-chip[data-tone="dep"] { border-color: rgba(96, 165, 250, 0.5); color: #2f6fd6; background: rgba(96, 165, 250, 0.09); }
@@ -1473,16 +1484,17 @@ export const PANEL_STYLES = `
 .tm-ci-chip[data-tone="tool"] { border-color: rgba(245, 158, 11, 0.5); color: #b45309; background: rgba(245, 158, 11, 0.08); cursor: help; }
 .tm-ci-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .tm-ci-flow {
-  display: flex; flex-wrap: wrap; align-items: center; row-gap: 6px;
+  display: flex; flex-wrap: wrap; align-items: center; row-gap: 6px; overflow-wrap: anywhere;
   padding: 8px 10px; border-radius: var(--radius-md);
   background: linear-gradient(135deg, rgba(96, 165, 250, 0.06), rgba(168, 85, 247, 0.05));
   border: 1px solid rgba(255, 255, 255, 0.75);
 }
-.tm-ci-flow-step { display: inline-flex; align-items: center; }
+.tm-ci-flow-step { display: inline-flex; align-items: center; max-width: 100%; }
 .tm-ci-flow-arrow { margin: 0 6px; color: rgba(100, 116, 139, 0.8); font-weight: 700; font-size: 12px; }
 .tm-ci-node {
-  display: inline-flex; align-items: center;
+  display: inline-flex; align-items: center; max-width: 100%;
   font-size: 11.5px; line-height: 1.35; padding: 4px 10px; border-radius: 999px;
+  overflow-wrap: anywhere;
   border: 1px solid rgba(96, 165, 250, 0.4); background: rgba(255, 255, 255, 0.72); color: var(--text);
   box-shadow: 0 1px 3px rgba(96, 165, 250, 0.1);
 }
@@ -1494,9 +1506,7 @@ export const PANEL_STYLES = `
   padding: 18px 0; text-align: center; font-size: 12px; color: var(--muted);
 }
 .tm-ci-error { padding: 10px 12px; font-size: 12px; color: #b45309; background: rgba(245, 158, 11, 0.09); border-radius: var(--radius-sm); }
-.tm-ci-foot { display: flex; align-items: center; gap: 8px; width: 100%; }
-.tm-ci-foot-spacer { flex: 1; }
-@media (max-width: 760px) {
-  .tm-ci-grid { grid-template-columns: 1fr; }
-}
+/* 旧居中 Modal 时代的页脚样式（foot/spacer）子页化后零引用，已删 */
+/* 弹窗内部布局已按弹窗宽度自适应（auto-fit），不再需要视口级 media query；
+   旧 760px 断点只强转单栏、解决不了横向溢出，已移除 */
 `

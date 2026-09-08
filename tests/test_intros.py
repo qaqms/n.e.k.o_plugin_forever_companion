@@ -228,7 +228,7 @@ def test_i18n_files_cover_intro_keys(locale_file):
             and k.split(".")[2] not in {
                 "open", "purpose", "scenarios", "limits", "deps", "flowTitle",
                 "flowEmpty", "stateOn", "stateOff", "depsNone", "depUpstream",
-                "toolsCount", "loading", "loadError", "notFound", "close",
+                "toolsCount", "loading", "loadError", "notFound", "close", "back",
             }
         ]
         assert not orphan, f"孤儿 capintro key: {orphan[:3]}"
