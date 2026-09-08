@@ -136,7 +136,10 @@ def _make_sdk_module() -> types.ModuleType:
     mod.SdkError = SdkError
     mod.Result = object
     mod.ui = _UiNamespace
-    mod.tr = lambda key, default=None, **_: default if default is not None else key
+    # default 是 keyword-only：与生产 SDK 签名 tr(key, *, default="", **params)
+    # 严格同构。曾用位置参数宽松桦，导致 build_intro_payload 直传两参调 tr
+    # 的 bug 在 361 项全绿下漏网、用户实机点开介绍卡才炸（1.2.7 教训）
+    mod.tr = lambda key, *, default=None, **_: default if default is not None else key
 
     class NekoPluginBase:
         def __init__(self, ctx):

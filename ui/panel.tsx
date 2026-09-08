@@ -541,6 +541,12 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   // 开关操作后 await props.api.refresh() 拉回最新帧——总开关在状态条拨了，
   // 功能页横幅与行开关 ≤ 下一帧自动跟上，不再有"拉一次就定格"的陈旧窗口
 
+  // 功能介绍卡（1.2.7）：按需拉一次 get_capability_intro（不进 5s 轮询），
+  // 缓存与刷新策略在 FeaturesPane 内部；这里只提供拉取通道
+  async function onLoadCapIntro(id: string) {
+    return unwrapCallResult(await props.api.call("get_capability_intro", { capability_id: id }))
+  }
+
   async function onToggleCap(id: string, enabled: boolean) {
     setCapsBusyId(id)
     try {
@@ -802,6 +808,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
               busyId={capsBusyId}
               onToggleCap={onToggleCap}
               onToggleHideTools={onToggleHideTools}
+              onLoadIntro={onLoadCapIntro}
             />
           ) : null}
           {activeTab === "settings" ? (

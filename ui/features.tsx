@@ -1,19 +1,18 @@
-// 功能管理页（1.2.7 能力中心）：全部功能能力的开关总览。
-// 数据源 = list_capabilities 入口（按宿主当前角色解析）；开关经 set_capability
-// 写"否决集"——关闭即否决、打开回落既有配置默认（不会强行点亮配置里关着的项）。
+// 功能管理页（1.2.7 能力中心；1.2.7 起每行带「功能介绍」按钮）：
+// 全部功能能力的开关总览。
+// 数据源 = dashboard 轮询同源下发的 capabilities（按宿主当前角色解析）；
+// 开关经 set_capability 写"否决集"——关闭即否决、打开回落既有配置默认（不会
+// 强行点亮配置里关着的项）。
+// 介绍卡（1.2.7）：点按钮拉一次 get_capability_intro（前端缓存、不轮询），
+// 居中 Modal 单页展示作用/场景/依赖/限制/原理图（文案源 core/intros.py，
+// 渲染与排版全在 ui/capintro.tsx）。
 // 高级选项 hide_disabled_tools 全局一份：开启后，对所有角色都不生效的能力，
 // 其 LLM 工具从模型可见面摘除（面板保存后经 props 上的 api.refresh 拉回最新状态）。
 import { Card, Field, StatusBadge, Switch, Alert } from "@neko/plugin-ui"
+import { useState } from "@neko/plugin-ui"
 import type { CapabilitiesPayload, CapItem, TFunc } from "./types"
-
-// LLM 触点徽标：让"关掉它能省什么"一眼可见
-const LLM_BADGES: Record<string, { key: string; def: string; tone: "warning" | "success" | "default" }> = {
-  tool: { key: "panel.features.llm.tool", def: "LLM 工具", tone: "warning" },
-  direct: { key: "panel.features.llm.direct", def: "直连模型", tone: "warning" },
-  host_http: { key: "panel.features.llm.host", def: "宿主模型", tone: "warning" },
-  injection: { key: "panel.features.llm.injection", def: "上下文注入", tone: "default" },
-  none: { key: "panel.features.llm.local", def: "纯本地", tone: "success" },
-}
+import { CapIntroModal, LLM_BADGES } from "./capintro"
+import type { CapIntroPayload } from "./capintro"
 
 const GROUP_ORDER = ["rhythm", "mood", "diary"]
 
@@ -24,10 +23,33 @@ export function FeaturesPane(props: {
   busyId?: string
   onToggleCap: (id: string, enabled: boolean) => void
   onToggleHideTools: (value: boolean) => void
+  onLoadIntro: (id: string) => Promise<CapIntroPayload>
 }) {
-  const { t, caps, loading, busyId, onToggleCap, onToggleHideTools } = props
+  const { t, caps, loading, busyId, onToggleCap, onToggleHideTools, onLoadIntro } = props
   const items = (caps && caps.capabilities) || []
   const masterOn = !!caps && caps.master_enabled !== false
+
+  // 介绍卡：introId 空串 = 关；introCache 一次拉取长期复用（文案静态，
+  // 开关态/依赖态由本行实时数据现场叠展示，不依赖缓存新鲜度）
+  const [introId, setIntroId] = useState("")
+  const [introCache, setIntroCache] = useState<Record<string, CapIntroPayload>>({})
+  const [introLoading, setIntroLoading] = useState(false)
+  const [introError, setIntroError] = useState("")
+
+  function openIntro(item: CapItem) {
+    setIntroId(item.id)
+    setIntroError("")
+    if (introCache[item.id]) return
+    setIntroLoading(true)
+    Promise.resolve(onLoadIntro(item.id))
+      .then((payload) => {
+        if (payload) setIntroCache({ ...introCache, [item.id]: payload })
+      })
+      .catch(() => {
+        setIntroError(t("panel.capintro.loadError", { defaultValue: "介绍加载失败，请确认插件在运行后重试" }))
+      })
+      .finally(() => setIntroLoading(false))
+  }
 
   function capLabel(id: string): string {
     return t(`panel.features.cap.${id}.label`, { defaultValue: id })
@@ -54,6 +76,8 @@ export function FeaturesPane(props: {
     return ""
   }
 
+  const introItem = introId ? items.find((item) => item.id === introId) : null
+
   return (
     <div className="tm-pane">
       {!masterOn ? (
@@ -65,6 +89,9 @@ export function FeaturesPane(props: {
         />
       ) : null}
 
+      {/* 单页目标（1.2.7 用户反馈）：三组卡横向并排，总高≈最高的身体节律列；
+          窄窗口由 CSS 媒体查询回落双栏/单栏 */}
+      <div className="tm-feat-cols">
       {GROUP_ORDER.map((group) => {
         const inGroup = items.filter((item) => item.group === group)
         if (!inGroup.length) return null
@@ -77,7 +104,18 @@ export function FeaturesPane(props: {
                 return (
                   <div key={item.id} className="tm-feat-row">
                     <Field
-                      label={capLabel(item.id)}
+                      label={(
+                        <span className="tm-feat-label">
+                          {capLabel(item.id)}
+                          <button
+                            type="button"
+                            className="tm-ci-open"
+                            onClick={() => openIntro(item)}
+                          >
+                            {t("panel.capintro.open", { defaultValue: "功能介绍" })}
+                          </button>
+                        </span>
+                      )}
                       help={
                         (item.enabled ? "" : offHint(item)) ||
                         t(`panel.features.cap.${item.id}.desc`, { defaultValue: "" })
@@ -91,7 +129,7 @@ export function FeaturesPane(props: {
                           onChange={(value: boolean) => onToggleCap(item.id, value)}
                         />
                       </span>
-                    </Field>
+                      </Field>
                   </div>
                 )
               })}
@@ -99,21 +137,44 @@ export function FeaturesPane(props: {
           </Card>
         )
       })}
+      </div>
 
-      <Card title={t("panel.features.advanced", { defaultValue: "高级选项" })}>
-        <Switch
-          checked={!!(caps && caps.hide_disabled_tools)}
-          disabled={loading}
-          label={t("panel.features.hideTools", { defaultValue: "关闭的功能从模型可见面摘除工具" })}
-          onChange={(value: boolean) => onToggleHideTools(value)}
-        />
-        <div className="tm-feat-note">
-          {t("panel.features.hideToolsHelp", {
-            defaultValue:
-              "默认温和模式：关闭的功能其工具仍在位、调用时被拒绝。开启后，对所有角色都不生效的功能，其工具会真正对模型隐藏（省上下文）；恢复生效自动重挂。",
+      {/* 高级选项压成单行窄条（配合横排后一屏放得下全部开关）：
+          长说明挂 title 悬停可见，不占版面 */}
+      <div className="tm-feat-adv">
+        <span className="tm-feat-adv-label">{t("panel.features.advanced", { defaultValue: "高级选项" })}</span>
+        <span
+          className="tm-feat-adv-switch"
+          title={t("panel.features.hideToolsHelp", {
+            defaultValue: "默认温和模式：关闭的功能其工具仍在位、调用时被拒绝。开启后，对所有角色都不生效的功能，其工具会真正对模型隐藏（省上下文）；恢复生效自动重挂。",
           })}
-        </div>
-      </Card>
+        >
+          <Switch
+            checked={!!(caps && caps.hide_disabled_tools)}
+            disabled={loading}
+            label={t("panel.features.hideTools", { defaultValue: "关闭的功能从模型可见面摘除工具" })}
+            onChange={(value: boolean) => onToggleHideTools(value)}
+          />
+        </span>
+        <span className="tm-feat-adv-help">
+          {caps && caps.hide_disabled_tools
+            ? t("panel.features.hideToolsOn", { defaultValue: "已开启：不生效功能的工具会摘除" })
+            : t("panel.features.hideToolsOff", { defaultValue: "温和模式：工具在位、调用时才拒" })}
+        </span>
+      </div>
+
+      {introItem ? (
+        <CapIntroModal
+          t={t}
+          item={introItem}
+          capLabel={capLabel}
+          statusHint={offHint(introItem)}
+          intro={introCache[introItem.id] || null}
+          loading={introLoading}
+          error={introError}
+          onClose={() => setIntroId("")}
+        />
+      ) : null}
     </div>
   )
 }

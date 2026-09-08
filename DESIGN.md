@@ -726,6 +726,94 @@ zh-CN / en i18n
 - **后续新 LLM 模块接入成本**：写 service + 声明表一行 + 闸走 `_cap_effective`，
   开关/面板/持久化/工具生命周期/多角色全自动。
 
+### 1.2.7（增补一）：功能介绍卡（面板「功能管理」每行→居中 Modal 单页介绍，纯增量）
+
+- **需求**：每个功能行加一个文字按钮「功能介绍」，点开 Modal 卡片展示：
+  功能作用 / 主要场景 / 依赖 / 限制与注意事项 / 原理演示图；单页看完不滚动；
+  只做介绍类展示，不改其它模块行为、不新增配置键。
+- **文案事实源在 Python**（用户明确要求后端下发、不接受前端写死）：新建
+  `core/intros.py`（纯数据 + 纯函数，零 SDK 依赖，与 core 层同一纪律）：
+  `CAP_INTROS` 表按能力 id 登记中文原文（purpose/scenarios/limits/flow），
+  i18n key 由 cap id 派生（panel.capintro.<id>.purpose / scene<N> / limit<N> /
+  flow<N>，N 从 1 起）；`build_intro_payload(spec, ref)` 把文案组装成
+  `tr()` 引用 + 从声明表现场取结构化事实（deps/config_keys/llm/tools），
+  介绍卡与开关状态永远同源同口径。新增能力忘登记 → payload `found: false`，
+  面板如实显示「介绍暂缺」不瞎编。
+- **传输通道（调研结论，重要）**：宿主只对 dashboard context 做 `resolve_i18n_refs`
+  （ui_query_service L1617），**action 返回值不解析** → 后端把 `tr()` 引用 dict
+  原样透传，前端 `resolveText()` 用 `t($i18n, {defaultValue: default})` 按宿主
+  语言展开（zh 走 default、en 进 i18n 文件）；payload 同时兼容裸字符串（测试
+  桩环境 tr 直返中文），两种形态一套渲染代码都吃得下。**不进 5s 轮询**：
+  新增按需入口 `get_capability_intro`（@ui.action，与 set_capability 同级），
+  点开才拉、前端按能力 id 缓存一次（文案静态；实时状态由行数据现场叠加，
+  缓存不会陈旧）；避免 9×5 段长文案搭 dashboard 便车每 5 秒重发。
+- **多语言范围（用户决定：中英双语）**：本期只登记 zh-CN.json + en.json
+  （共 +111 内容键 +3 入口元数据键）；其余 6 语言按 default_locale=zh-CN 回落
+  中文，将来补翻译只需往对应文件加同名 key，三层零改动。zh 值由生成脚本
+  从 CAP_INTROS 自动导入（事实源单二），并有测试逐字对账防漂移。
+- **原理图：hosted 运行时确认无 SVG（三重封死）**：渲染器 `document.createElement`
+  全程无 `createElementNS`（JSX <svg> 成未知元素）、`dangerouslySetInnerHTML`/
+  `innerHTML`/`srcdoc` 被 patchProps 黑名单无视、`img src` 的 data-URI 白名单不含
+  svg；ring.tsx 头注早已踩坑在案。改用**纯 CSS 流程图**：流程数据（kind/
+  icon/label）在 core/intros.py 声明（emoji 图标，kind 只决配色
+  src蓝/proc紫/gate琥珀虚线/out绿，未知 kind 视觉回落中性），
+  `ui/capintro.tsx` 的 `IntroFlow` 通用渲染（胶囊节点 + 文字箭头，可换行）；
+  字符串纪律：介绍正文内引用一律「」角括号（ASCII 双引号截断 Python 字符串、
+  全角弯引号会被工具链规范化掉，都踩过；测试有禁 ASCII 引号断言）。
+- **文件落点**：新建 `core/intros.py` + `ui/capintro.tsx`（Modal+流程图+
+  LLM_BADGES 徒迁至此统一维护，features.tsx 反向 import）；`mixins/capabilities.py`
+  只新增 `get_capability_intro` 入口（既有入口/判定/轮询零改动）；
+  `ui/features.tsx` 行内加按钮 + 状态缓存；`ui/panel.tsx` 接线 `onLoadIntro`；
+  `ui/types.ts` TFunc 第二参开放意插值键（运行时 interpolateI18n 本就支持
+  {n}/{{n}}，校验器实测卡出）；`ui/styles.ts` 新增 `.tm-ci-*` 样式块（Modal
+  className 挂 backdrop，宽度选择器从这层下钻）。
+- **踩坑记录（1.2.7 白屏事故复盘，重要）**：
+  ① **链接器导出扫描器会在带 JSX 的函数体后丢位，漏掉其后所有
+  `export function`**（不管那个 JSX 函数是不是导出）：编译产物残留裸
+  `export` 是**解析期** SyntaxError，整个 iframe `<script>` 直接死亡，连
+  __showHostedError 错误卡片都跑不到——面板"纯白无报错"的根因就是它，
+  本地官方 tsc 校验器（check-hosted-tsx）查不出，只有真实链接器
+  （bundleHostedTsxSource + sucrase）能复现。生存规则：模块内**任何带 JSX
+  的函数之后不得再有 export 语句**；JSX 辅助组件不导出、放文件尾靠函数
+  声明提升引用（仓库既有注释"辅助组件放文件尾部靠函数声明提升"即此），
+  必须跨文件用的组件把全部 export 排在首个 JSX 函数之前；命名类型
+  导出（export type）安全（sucrase 最终抹掉）。capintro.tsx 头部已立
+  "签名纪律"注释；今后任何面板改动后必须跑一次链接器泄漏自检：
+  `node -e` 用 bundleHostedTsxSource 包一遵，grep 产物里 `^\s*export\s` 必须为 0。
+  ② 复现 harness 的保真度陷阱：编译段必须包在 try{} 块内（真宿主如此，
+  否则 entry 顶层 `const { Alert }` 与 runtime 全局 function Alert 在 harness
+  里假阳性冲突）；__hostedProps 必须 `...window.NekoUiKit` 全量展开（否则
+  props.t undefined）；api.call 桩返回宿主信封 {plugin_id, action_id, result}
+  形态（unwrapCallResult 认这个）。
+  ③ hosted-tsx 校验器不识别泛型尖括号层级的逗号，`export const X: Record<
+  string, {a,b}>` 被误判"多声明符"——用类型别名绕开（utils.ts 既有同款注释）。
+  ④ 声明表 config 段名不带方括号，组装展示键时才包 `[{section}]`。
+  ⑤ 介绍正文禁 ASCII 引号（曾截断 Python 字符串），统一用「」。
+
+- **测试**：`tests/test_intros.py` 15 项：声明表与能力表同步/结构合规/首尾
+  src→out、payload key 派生与同源字段、未登记 found=false、入口未知拒绝/
+  可序列化、i18n zh/en 覆盖 + zh 逐字对账 + 孤儿 key 检测。
+
+### 1.2.7（增补二）：单页化改造（发版前用户实测反馈）
+
+- **用户反馈两点**：① 流程图 emoji 图标不要（全部删除）；② 功能页签上下滚动
+  麻烦，要单页——追问确认**两处都要**（页签 + 介绍卡）。
+- **emoji 彻底移除**：`FlowNode` 数据类删 `icon` 字段、`build_intro_payload`
+  不再携带、`IntroFlow` 不渲染、`.tm-ci-node-icon` 样式删除、
+  `tests/test_intros.py` 断言翻转（payload 含 icon 即红，防回潮）；
+  类型区分全靠配色胶囊（gate 虚线），i18n 无需动（flow 键只存文字）。
+- **功能页签单页**：`.tm-feat-cols` 三组卡横向并排（4/2/3 行，总高≈最高列），
+  高级选项压成单行窄条（长说明挂 title 悬停，右侧状态文本复用既有
+  hideToolsOn/Off 键零新增）；媒体查询回落 900px→双栏、620px→单栏。
+- **介绍卡单页**：弹窗加宽 820→980px；五段重排双栏网格（左作用+场景 /
+  右限制+依赖，流程图通栏置底）；全套留白/字号紧化；工具名独立行收进
+  计数 chip 的 title 悬停。**真浏览器实测（Playwright，两档视口 1280x860 /
+  1000x700）：页签与 9 张卡全都 overflow=0px**，窄窗回落滚动属预期保险。
+- **验证基建升级**：复现 harness 进化为常驻测量脚本（逐卡开合测
+  scrollHeight-clientHeight + emoji 残留计数 + 链接器泄漏扫描前置），
+  面板布局改动后必跑。
+
+
 ## Out of Scope
 
 - 情绪日记的 LLM 自动总结写入（v1 只提供模型手写日记工具与人工查看）

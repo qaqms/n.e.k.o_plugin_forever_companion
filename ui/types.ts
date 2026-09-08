@@ -1,6 +1,8 @@
 // 面板共享类型：宿主 context 快照、设置表单、以及各模块间传递的回调签名
 
-export type TFunc = (key: string, opts?: { defaultValue?: string }) => string
+// 宿主桥的 t() 第二参数同时承担 defaultValue 与 {{n}}/{n} 插值参数（见 ui-kit 运行时
+// interpolateI18n），索引签名放行任意插值键；1.2.7 介绍卡 toolsCount 用到 {n}
+export type TFunc = (key: string, opts?: { defaultValue?: string; [param: string]: any }) => string
 
 export type Status = {
   enabled?: boolean

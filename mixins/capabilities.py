@@ -35,6 +35,7 @@ from ..core.capabilities import (
     capability_tools_for,
     evaluate_capabilities,
 )
+from ..core.intros import build_intro_payload
 from ..core.state import _caps_key
 
 JsonObject = dict[str, Any]
@@ -201,6 +202,44 @@ class CapabilityMixin:
         name = str(lanlan or "").strip() or self._current_shard_name()
         await self._ensure_shard(name)
         return Ok(self._cap_view(name))
+
+    @ui.action(
+        label=tr("actions.get_capability_intro.label", default="查看功能介绍"),
+        tone="default",
+    )
+    @plugin_entry(
+        id="get_capability_intro",
+        name=tr("entries.get_capability_intro.name", default="查看功能介绍"),
+        description=tr(
+            "entries.get_capability_intro.description",
+            default="返回指定功能能力的介绍：作用、主要场景、限制与注意事项、原理流程与静态依赖声明（文案以 i18n 引用下发，由面板按语言解析）。",
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "capability_id": {"type": "string", "description": "能力 id（见 list_capabilities）"},
+            },
+            "required": ["capability_id"],
+        },
+    )
+    async def get_capability_intro(self, capability_id: str = "", **_: Any):
+        """一项功能的介绍卡片数据（按需拉取，不进 5s 轮询）。
+
+        文案事实源在 core/intros.py（中文原文 + key 派生规则），这里只把
+        tr() 引用原样透传：action 返回值不经宿主 i18n 解析（只有
+        dashboard context 会解析），前端用 t(key, {defaultValue}) 自行
+        按宿主语言展开——zh 走 default，en 等小语种进 i18n/*.json 补 key
+        即可生效，三层零耦合。依赖/触点/配置键从声明表现场取，介绍与
+        开关状态永不同源不同。
+        """
+        cap_id = str(capability_id or "").strip()
+        spec = CAPABILITY_SPECS.get(cap_id)
+        if spec is None or not spec.managed:
+            return Err(SdkError(f"unknown capability: {cap_id!r}"))
+        # SDK 的 tr(key, *, default=) 里 default 是 keyword-only（生产实测：
+        # 直接传 build_intro_payload 会炸 "tr() takes 1 positional argument"）；
+        # 这里包一层适配成 core 层的 (key, zh) 双参约定。测试桦已收紧同构。
+        return Ok(build_intro_payload(spec, lambda k, d: tr(k, default=d)))
 
     @ui.action(
         label=tr("actions.set_capability.label", default="开关功能能力"),
