@@ -42,4 +42,5 @@ exclude_files = [
     "uv.lock",
     "ruff.toml",
     "DESIGN.md",
+    "CHANGELOG.md",
 ]
