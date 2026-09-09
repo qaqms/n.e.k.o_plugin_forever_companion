@@ -867,3 +867,28 @@ DESIGN 定下的下轮任务并入本版本（1.3.0 尚未发行，同版续写�
   0 错；`neko-plugin check` 0 错（唯一 warning 为寄放工作区无独立 git 仓，
   属实情非问题）；ruff check 全绿（ruff format 非本仓关卡，HEAD 自身即 36 件
   不合默认配置，不强刷免无关 diff）
+
+#### 1.3.0 第四轮：真机反馈「日记一页大一小」——书宽被宿主 Card 缩成看文字脸色
+
+- **真机现象**（两张对比截图，同角色同书不同页）：第 10 页（1 段短句）与
+  第 11 页（2 段长句）并排一看，纸页一大一小、书脊左右错位。逐像素实测：
+  页 10 全书盒 1157→~1690（宽 ≈533px），页 11 全书盒 1099→~1756（宽 ≈657px，
+  顶满 --tmb-col 640）；左缘随居中漂移——宽度不是被设计定的，是被**该页最长
+  正文行**定的
+- **根因（宿主层布局陷阱，插件侧可修）**：宿主 ui-kit 的 Card 内容区是
+  `.neko-card-body { display: grid }`，而 `.tmb-book` 写的是
+  `max-width: 640px + margin: auto 居中`——**grid 子项一旦带 auto margin，
+  默认 stretch 即退化为 shrink-to-fit**，书宽 = min(内容 max-content, 640)：
+  短句页收缩、长句页顶满，同一本书翻页就变形（藏书阁/卷宗共用本类，一并受影响；
+  这也解释了上一轮「全屏书扁」修正后小屏观感反复——纸高钉住了，纸宽一直在飘）
+- **修法一行**：`.tmb-book` 补显式 `width: 100%`（对 grid area 取满、封顶
+  max-width 640，auto margin 继续负责居中，窄窗照旧 media query 收缩）；
+  全仓排查同模式，仅此一处受影响（`.tm-journal-toolbar` 的 shrink-to-fit
+  是预期行为——内容紧贴居中的工具条，不装纸页）；约束注释就地落在 styles_book.ts
+- **纪律**：宿主 Card body 是 grid——插件在 Card 直子层想要「固定宽度居中块」，
+  必须 `width + max-width + margin:auto` 三件套齐写，只写 max-width 等于把
+  宽度外包给了内容；面板几何异常先量截图盒线再读宿主 runtime.js 的容器声明，
+  不在自家 CSS 里猜（本轮从截图到定位根因三步：量盒线 → 查 Card → 验 grid）
+- **验证（第四轮）**：pytest 374 全绿（纯样式改动，无行为变化）；hosted 链接门
+  23 模块 0 丢导出；宿主仓内 `check-hosted-tsx` 0 错；ruff check 全绿；
+  **真机观感待验收**：两本书逐页宽度应不再随文字长短呼吸，翻页时书脊不横移

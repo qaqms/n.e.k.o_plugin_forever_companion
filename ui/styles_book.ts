@@ -141,8 +141,13 @@ export const BOOK_STYLES = `
    ============================================================ */
 .tmb-book {
   display: grid; grid-template-columns: 27px minmax(0, 1fr);
-  align-items: stretch; max-width: var(--tmb-col, 640px); margin: 2px auto 0;
+  align-items: stretch; width: 100%; max-width: var(--tmb-col, 640px); margin: 2px auto 0;
 }
+/* 1.3.0 真机反馈「日记一页大一小」：宿主 Card 的 body 是 display:grid，
+   grid 子项带 margin:auto 即从 stretch 退化为 shrink-to-fit——书宽随该页
+   最长文字行的 max-content 浮动（1 段短页 ≈533px vs 2 段长页顶满 640px），
+   居中又让左缘跟着书脊漂。显式 width:100% 钉回「满列宽、封顶 640」，
+   两本书与藏书阁共用本类，一处修全。 */
 /* 1.3.0 真机反馈“全屏下书很扁”：纸页实测 728×366 ≈ 2.0:1。宽收到 640
    （正文列 ≈ 540px → 15px 下约 36 字/行，中文书舒适行宽），高见 .tmb-page
    竖版下限。列宽变量挂在 .tmb-card（Card 元素）上：工具条与书都是它的后代
