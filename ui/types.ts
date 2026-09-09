@@ -74,6 +74,14 @@ export type JournalPageHeader = {
   legacy?: boolean
 }
 
+// 藏书阁概览（1.3.0，journal_archive_brief 用）：合订本极轻量摘要——
+// 只显存储里现成的事实（本数 + 时段），不派生会随淘汰平移的序号
+export type JournalArchiveBrief = {
+  pages?: number
+  first_ts?: string
+  last_ts?: string
+}
+
 // 个人日记页内的单段续写记录
 export type JournalEntry = { ts?: string; text?: string; affect?: number }
 
@@ -245,6 +253,8 @@ export type State = {
   diary_total?: number
   fragment_total?: number
   journal_index?: JournalPageHeader[]
+  // 藏书阁（1.3.0）：合订本概览；全量翻阅走 get_journal_archive 按需拉取
+  journal_archive_brief?: JournalArchiveBrief
   // 个人日记邀请挂起态（1.2.3）：递过邀请、她还没落笔
   journal_invite_pending?: boolean
   lanlan?: string

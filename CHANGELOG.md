@@ -793,8 +793,42 @@ zh-CN / en i18n
   > **看不清就先量，别用假设补全观察**；写代码时的"应该没问题"不算证据。
 
 - **时光日记页签未动**：它是"时间流便签"，与"书"是两种物件，本次不在需求内
-- **验证**：pytest 363 全绿；hosted 链接门 23 模块 0 丢导出；按宿主同款选项跑
+- **验证（第一轮）**：pytest 363 全绿；hosted 链接门 23 模块 0 丢导出；按宿主同款选项跑
   tsc 类型检查 0 错（宿主 `check-hosted-tsx` 只认仓内路径，故用等价配置外跑）；
   `neko-plugin check` 0 错 0 警。**真机观感待验收**：楷体/仿宋在非中文 Windows
   回落 SimSun→serif；sticky 页脚若被祖先链某处的 overflow 打断会退化成
   "沉在纸堆末尾"（不影响可读，只影响常驻）
+
+#### 1.3.0 第二轮：藏书阁——写满 52 页后，淘汰从"静默的丢"改成"静默的搬家"
+
+DESIGN 定下的下轮任务并入本版本（1.3.0 尚未发行，同版续写）：
+
+- **纯逻辑层**：`journal_write` 返回值三元组扩为四元组
+  `(pages, page_no, tail, evicted)`——淘汰页随结果带出（时间正序、内容完整），
+  不再是函数内部的静默丢弃；新增 `archive_brief(pages)` 纯函数（只显本数 +
+  时段事实，不派生会随淘汰平移的序号，遵 1.3.0 显示层纪律）
+- **存储层**：新键 `journal_archive@<角色>`（只追加、不入当前书 blob——写日记
+  的热路径永远只重写活架那块，阁 blob 只在淘汰那一拍重写）；两条收集路径守住
+  一切截断：工具路径（`tool_write_journal` 把 evicted 入阁）与保存路径
+  （`_save_shard_journal` 兜住旧版磁盘残留/周记迁移超长）；阁内再满
+  `_JOURNAL_ARCHIVE_MAX_PAGES = 104`（约四年周更体量）才从最旧一页真删；
+  零淘汰的常态写**不多花一次存储写**（空 evicted 不碰键，测试锁死）；
+  shard 加载回读、prune 角色清除一并清阁 key
+- **倒计数不挪位**：入阁序时间正序存储、显示倒序（最新在前）——阁满裁旧时
+  新侧的位置数不平移，与 1.3.0 "盒号漂移"自查同一条纪律；翻阅按 page_no
+  定位（累计页码永不重编），brief 本数变化即视为缓存过期重拉
+- **面板**：书架末尾多一根横放的小书摞（ArchiveStack：三块布面板微错位堆叠 +
+  切口纸口线 + 右上朱色"藏"字小印（盖章必不正同款 -4°）+ 探出的丝带，
+  坐同一根木隔板；纯 CSS，不标本数、不提 52 上限，悬停只给时段事实）；点开
+  复用 JournalBook 只读翻阅（题签换口径"藏书阁·合订本"，页眉页码/日期/心情
+  照常——都是存储里现成的事实）；切角色即作废重拉
+- **入口**：新增 `get_journal_archive`（ui.action，只读）；dashboard 新增
+  `journal_archive_brief`（极轻量，进 5s 轮询）；全量翻阅按需拉取不进轮询
+- **i18n**：登记 en + zh-CN 各 +8 key（入口三键 + archiveBadge/archiveLoading/
+  archiveSeal/archiveTip），其余 6 语种按仓惯例回落 defaultValue
+- **验证**：pytest 370 全绿（新增 test_journal_archive.py 7 篇：工具淘汰入阁/
+  保存溢出入阁/零淘汰不写阁/阁满裁旧/brief 只显事实/载入回读/入口只读）；
+  hosted 链接门 23 模块 0 丢导出；宿主仓内 `check-hosted-tsx`（含同款 tsc）
+  0 错；`neko-plugin check` 0 错（唯一 warning 为寄放工作区无独立 git 仓，
+  属实情非问题）；ruff check 全绿（ruff format 非本仓关卡，HEAD 自身即 36 件
+  不合默认配置，不强刷免无关 diff）

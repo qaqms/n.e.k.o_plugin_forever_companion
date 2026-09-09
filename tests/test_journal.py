@@ -28,9 +28,10 @@ NOW = datetime(2026, 8, 29, 12, 0, 0, tzinfo=timezone.utc)
 
 
 def test_first_write_creates_page_one() -> None:
-    pages, page_no, tail = journal_write([], "第一篇", False, now=NOW, affect=0.3)
+    pages, page_no, tail, evicted = journal_write([], "第一篇", False, now=NOW, affect=0.3)
     assert page_no == 1
     assert tail == ""
+    assert evicted == []
     assert pages[0]["page_no"] == 1
     assert pages[0]["started_at"] == NOW.isoformat(timespec="seconds")
     entry = pages[0]["entries"][0]
@@ -39,9 +40,9 @@ def test_first_write_creates_page_one() -> None:
 
 
 def test_continue_appends_to_current_page() -> None:
-    pages, page_no, tail = journal_write([], "第一段", False, now=NOW)
+    pages, page_no, tail, _ = journal_write([], "第一段", False, now=NOW)
     later = NOW + timedelta(days=1)
-    pages2, page_no2, tail2 = journal_write(pages, "第二段", False, now=later)
+    pages2, page_no2, tail2, _ = journal_write(pages, "第二段", False, now=later)
     assert page_no2 == 1  # 还在同一页
     assert "第一段" in tail2  # 续写衔接带出上次写的
     assert [e["text"] for e in pages2[0]["entries"]] == ["第一段", "第二段"]
@@ -50,9 +51,9 @@ def test_continue_appends_to_current_page() -> None:
 
 
 def test_new_page_flag_starts_fresh_page_with_previous_tail() -> None:
-    pages, _, _ = journal_write([], "上一页的结尾", False, now=NOW)
+    pages, _, _, _ = journal_write([], "上一页的结尾", False, now=NOW)
     later = NOW + timedelta(days=3)
-    pages2, page_no2, tail2 = journal_write(pages, "新的一页", True, now=later)
+    pages2, page_no2, tail2, _ = journal_write(pages, "新的一页", True, now=later)
     assert page_no2 == 2
     # 翻页时衔接上一页最后一段（带落笔日期前缀）
     assert tail2.endswith("上一页的结尾")
@@ -63,24 +64,31 @@ def test_new_page_flag_starts_fresh_page_with_previous_tail() -> None:
 def test_full_page_auto_flips() -> None:
     pages: list[dict] = []
     for i in range(8):  # 页容量 8
-        pages, _, _ = journal_write(pages, f"段{i}", False, now=NOW + timedelta(minutes=i))
+        pages, _, _, _ = journal_write(pages, f"段{i}", False, now=NOW + timedelta(minutes=i))
     assert len(pages) == 1
-    pages, page_no, _ = journal_write(pages, "第9段", False, now=NOW)
+    pages, page_no, _, _ = journal_write(pages, "第9段", False, now=NOW)
     assert page_no == 2  # 写满自动翻页
     assert [e["text"] for e in pages[0]["entries"]][-1] == "段7"
 
 
-def test_page_cap_evicts_oldest() -> None:
+def test_page_cap_evicts_oldest_into_evicted_list() -> None:
     pages: list[dict] = []
+    all_evicted: list[dict] = []
     for i in range(60):  # 造 60 页（上限 52）
-        pages, _, _ = journal_write(pages, f"页{i}", True, now=NOW + timedelta(days=i))
+        pages, _, _, evicted = journal_write(pages, f"页{i}", True, now=NOW + timedelta(days=i))
+        all_evicted.extend(evicted)
     assert len(pages) == 52
     assert pages[0]["page_no"] == 9  # 最旧的 8 页被淘汰
     assert pages[-1]["page_no"] == 60
+    # 1.3.0 藏书阁：淘汰页随返回值带出（时间正序、内容完整），不再是静默丢弃
+    assert [p["page_no"] for p in all_evicted] == list(range(1, 9))
+    assert all_evicted[0]["entries"][0]["text"] == "页0"
+    # 淘汰后新页号仍连续递增（累计页码永不重编，面板显示层据此说真话）
+    assert [p["page_no"] for p in pages] == list(range(9, 61))
 
 
 def test_entry_text_truncated_to_cap() -> None:
-    pages, _, _ = journal_write([], "长" * 2000, False, now=NOW)
+    pages, _, _, _ = journal_write([], "长" * 2000, False, now=NOW)
     # 0.7.1 起结构化四字段拼装，单条上限放宽到 900
     assert len(pages[0]["entries"][0]["text"]) == 900
 
@@ -94,21 +102,21 @@ def test_due_when_never_written() -> None:
 
 
 def test_not_due_within_interval() -> None:
-    pages, _, _ = journal_write([], "昨天写的", False, now=NOW - timedelta(days=1))
+    pages, _, _, _ = journal_write([], "昨天写的", False, now=NOW - timedelta(days=1))
     due, reason = journal_due(pages, now=NOW, interval_days=7)
     assert due is False and reason == "recent_write"
 
 
 def test_due_after_interval_even_without_new_pages() -> None:
-    pages, _, _ = journal_write([], "八天前写的", False, now=NOW - timedelta(days=8))
+    pages, _, _, _ = journal_write([], "八天前写的", False, now=NOW - timedelta(days=8))
     due, _ = journal_due(pages, now=NOW, interval_days=7)
     assert due is True
 
 
 def test_continue_resets_cadence() -> None:
     # 首段写在 9 天前，但续写发生在 1 天前 → 节奏以"最近一次落笔"起算
-    pages, _, _ = journal_write([], "九天前", False, now=NOW - timedelta(days=9))
-    pages, _, _ = journal_write(pages, "昨天续写", False, now=NOW - timedelta(days=1))
+    pages, _, _, _ = journal_write([], "九天前", False, now=NOW - timedelta(days=9))
+    pages, _, _, _ = journal_write(pages, "昨天续写", False, now=NOW - timedelta(days=1))
     due, reason = journal_due(pages, now=NOW, interval_days=7)
     assert due is False and reason == "recent_write"
 
@@ -140,8 +148,8 @@ def test_migrate_empty_and_bad_data() -> None:
 
 
 def test_page_header_stats() -> None:
-    pages, _, _ = journal_write([], "a", False, now=NOW, affect=0.4)
-    pages, _, _ = journal_write(pages, "b", False, now=NOW, affect=-0.2)
+    pages, _, _, _ = journal_write([], "a", False, now=NOW, affect=0.4)
+    pages, _, _, _ = journal_write(pages, "b", False, now=NOW, affect=-0.2)
     header = page_header(pages[0])
     assert header["page_no"] == 1
     assert header["entry_count"] == 2

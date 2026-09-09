@@ -885,20 +885,22 @@ class MoodActionsMixin:
         body = assemble_journal_entry(events, thoughts, feelings, extra)
         # 页眉的好感度参考值：落笔瞬间的连续心情（读取时已惰性衰减），只进页眉展示层
         valence_now = self._current_affect(shard)[0]
-        shard.journal, page_no, previous_lines = journal_write(
+        shard.journal, page_no, previous_lines, evicted = journal_write(
             shard.journal,
             body,
             bool(new_page),
             affect=valence_now,
         )
         res_journal = await self._save_shard_journal(lanlan, shard)
-        # 相处统计：第一页个人日记里程碑 + 落盘（这里显式存一次保证"第一篇"即时可见）
+        # 藏书阁（1.3.0）：写满 52 页后淘汰的最旧一页不丢，静默搬进合订本
+        res_archive = await self._append_journal_archive(lanlan, shard, evicted)
+        # 相处统计：第一页个人日记里程碑 + 落盘（这里显式存一次保证“第一篇”即时可见）
         shard.stats = record_milestone(shard.stats, "first_journal")
         res_stats = await self._save_shard_stats(lanlan, shard)
         # 0.7.0 起不再镜像 read 推送：个人日记只给用户翻看，不进她的对话上下文、
-        # 不随对话历史被宿主记忆抽取——"续写衔接"由工具结果里的 recent_context
+        # 不随对话历史被宿主记忆抽取——“续写衔接”由工具结果里的 recent_context
         # 即时承载（只存在于写日记的这轮工具结果里）
-        persist_err = self._persist_error(res_journal, res_stats)
+        persist_err = self._persist_error(res_journal, res_archive, res_stats)
         if persist_err is not None:
             return persist_err
         return Ok({

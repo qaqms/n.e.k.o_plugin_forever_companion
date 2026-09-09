@@ -38,7 +38,7 @@ from ..core.cycle import (
     compute_phase_state,
     parse_anchor_date,
 )
-from ..core.journal import page_header
+from ..core.journal import archive_brief, page_header
 from ..core.onboarding import build_readiness, make_guide_record, wizard_pending
 from ..core.review import new_stats as review_new_stats
 from ..core.review import review_due
@@ -57,6 +57,7 @@ from ..core.state import (
     _cfg_section,
     _cycle_key,
     _diary_key,
+    _journal_archive_key,
     _journal_key,
     _LanlanShard,
     _mood_key,
@@ -269,6 +270,9 @@ class PanelEntriesMixin:
             # 个人日记（书页式）：index 供面板展示页数概览（极轻量，进 5s 轮询）；
             # 全量翻阅走 get_journal 入口按需拉取，不进轮询
             "journal_index": [page_header(page) for page in shard.journal],
+            # 藏书阁（1.3.0）：合订本概览（极轻量：本数 + 时段）——面板据此在书架
+            # 末尾决定画不画那根横放书脊；全量翻阅走 get_journal_archive 按需拉取
+            "journal_archive_brief": archive_brief(shard.journal_archive),
             # 邀请挂起态（1.2.3）：递过邀请、她还没落笔——日记页显示"等她"提示，
             # 免得"点了没反应、过一会凭空多一页"
             "journal_invite_pending": self._journal_invite_pending(shard),
@@ -1362,6 +1366,27 @@ class PanelEntriesMixin:
         return Ok({"pages": pages, "lanlan": lanlan})
 
     @ui.action(
+        label=tr("actions.get_journal_archive.label", default="翻阅藏书阁合订本"),
+        tone="default",
+    )
+    @plugin_entry(
+        id="get_journal_archive",
+        name=tr("entries.get_journal_archive.name", default="翻阅藏书阁合订本"),
+        description=tr(
+            "entries.get_journal_archive.description",
+            default="只读翻阅藏书阁：个人日记写满下架的旧页合订本（全部页，含每页全部段落）。仅作用于当前角色。",
+        ),
+        input_schema={"type": "object", "properties": {}},
+    )
+    async def get_journal_archive(self, **_: Any):
+        lanlan, shard = await self._current_shard_async()
+        pages = [
+            {**page_header(page), "entries": (page.get("entries") if isinstance(page.get("entries"), list) else [])}
+            for page in shard.journal_archive
+        ]
+        return Ok({"pages": pages, "lanlan": lanlan})
+
+    @ui.action(
         label=tr("actions.get_review.label", default="翻看我的日记"),
         tone="default",
     )
@@ -1621,6 +1646,7 @@ class PanelEntriesMixin:
         for key in (
             _cycle_key(name), _mood_key(name), _diary_key(name),
             _journal_key(name), _weekly_key(name),  # weekly@ 为 0.7.0 前的旧周记 key，一并清
+            _journal_archive_key(name),  # 藏书阁合订本（1.3.0）：角色份一并清
             _review_key(name), _review_stats_key(name),  # 我的日记（0.8.0）：篇目与旧独立 stats key
             _stats_key(name),  # 相处统计（1.1.0）
             _caps_key(name),  # 能力否决集（1.2.7）：角色份一并清，不留残留开关

@@ -12,7 +12,7 @@ import { Button, Card, EmptyState, Tabs } from "@neko/plugin-ui"
 import { useEffect, useLocalState, useRef, useState } from "@neko/plugin-ui"
 import { BOOK_STYLES } from "./styles_book"
 import type {
-  DiaryItem, JournalPage, JournalPageHeader, ReviewBrief, ReviewEntry, ReviewProgress, TFunc,
+  DiaryItem, JournalPage, JournalPageHeader, JournalArchiveBrief, ReviewBrief, ReviewEntry, ReviewProgress, TFunc,
 } from "./types"
 import { fragmentKindKey, journalTrendKey, moodDotColor } from "./utils"
 
@@ -22,6 +22,9 @@ export function DiaryPane(props: {
   diaryTotal: number
   fragmentTotal: number
   journalIndex: JournalPageHeader[]
+  // 藏书阁（1.3.0）：活架写满下架的旧页合订本——概览进轮询，全量按需拉取；
+  // 面板据此在书架末尾画一根横放书脊，点开即只读翻阅
+  journalArchiveBrief?: JournalArchiveBrief
   invitePending?: boolean
   lanlan?: string
   // 用 types.ts 的 ReviewBrief（含 1.2.3 的 writing/last_result）：内联复刻一份
@@ -30,6 +33,7 @@ export function DiaryPane(props: {
   onClearDiary: () => void
   onDeleteFragment: (ts: string) => void
   onLoadJournal: () => Promise<JournalPage[]>
+  onLoadJournalArchive: () => Promise<JournalPage[]>
   onLoadMoreDiary: (offset: number) => Promise<{ items: DiaryItem[]; hasMore: boolean }>
   onInviteJournal: () => void
   onLoadReview: () => Promise<{ entries: ReviewEntry[]; progress: ReviewProgress }>
@@ -38,8 +42,8 @@ export function DiaryPane(props: {
   settingsChildren?: any
 }) {
   const {
-    t, diary, diaryTotal, fragmentTotal, journalIndex, invitePending, lanlan, reviewBrief,
-    onClearDiary, onDeleteFragment, onLoadJournal, onLoadMoreDiary, onInviteJournal,
+    t, diary, diaryTotal, fragmentTotal, journalIndex, journalArchiveBrief, invitePending, lanlan, reviewBrief,
+    onClearDiary, onDeleteFragment, onLoadJournal, onLoadJournalArchive, onLoadMoreDiary, onInviteJournal,
     onLoadReview, onWriteReviewNow, onClearReview, settingsChildren,
   } = props
 
@@ -65,6 +69,17 @@ export function DiaryPane(props: {
     .map((p) => `${p.page_no || 0}:${p.entry_count || 0}:${p.last_ts || ""}`)
     .join("|")
   const bookFpSeen = useRef<string | null>(null)
+  // ---- 藏书阁（1.3.0）：合订本按需拉取 + 当前翻阅页（按倒序从最新一本数起）----
+  const [archivePages, setArchivePages] = useState<JournalPage[]>([])
+  const [archiveLoaded, setArchiveLoaded] = useState(false)
+  const [archiveLoading, setArchiveLoading] = useState(false)
+  const [openArchiveNo, setOpenArchiveNo] = useState<number | null>(null)
+  // 翻阅序：入阁序时间正序，显示倒序（最新在前）——新页追加不抽旧页的位，
+  // 位置数才不会随入阁平移（1.3.0 显示层纪律）
+  const archiveList = archivePages.slice().reverse()
+  const archIdx = openArchiveNo === null ? null : archiveList.findIndex((p) => (p.page_no || 0) === openArchiveNo)
+  const visibleArchive = archIdx !== null && archIdx >= 0 ? archiveList[archIdx] : null
+  const archiveCount = Number((journalArchiveBrief && journalArchiveBrief.pages) || 0)
   // ---- 我的日记：全部篇目（倒序）+ 素材进度 + 当前翻开篇（null = 目录视图）----
   const [reviewEntries, setReviewEntries] = useState<ReviewEntry[]>([])
   const [reviewProgress, setReviewProgress] = useState<ReviewProgress>({})
@@ -108,12 +123,15 @@ export function DiaryPane(props: {
     }
   }
 
-  // 切角色：重置时光日记分页与翻开的页码 + 重拉日记本与我的日记
+  // 切角色：重置时光日记分页与翻开的页码 + 藏书阁与我的日记状态，重拉日记本
   useEffect(() => {
     setFullDiary(null)
     setDiaryHasMore(false)
     setOpenPageNo(null)
     setOpenReviewTs(null)
+    setOpenArchiveNo(null)
+    setArchivePages([])
+    setArchiveLoaded(false)
     bookFpSeen.current = null  // 指纹基线作废，按新角色的书重认（1.2.3）
     reloadBook()
     reloadReview()
@@ -159,6 +177,27 @@ export function DiaryPane(props: {
     } finally {
       setDiaryLoading(false)
     }
+  }
+
+  // 翻开合订本（1.3.0）：按需拉全量（brief 本数变化即视为过期），从最新一本读起。
+  // 翻阅中不自动重拉：淘汰一周至多一次，且翻阅按 page_no 定位、新页入阁不挪位
+  async function openArchive() {
+    if (archiveLoading) return
+    let list = archivePages
+    if (!archiveLoaded || list.length !== archiveCount) {
+      setArchiveLoading(true)
+      try {
+        list = await onLoadJournalArchive()
+        setArchivePages(list)
+        setArchiveLoaded(true)
+      } catch (err) {
+        console.warn("[forever_companion] load journal archive failed:", err)
+      } finally {
+        setArchiveLoading(false)
+      }
+    }
+    if (!list.length) return
+    setOpenArchiveNo(Number(list[list.length - 1].page_no || 0))
   }
 
   return (
@@ -236,7 +275,20 @@ export function DiaryPane(props: {
                 <div className="tm-derived">
                   {t("panel.journal.hint", { defaultValue: "她每隔一段时间自己写的一篇日记，只给你看；翻页看看她这段时间在想什么。" })}
                 </div>
-                {bookLoaded && pages.length === 0 ? (
+                {visibleArchive ? (
+                  <JournalBook
+                    t={t}
+                    page={visibleArchive}
+                    position={archIdx !== null ? archIdx + 1 : 1}
+                    totalPages={archiveList.length}
+                    hasPrev={archIdx !== null && archIdx > 0}
+                    hasNext={archIdx !== null && archIdx < archiveList.length - 1}
+                    onBack={() => { setOpenArchiveNo(null) }}
+                    onPrev={() => { if (archIdx !== null && archIdx > 0) setOpenArchiveNo(archiveList[archIdx - 1].page_no || null) }}
+                    onNext={() => { if (archIdx !== null && archIdx < archiveList.length - 1) setOpenArchiveNo(archiveList[archIdx + 1].page_no || null) }}
+                    archiveLabel={t("panel.journal.archiveBadge", { defaultValue: "藏书阁·合订本" })}
+                  />
+                ) : bookLoaded && pages.length === 0 ? (
                   <EmptyState
                     title={t("panel.journal.emptyTitle", { defaultValue: "还没有写过日记" })}
                     description={t("panel.journal.emptyDesc", { defaultValue: "点右上角「请她写一篇」递个邀请；当她愿意写时，第一页会出现在这里。" })}
@@ -254,7 +306,20 @@ export function DiaryPane(props: {
                     onNext={() => { if (openIdx < pages.length - 1) setOpenPageNo(pages[openIdx + 1].page_no || null) }}
                   />
                 ) : (
-                  <JournalShelf t={t} index={pages.length ? pages : journalIndex} onOpen={(no) => { setOpenPageNo(no) }} loading={bookLoading} />
+                  <JournalShelf
+                    t={t}
+                    index={pages.length ? pages : journalIndex}
+                    onOpen={(no) => { setOpenPageNo(no) }}
+                    loading={bookLoading}
+                    stack={archiveCount > 0 ? (
+                      <ArchiveStack
+                        t={t}
+                        brief={journalArchiveBrief || {}}
+                        loading={archiveLoading}
+                        onOpen={openArchive}
+                      />
+                    ) : null}
+                  />
                 )}
               </Card>
             ),
@@ -389,8 +454,10 @@ function JournalShelf(props: {
   index: Array<JournalPageHeader & { entries?: Array<{ text?: string }> }>
   onOpen: (pageNo: number) => void
   loading: boolean
+  // 藏书阁（1.3.0）：书架末尾那根横放的合订本（空则不画）——真元素坐在同一块木隔板上
+  stack?: any
 }) {
-  const { t, index, onOpen, loading } = props
+  const { t, index, onOpen, loading, stack } = props
   if (!index.length) {
     return <div className="tm-derived">{loading ? t("panel.journal.loading", { defaultValue: "翻开日记本…" }) : ""}</div>
   }
@@ -416,6 +483,7 @@ function JournalShelf(props: {
           </button>
         )
       })}
+      {stack}
     </div>
   )
 }
@@ -436,8 +504,11 @@ function JournalBook(props: {
   onBack: () => void
   onPrev: () => void
   onNext: () => void
+  // 藏书阁模式（1.3.0）：题签换口径——同一套纸，两处出身（页眉页码/日期/心情照常，
+  // 都是存储里现成的事实）
+  archiveLabel?: string
 }) {
-  const { t, page, position, totalPages, hasPrev, hasNext, onBack, onPrev, onNext } = props
+  const { t, page, position, totalPages, hasPrev, hasNext, onBack, onPrev, onNext, archiveLabel } = props
   const sheets = (page.entries || []).map((entry, idx) => ({
     key: String(entry.ts || idx),
     when: fmtTs(entry.ts),
@@ -456,7 +527,7 @@ function JournalBook(props: {
     <div className="tmb-book">
       <div className="tmb-book-strip">
         <span className="tmb-book-stitch" />
-        <span className="tmb-book-title">{t("panel.journal.spineTitle", { defaultValue: "她的日记" })}</span>
+        <span className="tmb-book-title">{archiveLabel || t("panel.journal.spineTitle", { defaultValue: "她的日记" })}</span>
       </div>
       <div className="tmb-page">
         <span className="tmb-ribbon" />
@@ -721,6 +792,34 @@ function shelfTip(t: TFunc, no: number, range: string, trend: string): string {
   if (range) parts.push(range)
   if (trend) parts.push(trend)
   return parts.join(" · ")
+}
+
+// 藏书阁的合订本（1.3.0）：书架末尾横叠的一小摞——下架的旧页都在这儿，只读翻阅。
+// 不标本数、不提 52 上限（1.3.0 显示层纪律：不在活架上加计数）；悬停只给时段事实
+function ArchiveStack(props: {
+  t: TFunc
+  brief: JournalArchiveBrief
+  loading: boolean
+  onOpen: () => void
+}) {
+  const { t, brief, loading, onOpen } = props
+  const from = String(brief.first_ts || "").slice(0, 10)
+  const to = String(brief.last_ts || "").slice(0, 10)
+  const tip = [
+    t("panel.journal.archiveTip", { defaultValue: "写满下架的旧页，合订在这一摞里——点开只读翻阅" }),
+    from ? `${from} – ${to || "?"}` : "",
+    loading ? t("panel.journal.archiveLoading", { defaultValue: "取合订本…" }) : "",
+  ].filter((p) => p).join(" · ")
+  return (
+    <button type="button" className="tmb-stack" title={tip} onClick={onOpen}>
+      <span className="tmb-stack-slab tmb-stack-slab--back" />
+      <span className="tmb-stack-slab tmb-stack-slab--mid" />
+      <span className="tmb-stack-slab tmb-stack-slab--top">
+        <span className="tmb-stack-seal">{t("panel.journal.archiveSeal", { defaultValue: "藏" })}</span>
+        <span className="tmb-stack-ribbon" />
+      </span>
+    </button>
+  )
 }
 
 // 悬停说明（我的日记）：成文日 · 统计区间 · 互动轮数——全部取存储里现成的值，

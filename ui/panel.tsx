@@ -406,6 +406,18 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     }
   }
 
+  // 藏书阁（1.3.0）：合订本全量按需拉取（淘汰低频，点开那一次拉齐即可）
+  async function onLoadJournalArchive() {
+    try {
+      const payload = unwrapCallResult(await props.api.call("get_journal_archive", {}))
+      const pages = (payload as Record<string, any>)?.pages
+      return Array.isArray(pages) ? (pages as JournalPage[]) : []
+    } catch (err) {
+      console.warn("[forever_companion] load journal archive failed:", err)
+      return []
+    }
+  }
+
   async function onLoadMoreDiary(offset: number) {
     try {
       const payload = unwrapCallResult(await props.api.call("get_diary", { limit: 50, offset }))
@@ -793,12 +805,14 @@ export default function Panel(props: PluginSurfaceProps<State>) {
               diaryTotal={state.diary_total || 0}
               fragmentTotal={state.fragment_total || 0}
               journalIndex={state.journal_index || []}
+              journalArchiveBrief={state.journal_archive_brief}
               invitePending={!!state.journal_invite_pending}
               lanlan={state.lanlan}
               reviewBrief={state.review_brief}
               onClearDiary={onClearDiary}
               onDeleteFragment={onDeleteFragment}
               onLoadJournal={onLoadJournal}
+              onLoadJournalArchive={onLoadJournalArchive}
               onLoadMoreDiary={onLoadMoreDiary}
               onInviteJournal={onInviteJournal}
               onLoadReview={onLoadReview}

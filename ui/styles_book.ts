@@ -432,6 +432,56 @@ export const BOOK_STYLES = `
 .tmb-meter-track { height: 5px; border-radius: 1px; background: rgba(72, 86, 104, 0.18); box-shadow: inset 0 1px 1px rgba(18, 26, 36, 0.18); overflow: hidden; }
 .tmb-meter-fill { height: 100%; background: linear-gradient(90deg, rgba(94, 108, 126, 0.85), rgba(58, 72, 90, 0.9)); }
 
+/* 藏书阁（1.3.0）：书架末尾横叠的一小摞——写满下架的旧页都在这儿，只读翻阅。
+   不标本数、不提 52 上限（显示层纪律：不在活架上加计数）；布面取书脊同族
+   色系但压暗两档——收起来的旧时光不该比活页抢眼；三块板微错位堆叠，
+   坐在同一根木隔板上（.tmb-shelf 的 align-items: flex-end 负责兑底） */
+.tmb-stack {
+  position: relative; flex: 0 0 auto;
+  width: 58px; height: 46px; margin-left: 16px;
+  border: 0; padding: 0; background: none; cursor: pointer;
+}
+.tmb-stack-slab {
+  position: absolute; left: 2px; right: 2px; bottom: 0;
+  height: 13px; border-radius: 2px 3px 3px 2px;
+  background: linear-gradient(180deg, rgba(107, 79, 54, 0.92) 0%, rgba(74, 53, 36, 0.95) 62%, rgba(56, 39, 25, 0.96) 100%);
+  border: 1px solid rgba(58, 42, 24, 0.44);
+  box-shadow: 0 2px 5px rgba(70, 50, 28, 0.26), inset 0 1px 0 rgba(255, 246, 226, 0.12);
+}
+.tmb-stack-slab--back { left: 6px; right: -2px; transform: rotate(-0.7deg); }
+.tmb-stack-slab--mid { bottom: 11px; left: 3px; right: 5px; transform: rotate(0.5deg); }
+.tmb-stack-slab--top {
+  bottom: 22px; left: 4px; right: 3px;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.tmb-stack:hover .tmb-stack-slab--top { transform: translateY(-3px) rotate(-0.8deg); box-shadow: 0 5px 10px rgba(70, 50, 28, 0.34), inset 0 1px 0 rgba(255, 246, 226, 0.16); }
+/* 切口一侧的纸口线：三板各画一道，读出“这里是一探书，不是一块砖” */
+.tmb-stack-slab::before {
+  content: ""; position: absolute; left: 3px; right: 3px; top: 50%;
+  height: 3px; border-radius: 1px;
+  background: linear-gradient(180deg, rgba(248, 242, 227, 0.85), rgba(228, 216, 190, 0.7));
+  box-shadow: inset 0 0 0 1px rgba(120, 102, 68, 0.18);
+}
+/* 封面题签：一枚朱色小印，里面一个“藏”字（盖章位子在书摞右上角） */
+.tmb-stack-seal {
+  position: absolute; right: 5px; top: -3px; z-index: 2;
+  width: 16px; height: 16px; border-radius: 3px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--tmb-seal);
+  color: #f6efe0; font-size: 10px; line-height: 1;
+  font-family: var(--tmb-kai);
+  box-shadow: 0 1px 3px rgba(40, 20, 10, 0.4), inset 0 0 0 1px rgba(255, 246, 226, 0.22);
+  transform: rotate(-4deg);
+}
+/* 丝带从书摞里探出来，搭在隔板沿上 */
+.tmb-stack-ribbon {
+  position: absolute; left: 10px; top: 10px; z-index: 1;
+  width: 7px; height: 20px;
+  background: linear-gradient(180deg, var(--tmb-ribbon), rgba(120, 40, 34, 0.9));
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%);
+  box-shadow: 0 1px 2px rgba(40, 20, 10, 0.35);
+}
+
 /* ============================================================
    4. 暗色孪生：一间屋子里的一盏灯——手写本偏暖褐，卷宗偏冷灰
    ============================================================ */
@@ -490,6 +540,9 @@ export const BOOK_STYLES = `
   .tmb-meter-row { color: rgba(195, 207, 221, 0.95); }
   .tmb-text--lead::first-letter { color: rgba(214, 184, 128, 0.95); }
   .tmb-page-body::before { background: linear-gradient(90deg, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.34)); }
+  .tmb-stack-slab { background: linear-gradient(180deg, rgba(76, 56, 38, 0.95) 0%, rgba(52, 37, 24, 0.96) 62%, rgba(36, 25, 15, 0.98) 100%); border-color: rgba(14, 10, 4, 0.55); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 246, 226, 0.08); }
+  .tmb-stack-slab::before { background: linear-gradient(180deg, rgba(214, 198, 166, 0.5), rgba(180, 164, 134, 0.4)); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.3); }
+  .tmb-stack-seal { color: #f2e8d5; }
 }
 
 /* ============================================================
@@ -516,5 +569,6 @@ export const BOOK_STYLES = `
 @media (prefers-reduced-motion: reduce) {
   .tmb-spine, .tmb-spine:hover, .tmb-btn, .tmb-btn:hover:not(:disabled) { transform: none !important; transition: none !important; }
   .tmb-entry:nth-child(even), .tmb-entry:nth-child(odd) { transform: none !important; }
+  .tmb-stack-slab, .tmb-stack-slab--top, .tmb-stack:hover .tmb-stack-slab--top { transform: none !important; transition: none !important; }
 }
 `

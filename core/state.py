@@ -80,6 +80,15 @@ def _journal_key(lanlan: str) -> str:
     return f"journal@{lanlan}"
 
 
+def _journal_archive_key(lanlan: str) -> str:
+    """藏书阁（1.3.0）：个人日记写满 52 页后被淘汰的旧页合订本。
+
+    只追加、不入 journal@ 当前书 blob——避免每次落笔重写整块；
+    时间正序（最旧在前），新页永远追加在末尾。
+    """
+    return f"journal_archive@{lanlan}"
+
+
 def _caps_key(lanlan: str) -> str:
     """能力否决集（1.2.7 能力中心）：按角色分片；{cap_id: true} 表示被用户关闭。
 
@@ -232,6 +241,10 @@ _FRAGMENT_NOTE_MAX_CHARS = 60
 _JOURNAL_PAGE_MAX_ENTRIES = 8
 # 日记本总页数上限：超出淘汰最旧一页（约一年的周更体量），避免 Store 无界增长
 _JOURNAL_MAX_PAGES = 52
+# 藏书阁上限（1.3.0）：活架淘汰出来的页进合订本，阁内再满才从最旧一页真删
+# （翻阅按“距最近一本”倒计数，删旧不挪位）；与上限 52 同量级取 2×，
+# 约四年的周更体量；上限内单键 blob 仍远小于写成本敏感区
+_JOURNAL_ARCHIVE_MAX_PAGES = 104
 # 单条日记正文的截断长度（0.7.1 起结构化四字段拼装，放宽到 900）
 _JOURNAL_ENTRY_MAX_CHARS = 900
 # 邀请节奏（[journal].interval_days 可覆盖）与邀请节流（内存，per-shard）
@@ -475,6 +488,7 @@ class _LanlanShard:
         "mood",
         "diary",
         "journal",
+        "journal_archive",
         "review_stats",
         "review",
         "stats",
@@ -510,6 +524,9 @@ class _LanlanShard:
         self.mood = _MoodState()
         self.diary: list[JsonObject] = []
         self.journal: list[JsonObject] = []
+        # 藏书阁（1.3.0）：活架淘汰下来的旧页只追加进独立键 journal_archive@，
+        # 不随当前书 blob 重写；面板书架末尾的横放合订本即此列表（只读翻阅）
+        self.journal_archive: list[JsonObject] = []
         # 我的日记（0.8.0）：review_stats = 成文素材统计（随写随存，成文后清零
         # 重新累计，见 review.py）；review = 已成文的评价篇目（时间正序列表）
         self.review_stats: JsonObject = {}

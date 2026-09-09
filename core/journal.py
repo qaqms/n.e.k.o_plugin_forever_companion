@@ -1,6 +1,7 @@
-"""永远的陪伴 —— 个人日记（书页式）的纯逻辑：续写/翻页/淘汰、邀请节奏、旧周记迁移。
+"""永远的陪伴 —— 个人日记（书页式）的纯逻辑：续写/翻页/淘汰入阁、邀请节奏、旧周记迁移。
 
-不持有状态、不做 IO：输入页列表，输出新列表与元信息，由主类落盘。
+不持有状态、不做 IO：输入页列表，输出新列表与元信息（含被淘汰页，由调用方
+append 进藏书阁 journal_archive@，1.3.0），由主类落盘。
 0.7.0 替代原 weekly.py（潮汐周记）：周记是一次性的"小结条目"，个人日记是
 **连续的书**——她每写一次都接在某一页上（续写或翻新页），页眉带这段时间的
 心情走向，只给用户翻看、不注入她的上下文。
@@ -75,14 +76,16 @@ def journal_write(
     *,
     now: datetime | None = None,
     affect: float | None = None,
-) -> tuple[list[JsonObject], int, str]:
-    """写一篇日记（纯函数）：续写当前页或翻新页，返回 (新页列表, 页码, 续写衔接句)。
+) -> tuple[list[JsonObject], int, str, list[JsonObject]]:
+    """写一篇日记（纯函数）：续写当前页或翻新页，返回 (新页列表, 页码, 续写衔接句, 被淘汰页)。
 
     - 当前页不存在/写满/显式 new_page → 翻新页（页码 = 上一页 + 1，起始时间 = now）；
     - 续写衔接句（previous_lines）= 写入前目标页最后两段的正文（换行拼接，各截 160 字），
       翻新页时回落到上一页最后一段——供工具结果带回，让她自然接上上次写到哪；
       空日记本返回空串；
-    - 页数超上限时淘汰最旧一页（约一年的周更体量，见 _JOURNAL_MAX_PAGES）。
+    - 页数超上限时淘汰最旧一页（约一年的周更体量，见 _JOURNAL_MAX_PAGES）；
+      被淘汰页随返回值带出（evicted，时间正序），由调用方 append 进藏书阁
+      （journal_archive@，1.3.0）——淘汰不再是静默的丢，而是静默的搬家。
     不 mutate 入参列表（调用方直接把返回值赋回 shard.journal）。
     """
     current = now or _now_utc()
@@ -115,9 +118,11 @@ def journal_write(
     if affect is not None:
         entry["affect"] = round(float(affect), 2)
     new_pages[-1]["entries"].append(entry)
+    evicted: list[JsonObject] = []
     if len(new_pages) > _JOURNAL_MAX_PAGES:
+        evicted = new_pages[:-_JOURNAL_MAX_PAGES]
         new_pages = new_pages[-_JOURNAL_MAX_PAGES:]
-    return new_pages, int(new_pages[-1].get("page_no") or 0), tail
+    return new_pages, int(new_pages[-1].get("page_no") or 0), tail, evicted
 
 
 def _tail_line(entry: JsonObject) -> str:
@@ -174,6 +179,28 @@ def migrate_weekly_to_pages(weekly: list[JsonObject]) -> list[JsonObject]:
             "entries": [{"ts": str(item.get("ts") or ""), "text": text[:_JOURNAL_ENTRY_MAX_CHARS]}],
         })
     return pages
+
+
+def archive_brief(pages: list[JsonObject]) -> JsonObject:
+    """藏书阁概览（纯函数，进 5s 轮询的极轻量载荷）：本数 + 时段。
+
+    只显存储里现成的事实（页起算日 / 末笔时刻），不派生任何会随淘汰平移的序号
+    （1.3.0 显示层纪律）。first_ts = 最旧一页的起始日，last_ts = 最新一页的末笔。
+    """
+    items = [p for p in pages if isinstance(p, dict)]
+    if not items:
+        return {"pages": 0}
+    def _last_ts(page: JsonObject) -> str:
+        entries = page.get("entries")
+        if isinstance(entries, list) and entries and isinstance(entries[-1], dict):
+            return str(entries[-1].get("ts") or "")
+        return ""
+    newest = items[-1]
+    return {
+        "pages": len(items),
+        "first_ts": str(items[0].get("started_at") or ""),
+        "last_ts": _last_ts(newest) or str(newest.get("started_at") or ""),
+    }
 
 
 def page_header(page: JsonObject) -> JsonObject:

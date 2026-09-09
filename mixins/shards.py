@@ -27,6 +27,7 @@ from ..core.onboarding import norm_guide_record
 from ..core.state import (
     _CURRENT_LANLAN_CACHE_TTL,
     _DIARY_MAX_ENTRIES,
+    _JOURNAL_ARCHIVE_MAX_PAGES,
     _JOURNAL_MAX_PAGES,
     _KNOWN_CATGIRLS_CACHE_TTL,
     _STORE_CAPS_GLOBAL,
@@ -40,6 +41,7 @@ from ..core.state import (
     _cfg_section,
     _cycle_key,
     _diary_key,
+    _journal_archive_key,
     _journal_key,
     _LanlanShard,
     _mood_key,
@@ -138,6 +140,12 @@ class ShardsMixin:
                         "weekly reviews migrated to journal pages for {} ({} pages)",
                         lanlan, len(shard.journal),
                     )
+        # 藏书阁（1.3.0）：活架淘汰下来的旧页合订本，只读翻阅；与 journal@ 同法载入
+        archive_res = await self._store_read(_journal_archive_key(lanlan))
+        if isinstance(archive_res, Ok) and isinstance(archive_res.value, list):
+            shard.journal_archive = [
+                dict(item) for item in archive_res.value if isinstance(item, dict)
+            ]
         # 我的日记（0.8.0）：已成文篇目 + 累计中的素材统计合并存一个 key
         #（成文时篇目追加与 stats 清零原子地一次写入；独立 stats key 仅作
         # 旧数据兼容读取，不再写入）
@@ -693,10 +701,46 @@ class ShardsMixin:
         return await self._save_shard_diary(name, self._get_shard(name))
 
     async def _save_shard_journal(self, lanlan: str, shard: _LanlanShard) -> Result[None]:
-        # 与手记同一截断语义：内存与落盘都只保留最近 _JOURNAL_MAX_PAGES 页
+        # 与手记同一截断语义：内存与落盘都只保留最近 _JOURNAL_MAX_PAGES 页。
+        # 1.3.0 藏书阁：截断掉的溢出页不再静默丢弃，先 append 进合订本再写书 blob
+        # （工具路径的淘汰页由 journal_write 返回值带出、调用点另行入阁；这里兜住
+        # 旧版磁盘残留 / 迁移超长等一切截断路径）
+        overflow: list[JsonObject] = []
+        if len(shard.journal) > _JOURNAL_MAX_PAGES:
+            overflow = shard.journal[:-_JOURNAL_MAX_PAGES]
         shard.journal = list(shard.journal[-_JOURNAL_MAX_PAGES:])
-        return await self._store_write(
+        res_journal = await self._store_write(
             _journal_key(lanlan), list(shard.journal), f"journal for {lanlan}",
+        )
+        if not overflow:
+            return res_journal
+        res_archive = await self._append_journal_archive(lanlan, shard, overflow)
+        if isinstance(res_journal, Err):
+            return res_journal
+        return res_archive
+
+    async def _append_journal_archive(
+        self, lanlan: str, shard: _LanlanShard, pages: list[JsonObject]
+    ) -> Result[None]:
+        """藏书阁追加（1.3.0）：把淘汰页按时间正序 append 进 journal_archive@ 并落盘。
+
+        阁内再满才从最旧一页真删（翻阅按“距最近一本”倒计数，删旧不挪位）；
+        空入参不碰存储（零淘汰的常态写入不多花一次写）。只追加、不进当前书 blob
+        ——写日记的热路径永远只重写 52 页那一块，阁 blob 只在淘汰那一拍重写。
+        """
+        if not pages:
+            return Ok(None)
+        for page in pages:
+            if isinstance(page, dict):
+                shard.journal_archive.append(
+                    {**dict(page), "entries": list(page.get("entries") or [])}
+                )
+        if len(shard.journal_archive) > _JOURNAL_ARCHIVE_MAX_PAGES:
+            shard.journal_archive = shard.journal_archive[-_JOURNAL_ARCHIVE_MAX_PAGES:]
+        return await self._store_write(
+            _journal_archive_key(lanlan),
+            list(shard.journal_archive),
+            f"journal archive for {lanlan}",
         )
 
     async def _save_shard_review(self, lanlan: str, shard: _LanlanShard) -> Result[None]:
