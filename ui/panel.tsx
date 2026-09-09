@@ -45,6 +45,24 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   // 默认页签 = 总览；useLocalState 的旧持久化值（0.9.0 前可能是 calendar 等）
   // 会被 VALID_TABS 校验兜回 overview，但初值本身也要指向 overview
   const [tab, setTab] = useLocalState<string>("tide.tab", "overview")
+  // 内容区（右侧主页面）滚动条静默化（1.2.9）：默认完全透明看不见，仅两种
+  // 时刻浮现——① 鼠标落入右缘滚动条位（:hover 命不中槽区，onPointerMove
+  // 判距 ≤16px 切 hot）；② 正在滚动（onScroll 续命，停 900ms 后归静）。
+  // 拖动滑块时 pointermove 不进元素、hot 会掉，但拖动即滚动，onScroll 接棒。
+  const [contentHot, setContentHot] = useState(false)
+  const [contentScrolling, setContentScrolling] = useState(false)
+  const scrollIdleRef = useRef<any>(null)
+  const markContentScrolling = () => {
+    setContentScrolling(true)
+    if (scrollIdleRef.current) clearTimeout(scrollIdleRef.current)
+    scrollIdleRef.current = setTimeout(() => setContentScrolling(false), 900)
+  }
+  useEffect(
+    () => () => {
+      if (scrollIdleRef.current) clearTimeout(scrollIdleRef.current)
+    },
+    []
+  )
   // 首次向导（1.2.6）：本会话关闭闸门——服务端 wizard_pending 要等下一次 5s
   // 轮询才翻转，关闭后到翻转前的窗口全靠这个本地闸不重现
   const [wizardClosed, setWizardClosed] = useState(false)
@@ -693,6 +711,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
               type="button"
               className={activeTab === item.id ? "tm-tab tm-tab-active" : "tm-tab"}
               onClick={() => setTab(item.id)}
+              title={item.label}
             >
               <span className={`tm-ico tm-ico-${item.id}`} />
               <span>{item.label}</span>
@@ -700,7 +719,17 @@ export default function Panel(props: PluginSurfaceProps<State>) {
           ))}
         </nav>
 
-        <div className="tm-content" key={activeTab}>
+        <div
+          className={contentHot || contentScrolling ? "tm-content tm-content-hot" : "tm-content"}
+          key={activeTab}
+          onScroll={markContentScrolling}
+          onPointerMove={(e: any) => {
+            const rect = e.currentTarget.getBoundingClientRect()
+            const near = rect.right - e.clientX <= 16
+            if (near !== contentHot) setContentHot(near)
+          }}
+          onPointerLeave={() => setContentHot(false)}
+        >
           {activeTab === "overview" ? (
             <OverviewPane
               t={t}

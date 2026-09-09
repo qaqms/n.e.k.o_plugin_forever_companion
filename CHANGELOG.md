@@ -699,3 +699,27 @@ zh-CN / en i18n
   合法性校验，同步保序避免误导）；内容区为 `activeTab` 独立条件渲染，
   onboarding/guidecard 与文档均无页签顺序硬编码，i18n key 不随序变化。
 - **验证**：pytest 363 全绿（含 hosted 链接门）。
+
+
+### 1.2.9：小窗滚动可用性（用户反馈三轮收敛）
+
+- **左侧导航可滚**：宿主插件详情窗口高度不足时 shell（100vh+overflow:hidden）
+  把末页页签物理裁掉且无从触达——`.tm-tabs` 改 `overflow-y: auto` +
+  `overscroll-behavior: contain`，滚动条本体彻底隐藏（用户终稿反馈：看得见
+  不如纯滚动手感舒服；历经常驻细条→悬停浮现→无条纯滚三版，注释留痕防回退），
+  `scrollbar-width:none` 不占 gutter、侧栏宽度零损失
+- **内容区滚动条静默化**：`.tm-content` 竖条默认全透明，仅两种时刻浮现——
+  鼠标落入右缘 16px 命中带（`:hover` 命不中滚动条槽，panel.tsx
+  `onPointerMove` 判距切 `tm-content-hot`），或正在滚动（`onScroll` 续命，
+  停 900ms 归静；拖动滑块时 pointermove 不进元素但拖动即滚动，onScroll 接棒）。
+  槽 8px 恒占位防浮现抽动；卸载清 scroll timer
+- **日历页横向条根因修复（用户反馈）**：两坑叠加——①`scrollbar-color:
+  transparent transparent` 触发 Chromium「设非 auto 即整体屏蔽
+  ::-webkit-scrollbar 定制」，垂直条退回 ~17px 经典宽挤窄内容区；②只写
+  `overflow-y:auto` 时 `overflow-x` 的 visible 连坐按 auto 计算，
+  `tm-slide-in` 的 translateX(12px)/`repeat(7,1fr)` min-content 不收缩等
+  几 px 溢出即弹横条。修法：删 scrollbar-color 改纯 webkit 单轨、内容区显式
+  `overflow-x: hidden`（全站纵向流式布局，无合法横滚需求）、日历网格
+  `repeat(7, minmax(0,1fr))` 治本。两坑写入注释防复发
+- **验证**：pytest 363 全绿（含 hosted 链接门）；构建包抽查三项（横滚封死/
+  无 color 陷阱/网格 minmax）全过

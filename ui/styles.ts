@@ -332,7 +332,16 @@ export const PANEL_STYLES = `
   background: rgba(255, 255, 255, 0.42);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
+  /* 小窗滚动（终态）：宿主插件详情窗口高度不够时，shell（100vh +
+     overflow:hidden）会把末页页签裁掉且无从触达——导航栏自身可滚即可。
+     滚动条本体彻底隐藏（用户反馈：看得见反而不如纯滚动手感舒服），
+     滚轮/触控板/拖滑块照常；scrollbar-width:none 不占 gutter，侧栏宽度
+     不被吃。历经三版演进：常驻细条→悬停浮现（:hover 命不中槽、改 pointer
+     右缘命中带）→无条纯滚，停在这版别再回头 */
+  overflow-y: auto; overscroll-behavior: contain;
+  scrollbar-width: none;
 }
+.tm-tabs::-webkit-scrollbar { width: 0; height: 0; display: none; }
 .tm-tab {
   display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 8px;
   border: 1px solid transparent; border-radius: var(--radius-md); background: transparent;
@@ -350,7 +359,24 @@ export const PANEL_STYLES = `
 .tm-tab:hover .tm-ico { opacity: 0.9; }
 .tm-tab-active .tm-ico { opacity: 1; }
 
-.tm-content { flex: 1; min-width: 0; overflow-y: auto; padding: 16px 18px; }
+.tm-content {
+  flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden; padding: 16px 18px;
+  /* 滚动条静默化（panel.tsx contentHot/contentScrolling）：槽 8px 恒占位
+     避免浮现抽动，轨道/滑块默认全透明即隐形；.tm-content-hot（悬停槽位
+     或滚动中）才着色。
+     ⚠两坑：①不用 scrollbar-color/scrollbar-width 非 auto 值——Chromium 下一
+     设它们就整体屏蔽 ::-webkit-scrollbar 定制，垂直条退回 ~17px 经典宽吃宽度；
+     ②overflow-x 必须显式 hidden——overflow-y:auto 会把 visible 的 overflow-x
+     连坐成 auto，入场动画 translateX/1fr min-content 等几 px 瞬时溢出都会弹
+     横向条（日历页反馈同因）。全站无任何需要横滚的内容（热力图也是自适应
+     禁滚），物理封掉无副作用 */
+}
+.tm-content::-webkit-scrollbar { width: 8px; }
+.tm-content::-webkit-scrollbar-track { background: transparent; }
+.tm-content::-webkit-scrollbar-thumb { background: transparent; border-radius: 999px; }
+.tm-content-hot::-webkit-scrollbar-thumb { background: rgba(100, 116, 139, 0.4); }
+.tm-content::-webkit-scrollbar-thumb:hover { background: rgba(100, 116, 139, 0.6); }
+
 .tm-pane { display: grid; gap: 12px; align-content: start; animation: tm-pane-in 280ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
 
 .tm-card-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px 0; }
@@ -368,7 +394,7 @@ export const PANEL_STYLES = `
 
 .tm-cal-nav { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .tm-cal-label { font-weight: 650; }
-.tm-cal-head, .tm-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.tm-cal-head, .tm-cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; } /* minmax(0,1fr)：1fr 隐式最小 auto 不收缩到 min-content 以下，小窗撞线 */
 .tm-cal-wd { color: var(--muted); font-size: 12px; text-align: center; padding: 2px 0; }
 .tm-cal-cell {
   padding: 4px 0; text-align: center; border-radius: var(--radius-sm); font-size: 13px;
