@@ -636,7 +636,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     }
   }
 
-  const VALID_TABS = ["overview", "calendar", "cycle", "mood", "diary", "moment", "features", "settings"]
+  const VALID_TABS = ["overview", "calendar", "diary", "moment", "features", "cycle", "mood", "settings"]
   const activeTab = VALID_TABS.indexOf(tab) >= 0 ? tab : "overview"
 
   // 面板始终跟随宿主当前角色（5 秒轮询自动跟上切卡），lanlan_list 提供全部已知角色的状态摘要
@@ -646,11 +646,11 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   const tabs = [
     { id: "overview", label: t("panel.tab.overview", { defaultValue: "总览" }) },
     { id: "calendar", label: t("panel.tab.calendar", { defaultValue: "日历" }) },
-    { id: "cycle", label: t("panel.tab.cycle", { defaultValue: "周期" }) },
-    { id: "mood", label: t("panel.tab.mood", { defaultValue: "情绪" }) },
     { id: "diary", label: t("panel.tab.diary", { defaultValue: "日记" }) },
     { id: "moment", label: t("panel.tab.moment", { defaultValue: "时光" }) },
     { id: "features", label: t("panel.tab.features", { defaultValue: "功能" }) },
+    { id: "cycle", label: t("panel.tab.cycle", { defaultValue: "周期" }) },
+    { id: "mood", label: t("panel.tab.mood", { defaultValue: "情绪" }) },
     { id: "settings", label: t("panel.tab.settings", { defaultValue: "设置" }) },
   ]
 
