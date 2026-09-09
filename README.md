@@ -458,6 +458,7 @@ Plugin Manager → 永远的陪伴：
 | 注入频控/计数（interval_n） | 连续调 `debug_simulate_user_message`，看返回的 `message_counter` 与 `injected` |
 | 工具重注册韧性 | 重启 main_server 后调 `debug_check_tools`，不用等 5 分钟；返回在位/缺失/是否当场重注册 |
 | 个人日记资格与邀请 | `debug_journal` 返回当前资格判定（due/reason/页数）；`debug_journal(force=true)` 立即推一次邀请（1.2.4 起真会跳过 7 天节奏闸；此前这一档仍受节奏限制，刚写过日记的机器上静默不递），观察她是否调 `mood_journal_write` 写日记（面板日记 tab 可见）；返回里的 `deliver` 回显投递方式（respond 当面递到 / read 补递 / failed 通道拒收） |
+| 藏书阁（合订本） | `debug_journal_fill` 把活架垫到写满 52 页并连翻 3 页，**走生产淘汰链路**把假页搬进合订本——面板书架末尾当场出现横放书摞，点开只读翻阅（假页带 demo 标记、四栏小标题与四档心情色，分节/首字下沉/脊皮色一次验齐）；`pages=N` 可控翻页数；真实日记与阁数据注入前整包备份，测完 `restore=true` 一键还原 |
 | 时光日记碎片捕获 | `debug_capture_fragment` 立即对最近一轮做碎片提取（绕过水位/间隔门控），返回原话/解析结果/是否落盘；先确认碎片槽位在宿主已配模型 |
 | 语气感知全链路 | `debug_emotion_sense` 立即分析最近一轮互动（绕过水位/概率/节流），返回 label/置信度/生效阈值/命中分支；先看宿主情感模型是否配置（未配则功能休眠） |
 | 我的日记素材与成文 | `debug_review` 返回素材统计（轮数/语气分布/动作事件/碎片数）与双门槛资格；`debug_review(force=true)` 立即成文一篇（素材不足仍拒绝），面板日记页「我的日记」页签可见；先确认成文槽位在宿主已配模型 |

@@ -18,14 +18,22 @@ from typing import Any
 from plugin.sdk.plugin import Err, Ok, SdkError
 
 from ..core.fragments import build_fragment_prompt, parse_fragment_response
-from ..core.journal import journal_due
+from ..core.journal import (
+    archive_brief,
+    fabricate_demo_pages,
+    journal_due,
+    journal_write,
+)
 from ..core.review import review_due
 from ..core.state import (
     _FRAGMENT_DEFAULT_CONFIDENCE,
     _FRAGMENT_DEFAULT_SLOT,
     _JOURNAL_DEFAULT_INTERVAL_DAYS,
+    _JOURNAL_MAX_PAGES,
     _TIMED_ACTIONS,
     _TONE_COLD_LABELS,
+    _journal_archive_key,
+    _journal_key,
     _LanlanShard,
     _stats_key,
 )
@@ -132,6 +140,19 @@ class DebugEntriesMixin:
                 "type": "object",
                 "properties": {
                     "force": {"type": "boolean", "description": "true = 清零 24h 节流并立即推一次邀请（默认 false）"},
+                    **_DEBUG_LANLAN_PROP,
+                },
+            },
+        ),
+        (
+            "debug_journal_fill",
+            "调试：藏书阁假书架注入/还原",
+            "用确定性假页把个人日记活架垫到写满，再连翻数页走生产淘汰链路入阁——面板书架末尾的横放合订本当场出现；真实日记与阁数据先备份，restore=true 一键还原。",
+            {
+                "type": "object",
+                "properties": {
+                    "restore": {"type": "boolean", "description": "true = 从备份还原真实日记与合订本（默认 false = 注入）"},
+                    "pages": {"type": "integer", "description": "注入后再翻几页触发淘汰（默认 3，上限 8；每翻一页挤下最旧一页）"},
                     **_DEBUG_LANLAN_PROP,
                 },
             },
@@ -329,6 +350,90 @@ class DebugEntriesMixin:
                 "空=开关未开，failed=传输拒收）。"
             )
         return Ok(payload)
+
+    async def _debug_journal_fill(
+        self, restore: bool = False, pages: int = 3, lanlan: str = "", **_: Any
+    ):
+        """藏书阁秒级验证（1.3.0 第二轮）：垫满活架→真翻页→生产链路淘汰入阁。
+
+        注入档：真实 journal@/journal_archive@ 先整包备份到 |pre-debug 键（首次
+        才备，连续注入不覆盖最早备份），再把 52 页确定性假页垫上活架，连翻
+        pages 页走 **生产 journal_write 路径**（新页按页码递增、淘汰页经
+        _append_journal_archive 落盘）——验的是真链路，不是面板假渲染。
+        restore 档：两本整包还原 + 清备份。只动当前角色的日记两键，周期/情绪/
+        时光日记/统计一概不碰（debug_stats 同款纪律）。
+        """
+        name, shard = await self._debug_target_shard(lanlan)
+        backup_key = f"{_journal_key(name)}|pre-debug"
+        if restore:
+            backup = await self.store.get(backup_key)
+            if isinstance(backup, Err) or not isinstance(backup.value, dict):
+                return Ok({"restored": False, "lanlan": name, "note": "没有可还原的备份（从未注入过）。"})
+            raw_j = backup.value.get("journal")
+            raw_a = backup.value.get("archive")
+            shard.journal = [
+                dict(item) for item in (raw_j if isinstance(raw_j, list) else []) if isinstance(item, dict)
+            ]
+            shard.journal_archive = [
+                dict(item) for item in (raw_a if isinstance(raw_a, list) else []) if isinstance(item, dict)
+            ]
+            res_journal = await self._save_shard_journal(name, shard)
+            res_archive = await self._store_write(
+                _journal_archive_key(name), list(shard.journal_archive), f"journal archive for {name}",
+            )
+            await self.store.set(backup_key, None)
+            self.logger.info("debug journal fill restored for {}", name)
+            persist_err = self._persist_error(res_journal, res_archive)
+            if persist_err is not None:
+                return persist_err
+            return Ok({
+                "restored": True,
+                "lanlan": name,
+                "note": "真实日记与合订本已还原，备份已清除。",
+                **self._debug_journal_fill_brief(shard),
+            })
+        flip = max(1, min(int(pages or 3), 8))
+        backup = await self.store.get(backup_key)
+        if not isinstance(backup, Err) and backup.value is None:
+            saved = await self.store.set(
+                backup_key,
+                {"journal": list(shard.journal), "archive": list(shard.journal_archive)},
+            )
+            if isinstance(saved, Err):
+                return Err(SdkError("备份真实数据失败，已中止注入"))
+        demo = fabricate_demo_pages(_JOURNAL_MAX_PAGES)
+        evicted_all: list[JsonObject] = []
+        last_no = 0
+        for i in range(flip):
+            demo, last_no, _, evicted = journal_write(
+                demo, f"【这段时间】调试翻页 {i + 1}：活架写满后被挤下的那一页，会原样出现在藏书阁合订本里。",
+                True, affect=0.2,
+            )
+            evicted_all.extend(evicted)
+        shard.journal = demo
+        res_journal = await self._save_shard_journal(name, shard)
+        res_archive = await self._append_journal_archive(name, shard, evicted_all)
+        self.logger.info(
+            "debug journal fill seeded for {} (flipped {}, archived {})", name, flip, len(evicted_all),
+        )
+        persist_err = self._persist_error(res_journal, res_archive)
+        if persist_err is not None:
+            return persist_err
+        return Ok({
+            "seeded": True,
+            "lanlan": name,
+            "flipped": flip,
+            "newest_page_no": last_no,
+            "note": "打开日记页即见写满的书架与末尾横放的合订本（假页带 demo 标记）；测完 restore=true 还原。",
+            **self._debug_journal_fill_brief(shard),
+        })
+
+    def _debug_journal_fill_brief(self, shard: _LanlanShard) -> JsonObject:
+        """debug_journal_fill 回显：活架/藏书阁本数与阁 brief（与面板 journal_archive_brief 同口径）。"""
+        return {
+            "shelf_pages": len(shard.journal),
+            "archive": archive_brief(shard.journal_archive),
+        }
 
     async def _debug_capture_fragment(self, lanlan: str = "", **_: Any):
         """立即对最近一轮用户消息做碎片提取（绕过水位/间隔门控），返回全链路细节。"""

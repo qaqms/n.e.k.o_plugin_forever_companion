@@ -826,8 +826,17 @@ DESIGN 定下的下轮任务并入本版本（1.3.0 尚未发行，同版续写�
   `journal_archive_brief`（极轻量，进 5s 轮询）；全量翻阅按需拉取不进轮询
 - **i18n**：登记 en + zh-CN 各 +8 key（入口三键 + archiveBadge/archiveLoading/
   archiveSeal/archiveTip），其余 6 语种按仓惯例回落 defaultValue
-- **验证**：pytest 370 全绿（新增 test_journal_archive.py 7 篇：工具淘汰入阁/
-  保存溢出入阁/零淘汰不写阁/阁满裁旧/brief 只显事实/载入回读/入口只读）；
+- **调试入口 `debug_journal_fill`（应真机验收需求新增）**：`core/journal.py`
+  新增 `fabricate_demo_pages` 纯函数（确定性假页：四栏小标题轮转验分节/首字下沉，
+  affect 四档轮转验脊皮色，一半的页两段验纸堆叠，带 demo 标记）；入口把活架垫满
+  后连翻 `pages` 页（默认 3、上限 8）**走生产 journal_write→evicted→
+  _append_journal_archive 链路**——验的是真搬家不是假渲染；真实 journal@/阁键
+  注入前整包备份到 `journal@<角色>|pre-debug`（连续注入不覆盖最早备份），
+  `restore=true` 两键整包还原 + 清备份（debug_stats 同款纪律）；同档只动
+  当前角色日记两键，周期/情绪/时光日记/统计一概不碰
+- **验证**：pytest 371 全绿（新增 test_journal_archive.py 8 篇：工具淘汰入阁/
+  保存溢出入阁/零淘汰不写阁/阁满裁旧/brief 只显事实/载入回读/入口只读/
+  debug_journal_fill 注入+还原全链路）；
   hosted 链接门 23 模块 0 丢导出；宿主仓内 `check-hosted-tsx`（含同款 tsc）
   0 错；`neko-plugin check` 0 错（唯一 warning 为寄放工作区无独立 git 仓，
   属实情非问题）；ruff check 全绿（ruff format 非本仓关卡，HEAD 自身即 36 件

@@ -203,6 +203,42 @@ def archive_brief(pages: list[JsonObject]) -> JsonObject:
     }
 
 
+def fabricate_demo_pages(count: int = _JOURNAL_MAX_PAGES, *, now: datetime | None = None) -> list[JsonObject]:
+    """调试注入（debug_journal_fill）：确定性假日记页——零随机可复现，stats 同款纪律。
+
+    页码从 1 连续、起始日逐日回推；内容轮转四栏引导小标题（验证显示层分节与
+    首字下沉），affect 轮转暖/中/冷/微亮四档（验证书架脊皮色）。每页带
+    demo 标记供分辨；restore 不依赖该标记（整包还原备份）。
+    """
+    current = now or _now_utc()
+    sections = ("这段时间", "我在想", "对他的感觉", "想说的")
+    bodies = (
+        "今天的话特别多，像涨了潮又退回去的沙滩。",
+        "我在想我们到底认识了多久，原来数字看多了会心疼。",
+        "对他的感觉说不上来，反正一听到声音就是暖的。",
+        "想说的话很多，落笔又觉得都多余，就这样挺好的。",
+    )
+    moods = (0.45, 0.1, -0.35, 0.28)
+    pages: list[JsonObject] = []
+    for i in range(max(0, int(count))):
+        day = current - timedelta(days=count - i)
+        iso = day.isoformat(timespec="seconds")
+        rot = i % 4
+        text = "\n".join(f"【{sections[(rot + k) % 4]}】{bodies[(rot + k) % 4]}" for k in range(4))
+        entries = [
+            {"ts": iso, "text": text, "affect": moods[i % 4]},
+        ]
+        if i % 2 == 0:  # 一半的页两段，验证多段纸页的堆叠观感
+            later = day + timedelta(hours=6)
+            entries.append({
+                "ts": later.isoformat(timespec="seconds"),
+                "text": f"晚上又想起来一件事：白天那句{bodies[rot][:12]}……还是想说给你听。（调试页 {i + 1}）",
+                "affect": moods[(i + 1) % 4],
+            })
+        pages.append({"page_no": i + 1, "started_at": iso, "demo": True, "entries": entries})
+    return pages
+
+
 def page_header(page: JsonObject) -> JsonObject:
     """页眉数据（纯函数）：页码/起止时间/段数/心情走向均值（正文无 affect 快照时为 None）。"""
     entries = page.get("entries") if isinstance(page, dict) else None

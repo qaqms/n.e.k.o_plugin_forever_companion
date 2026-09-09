@@ -150,3 +150,36 @@ def test_archive_loaded_with_shard(plugin_factory):
     shard2.loaded = False
     run(p2._ensure_shard("灵"))
     assert [pg["page_no"] for pg in shard2.journal_archive] == [1, 2]
+
+
+# ---------------------------------------------------------------------------
+# 5. 调试入口 debug_journal_fill：注入走生产淘汰链路，restore 整包回滚
+# ---------------------------------------------------------------------------
+
+
+def test_debug_journal_fill_seed_and_restore(tm, plugin_factory):
+    p = plugin_factory()
+    shard = p._get_shard("灵")
+    shard.journal = _pages(1)  # 先垫一页"真实"日记
+    res = run(p._debug_journal_fill(pages=3, lanlan="灵"))
+    assert isinstance(res, tm.Ok), res
+    data = res.value
+    assert data["seeded"] is True and data["flipped"] == 3
+    assert data["shelf_pages"] == 52
+    assert data["archive"]["pages"] == 3
+    assert shard.journal[0]["page_no"] == 4, "翻 3 页应挤下最旧 3 页"
+    assert [pg["page_no"] for pg in shard.journal_archive] == [1, 2, 3]
+    # 注入前状态已整包备份（含从未入阁的空档）
+    backup = p.store.data["journal@灵|pre-debug"]
+    assert [pg["page_no"] for pg in backup["journal"]] == [1]
+    assert backup["archive"] == []
+    # 落盘同步：两键都在盘上
+    assert len(p.store.data["journal@灵"]) == 52
+    assert len(p.store.data["journal_archive@灵"]) == 3
+
+    res2 = run(p._debug_journal_fill(restore=True, lanlan="灵"))
+    assert isinstance(res2, tm.Ok), res2
+    assert res2.value["restored"] is True
+    assert [pg["page_no"] for pg in shard.journal] == [1], "真实日记原样回来"
+    assert shard.journal_archive == []
+    assert p.store.data.get("journal@灵|pre-debug") is None, "还原后备份作废"
