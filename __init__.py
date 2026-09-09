@@ -173,6 +173,9 @@ from .core.journal import (
     assemble_journal_entry as assemble_journal_entry,
 )
 from .core.journal import (
+    fabricate_demo_pages as fabricate_demo_pages,
+)
+from .core.journal import (
     has_journal_content as has_journal_content,
 )
 from .core.journal import (
@@ -210,6 +213,9 @@ from .core.review import (
 )
 from .core.review import (
     can_force_write as can_force_write,
+)
+from .core.review import (
+    fabricate_demo_reviews as fabricate_demo_reviews,
 )
 from .core.review import (
     parse_review_response as parse_review_response,

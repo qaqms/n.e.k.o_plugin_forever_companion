@@ -79,6 +79,60 @@ def test_get_journal_archive_entry(tm, plugin_factory_full):
     assert page["entries"][0]["text"] == "内容0"
 
 
+def test_get_journal_scope_archive_channel(tm, plugin_factory_full):
+    """1.3.0 实机 403 踩坑后的主翻阅通道：get_journal(scope=archive) 与
+    get_journal_archive 同数据（前者走旧入口静态白名单，运行中覆盖导入也可达）。"""
+    p = plugin_factory_full(current_lanlan="灵")
+    shard = p._get_shard("灵")
+    shard.journal = _pages(2, start_no=1)
+    run(p._append_journal_archive("灵", shard, _pages(1)))
+    res = run(p.get_journal(scope="archive"))
+    assert isinstance(res, tm.Ok), res
+    assert res.value["scope"] == "archive"
+    assert [pg["page_no"] for pg in res.value["pages"]] == [1]
+    # 缺省仍翻活架，不串数据
+    res2 = run(p.get_journal())
+    assert isinstance(res2, tm.Ok)
+    assert res2.value["scope"] == "shelf"
+    assert [pg["page_no"] for pg in res2.value["pages"]] == [1, 2]
+
+
+# ---------------------------------------------------------------------------
+# 6. 我的日记调试注入：假卷宗上架/还原（档案架验收用）
+# ---------------------------------------------------------------------------
+
+
+def test_fabricate_demo_reviews_shape(tm):
+    entries = tm.fabricate_demo_reviews(4, now=NOW)
+    assert len(entries) == 4
+    assert [e["ts"] for e in entries] == sorted(e["ts"] for e in entries), "时间正序"
+    assert all(e.get("demo") for e in entries)
+    for e in entries:
+        assert e["turns"] > 0 and "~" in e["span"] and "\n" in e["text"]
+        assert set(e) == {"ts", "turns", "span", "self_action_count", "text", "demo"}
+
+
+def test_debug_review_fill_seed_and_restore(tm, plugin_factory):
+    p = plugin_factory()
+    shard = p._get_shard("灵")
+    real = {"ts": "2026-01-01T00:00:00+00:00", "turns": 3, "span": "", "self_action_count": 0, "text": "真实篇"}
+    shard.review = [dict(real)]
+    shard.review_stats = {"turns": 9}
+    res = run(p._debug_review_fill(entries=4, lanlan="灵"))
+    assert isinstance(res, tm.Ok), res
+    assert res.value["entries_total"] == 4
+    assert all(pg.get("demo") for pg in shard.review)
+    backup = p.store.data["review@灵|pre-debug"]
+    assert backup["entries"][0]["text"] == "真实篇" and backup["stats"]["turns"] == 9
+    assert len(p.store.data["review@灵"]["entries"]) == 4
+
+    res2 = run(p._debug_review_fill(restore=True, lanlan="灵"))
+    assert isinstance(res2, tm.Ok) and res2.value["restored"] is True
+    assert [pg["text"] for pg in shard.review] == ["真实篇"]
+    assert shard.review_stats["turns"] == 9
+    assert p.store.data.get("review@灵|pre-debug") is None
+
+
 # ---------------------------------------------------------------------------
 # 2. 载入/保存路径：溢出截断同样入阁（旧 blob 超长的兜底）
 # ---------------------------------------------------------------------------

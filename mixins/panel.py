@@ -1354,16 +1354,30 @@ class PanelEntriesMixin:
     @plugin_entry(
         id="get_journal",
         name=tr("entries.get_journal.name", default="翻看个人日记"),
-        description=tr("entries.get_journal.description", default="翻看她的个人日记本（全部页，含每页全部段落）。仅作用于当前角色。"),
-        input_schema={"type": "object", "properties": {}},
+        description=tr("entries.get_journal.description", default="翻看她的个人日记本（全部页，含每页全部段落）。scope=archive 时改翻藏书阁合订本。仅作用于当前角色。"),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "scope": {
+                    "type": "string",
+                    "enum": ["", "shelf", "archive"],
+                    "description": "缺省/shelf=当前书架；archive=藏书阁合订本（只读）",
+                },
+            },
+        },
     )
-    async def get_journal(self, **_: Any):
+    async def get_journal(self, scope: str = "", **_: Any):
         lanlan, shard = await self._current_shard_async()
+        # 1.3.0 藏书阁：合订本翻阅默认走本入口的 scope=archive 通道——宿主在
+        # 运行中覆盖导入时不会重扫静态入口白名单，新入口 get_journal_archive
+        # 要整启宿主才可达（实机踩坑，见 README 平台机制节）；两个通道同数据
+        want_archive = str(scope or "").strip().lower() == "archive"
+        source = shard.journal_archive if want_archive else shard.journal
         pages = [
             {**page_header(page), "entries": (page.get("entries") if isinstance(page.get("entries"), list) else [])}
-            for page in shard.journal
+            for page in source
         ]
-        return Ok({"pages": pages, "lanlan": lanlan})
+        return Ok({"pages": pages, "lanlan": lanlan, "scope": "archive" if want_archive else "shelf"})
 
     @ui.action(
         label=tr("actions.get_journal_archive.label", default="翻阅藏书阁合订本"),
@@ -1374,7 +1388,7 @@ class PanelEntriesMixin:
         name=tr("entries.get_journal_archive.name", default="翻阅藏书阁合订本"),
         description=tr(
             "entries.get_journal_archive.description",
-            default="只读翻阅藏书阁：个人日记写满下架的旧页合订本（全部页，含每页全部段落）。仅作用于当前角色。",
+            default="只读翻阅藏书阁：个人日记写满下架的旧页合订本（全部页，含每页全部段落）。面板翻阅默认走 get_journal(scope=archive) 同数据通道（兼容宿主运行中覆盖导入不重扫静态入口白名单）；本入口供 API/跨插件与整启后使用。仅作用于当前角色。",
         ),
         input_schema={"type": "object", "properties": {}},
     )

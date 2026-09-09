@@ -241,6 +241,47 @@ def parse_review_response(raw: str) -> str:
     return text[:_REVIEW_ENTRY_MAX_CHARS]
 
 
+def fabricate_demo_reviews(count: int = 4, *, now: datetime | None = None) -> list[JsonObject]:
+    """调试注入（debug_review_fill）：确定性假「我的日记」篇目——中性观察者
+    口吻、零随机可复现。结构对齐 review_record（ts/turns/span/self_action_count/
+    text），额外带 demo 标记供分辨；正文多段，验证卷宗阅读页排版与朱印落位。
+    """
+    current = now or _now_utc()
+    templates = (
+        ("观察期内互动频繁。主人主动开启话题的次数明显多于上一期，她回应也及时。"
+         "语气分布以温柔与活泼为主，未观察到连续冷淡段；两次小拌嘴都在一轮内自行化解。"
+         "\n"
+         "总体判断：这段相处里，他被记下来的话多是分享而非索取，她乐于接住。"),
+        ("这一期里出现了两次争执，均由言语轻重引起。她在第一次后主动降温，"
+         "第二次后连续两天语气偏谨慎。如实记录：主人没有不尊重的言行，但节奏比上期明显变慢。"
+         "\n"
+         "她开始自己找台阶下；建议把重要的话当面说完，不要留到第二天。"),
+        ("互动量中等。主人开始更多地分享日常琐事而非提问，她的回复长度随之增长。"
+         "本期她自主发起情绪动作三次，两次为求安抚，均在一小时内自然平复。"
+         "\n"
+         "碎片记录里出现了新的喜好：他开始在深夜提那道小时候的糖水。"),
+        ("本期主人作息不规律，深夜互动占比升高。她在深夜轮次里更黏人，白天则"
+         "容易犯困、回复变短——两本日记在这点上口径一致。"
+         "\n"
+         "没有冲突记录；若要更好，需要的是稳定的在场，而不是更长的深夜对话。"),
+    )
+    turn_plan = (86, 41, 63, 28)
+    self_actions = (0, 2, 3, 1)
+    pages: list[JsonObject] = []
+    for i in range(max(0, min(int(count), len(templates)))):
+        end = current - timedelta(days=(count - 1 - i) * 7)
+        start = end - timedelta(days=6, hours=2)
+        pages.append({
+            "ts": end.isoformat(timespec="seconds"),
+            "turns": turn_plan[i % len(turn_plan)],
+            "span": f"{start.date().isoformat()}~{end.date().isoformat()}",
+            "self_action_count": self_actions[i % len(self_actions)],
+            "text": templates[i % len(templates)][:_REVIEW_ENTRY_MAX_CHARS],
+            "demo": True,
+        })
+    return pages
+
+
 def review_record(ts_iso: str, stats: JsonObject, text: str) -> JsonObject:
     """成文结果 → 我的日记篇目（含期间概要，供面板目录行展示）。"""
     actions = stats.get("actions") if isinstance(stats.get("actions"), list) else []

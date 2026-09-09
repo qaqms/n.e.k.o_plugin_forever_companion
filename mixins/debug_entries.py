@@ -24,7 +24,7 @@ from ..core.journal import (
     journal_due,
     journal_write,
 )
-from ..core.review import review_due
+from ..core.review import fabricate_demo_reviews, review_due
 from ..core.state import (
     _FRAGMENT_DEFAULT_CONFIDENCE,
     _FRAGMENT_DEFAULT_SLOT,
@@ -35,6 +35,7 @@ from ..core.state import (
     _journal_archive_key,
     _journal_key,
     _LanlanShard,
+    _review_key,
     _stats_key,
 )
 from ..core.stats import (
@@ -177,6 +178,19 @@ class DebugEntriesMixin:
                 "type": "object",
                 "properties": {
                     "force": {"type": "boolean", "description": "true = 跳过门槛立即成文（素材不足仍会拒绝）"},
+                    **_DEBUG_LANLAN_PROP,
+                },
+            },
+        ),
+        (
+            "debug_review_fill",
+            "调试：我的日记假卷宗注入/还原",
+            "用确定性假篇目（中性观察者口吻、冷暖轮换）填满「我的日记」档案架——验证盒脊/卷宗阅读页/朱印落位；真实篇目与素材先整包备份，restore=true 一键还原。",
+            {
+                "type": "object",
+                "properties": {
+                    "entries": {"type": "integer", "description": "注入篇目数（默认 4，上限 8）"},
+                    "restore": {"type": "boolean", "description": "true = 从备份还原真实篇目与素材（默认 false = 注入）"},
                     **_DEBUG_LANLAN_PROP,
                 },
             },
@@ -559,6 +573,61 @@ class DebugEntriesMixin:
             payload["forced_write"] = written
             payload["write_reason"] = write_reason
         return Ok(payload)
+
+    async def _debug_review_fill(
+        self, entries: int = 4, restore: bool = False, lanlan: str = "", **_: Any
+    ):
+        """我的日记秒级验收（1.3.0）：假卷宗上架/还原，debug_journal_fill 同款纪律。
+
+        注入档：真实 review@ 整包（篇目+素材）备份到 |pre-debug 键（首次才备），
+        档案架换成确定性假篇目（字段全是存储里现成的口径：面板卷宗页/盒脊/
+        朱印一次验齐）；restore 档：整包还原 + 清备份。只动当前角色 review 一键。
+        """
+        name, shard = await self._debug_target_shard(lanlan)
+        backup_key = f"{_review_key(name)}|pre-debug"
+        if restore:
+            backup = await self.store.get(backup_key)
+            if isinstance(backup, Err) or not isinstance(backup.value, dict):
+                return Ok({"restored": False, "lanlan": name, "note": "没有可还原的备份（从未注入过）。"})
+            raw = backup.value
+            shard.review = [
+                dict(item) for item in (raw.get("entries") or []) if isinstance(item, dict)
+            ]
+            stats = raw.get("stats")
+            shard.review_stats = dict(stats) if isinstance(stats, dict) else {}
+            res = await self._save_shard_review(name, shard)
+            await self.store.set(backup_key, None)
+            self.logger.info("debug review fill restored for {}", name)
+            persist_err = self._persist_error(res)
+            if persist_err is not None:
+                return persist_err
+            return Ok({
+                "restored": True,
+                "lanlan": name,
+                "entries_total": len(shard.review),
+                "note": "真实篇目与素材统计已还原，备份已清除。",
+            })
+        n = max(1, min(int(entries or 4), 8))
+        backup = await self.store.get(backup_key)
+        if not isinstance(backup, Err) and backup.value is None:
+            saved = await self.store.set(
+                backup_key,
+                {"entries": list(shard.review), "stats": dict(shard.review_stats)},
+            )
+            if isinstance(saved, Err):
+                return Err(SdkError("备份真实数据失败，已中止注入"))
+        shard.review = fabricate_demo_reviews(n)
+        res = await self._save_shard_review(name, shard)
+        self.logger.info("debug review fill seeded for {} (entries {})", name, n)
+        persist_err = self._persist_error(res)
+        if persist_err is not None:
+            return persist_err
+        return Ok({
+            "seeded": True,
+            "lanlan": name,
+            "entries_total": n,
+            "note": "打开日记页「我的日记」即见档案架与卷宗（假篇目带 demo 标记）；测完 restore=true 还原。",
+        })
 
     async def _debug_stats(
         self,

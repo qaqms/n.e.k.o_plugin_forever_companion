@@ -8,7 +8,7 @@
 // 正文分节（【这段时间】等）在**显示层**解析：存储与注入文本一个字都不改，
 // 那些小标题是 prompt 共用的（core/journal.py 中文声明制），改不得。
 // hosted-tsx 约束：唯一 export 在任何 JSX 闭合标签之前；辅助组件放文件尾部靠函数声明提升被引用
-import { Button, Card, EmptyState, Tabs } from "@neko/plugin-ui"
+import { Button, Card, EmptyState, Tabs, useToast } from "@neko/plugin-ui"
 import { useEffect, useLocalState, useRef, useState } from "@neko/plugin-ui"
 import { BOOK_STYLES } from "./styles_book"
 import type {
@@ -33,7 +33,8 @@ export function DiaryPane(props: {
   onClearDiary: () => void
   onDeleteFragment: (ts: string) => void
   onLoadJournal: () => Promise<JournalPage[]>
-  onLoadJournalArchive: () => Promise<JournalPage[]>
+  // 失败回 null（区别于"真的还没有合订本"的空数组）：面板据此弹错，不再静默
+  onLoadJournalArchive: () => Promise<JournalPage[] | null>
   onLoadMoreDiary: (offset: number) => Promise<{ items: DiaryItem[]; hasMore: boolean }>
   onInviteJournal: () => void
   onLoadReview: () => Promise<{ entries: ReviewEntry[]; progress: ReviewProgress }>
@@ -46,6 +47,7 @@ export function DiaryPane(props: {
     onClearDiary, onDeleteFragment, onLoadJournal, onLoadJournalArchive, onLoadMoreDiary, onInviteJournal,
     onLoadReview, onWriteReviewNow, onClearReview, settingsChildren,
   } = props
+  const toast = useToast()
 
   // 页内 Tab 持久化：像顶部页签一样记住上次停留在哪一本
   const [tab, setTab] = useLocalState("tide.diary.tab", "time")
@@ -187,11 +189,19 @@ export function DiaryPane(props: {
     if (!archiveLoaded || list.length !== archiveCount) {
       setArchiveLoading(true)
       try {
-        list = await onLoadJournalArchive()
+        const fetched = await onLoadJournalArchive()
+        if (fetched === null) {
+          // 面板不再"点了没反应"：拉取失败当场说清（1.3.0 真机验收反馈背锅位）
+          toast.error(t("panel.journal.archiveLoadError", { defaultValue: "没能取到合订本（通道不可用），稍后再点一次试试" }))
+          return
+        }
+        list = fetched
         setArchivePages(list)
         setArchiveLoaded(true)
       } catch (err) {
         console.warn("[forever_companion] load journal archive failed:", err)
+        toast.error(t("panel.journal.archiveLoadError", { defaultValue: "没能取到合订本（通道不可用），稍后再点一次试试" }))
+        return
       } finally {
         setArchiveLoading(false)
       }

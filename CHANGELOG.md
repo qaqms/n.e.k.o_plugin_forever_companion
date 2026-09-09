@@ -834,6 +834,32 @@ DESIGN 定下的下轮任务并入本版本（1.3.0 尚未发行，同版续写�
   注入前整包备份到 `journal@<角色>|pre-debug`（连续注入不覆盖最早备份），
   `restore=true` 两键整包还原 + 清备份（debug_stats 同款纪律）；同档只动
   当前角色日记两键，周期/情绪/时光日记/统计一概不碰
+#### 1.3.0 第三轮：真机验收反馈——藏书阁 403 根因与双通道、我的日记假卷宗
+
+- **真机反馈「注入后点藏没有用」**（Steam 宿主实机，日志定位）：宿主侧
+  `Hosted UI action rejected … reason=action_not_exposed` 连排 403。根因：面板
+  action 授权 = 子进程 live actions 白名单 **∩** 宿主进程启动时扫描的静态
+  entry_ids；覆盖导入只重启子进程（子进程 collect 日志里明明有
+  get_journal_archive），宿主不重扫静态白名单，stop/start 与 refresh
+  （返回 unchanged）都不刷新——新静态入口在整启宿主前不可达。实测排除：
+  磁盘代码新、子进程新、surface/context/权限声明全部与 get_journal 同款。
+  **插件侧防御**：面板拉取改 `get_journal(scope="archive")` 搭已白名单旧入口
+  加参数（两通道同数据，测试钉死不串架），`get_journal_archive` 保留为规范
+  入口；纪律入 DESIGN：面板新增拉取类需求优先给既有已暴露入口加参数，
+  纯新入口只供 API/跨插件。另：拉取失败不再静默（openArchive 失败弹
+  archiveLoadError toast），"点了没反应"这类哑弹面板一律就地消灭
+- **`debug_review_fill`（应"缺我的日记的注入"）**：`core/review.py` 新增
+  `fabricate_demo_reviews` 纯函数（假篇目结构对齐 review_record：成文日 14 天
+  等距、span 区间、轮数印章、自主情绪计数，正文四模板冷暖轮换含争执/深夜
+  作息等如实样例，带 demo 标记）；注入/还原与 debug_journal_fill 同款纪律
+  （review@ 整包备份到 `review@<角色>|pre-debug`，restore 一键回滚，只动当前
+  角色 review 一键，素材统计随篇目一并备份不受污染）
+- **旧宿主布局实勘**：用户 Steam 版无 `.neko-plugin-installations`，插件住在
+  `N.E.K.O\plugins\forever_companion`（代码数据同居旧布局），实测覆盖导入后
+  `data/store.db` 存活；升级前自行备份重要记录的保守建议仍适旧宿主
+- **验证（第三轮）**：pytest 374 全绿（+3：scope 双通道不串架/fabricate
+  形状/我的日记注入还原）；hosted 链接门 23 模块 0 丢导出；ruff check 全绿；
+  宿主 check-hosted-tsx 重跑 0 错
 - **验证**：pytest 371 全绿（新增 test_journal_archive.py 8 篇：工具淘汰入阁/
   保存溢出入阁/零淘汰不写阁/阁满裁旧/brief 只显事实/载入回读/入口只读/
   debug_journal_fill 注入+还原全链路）；

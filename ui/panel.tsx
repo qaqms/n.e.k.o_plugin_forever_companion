@@ -406,15 +406,18 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     }
   }
 
-  // 藏书阁（1.3.0）：合订本全量按需拉取（淘汰低频，点开那一次拉齐即可）
+  // 藏书阁（1.3.0）：合订本全量按需拉取（淘汰低频，点开那一次拉齐即可）。
+  // 走 get_journal(scope=archive) 而非新入口 get_journal_archive：宿主运行中
+  // 覆盖导入不重扫静态入口白名单，新入口要整启宿主才可达（实机 403 踩坑）；
+  // 两通道同数据，新入口保留给 API/跨插件与重启后的规范调用
   async function onLoadJournalArchive() {
     try {
-      const payload = unwrapCallResult(await props.api.call("get_journal_archive", {}))
+      const payload = unwrapCallResult(await props.api.call("get_journal", { scope: "archive" }))
       const pages = (payload as Record<string, any>)?.pages
       return Array.isArray(pages) ? (pages as JournalPage[]) : []
     } catch (err) {
       console.warn("[forever_companion] load journal archive failed:", err)
-      return []
+      return null
     }
   }
 
@@ -813,6 +816,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
               onDeleteFragment={onDeleteFragment}
               onLoadJournal={onLoadJournal}
               onLoadJournalArchive={onLoadJournalArchive}
+
               onLoadMoreDiary={onLoadMoreDiary}
               onInviteJournal={onInviteJournal}
               onLoadReview={onLoadReview}
