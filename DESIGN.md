@@ -122,6 +122,13 @@
 - **书页结构**（`journal@<角色>` key）：页列表 `{page_no, started_at, entries[]}`，
   每页至多 8 段（写满自动翻页），`new_page=true` 可主动翻新页；页数上限 52
   （超出淘汰最旧页）；页码按上一页号递增（淘汰后编号仍连续）
+- **淘汰是静默的，所以显示层不得说谎（1.3.0 约束）**：面板**不得派生任何会随淘汰
+  平移的序号**（如“第 N 篇”按列表长度现算），也不得把**累计页码**与**现存本数**
+  放进同一个 `a / b` 式子；只能显存储里现成的事实（page_no / 日期 / 区间 / 段数 / 轮数）
+- **写满了怎么办**：已定方向为「**藏书阁**」——满架时淘汰出去的那页不删，
+  append 进独立键（只追加、不入当前书 blob，避免每次落笔重写整块），书架末尾多一根
+  横放的合订本书脊→只读翻阅；不在活架上加计数、不提 52 上限（单键 JSON 已经
+  52×8×900 字的量级，再大就是写入成本倒退）。下轮实现
 - **续写衔接**：工具结果带 `previous_lines`（写入前目标页最后两段）——只存在于
   写日记那轮的工具结果里（即时、不持久注入），让她自然接上上次写到哪，
   不违背"不注入"原则
@@ -189,14 +196,26 @@ CHANGELOG，契约性变化改本文件正文——两边各司其职，不再�
 - SDK surfaces: `@neko_plugin`, `@plugin_entry`, `@llm_tool`, `@timer_interval`, `@lifecycle`,
   `push_message`, `self.store`, `self.config`, `tr()`
 - UI surfaces: `[[plugin.ui.panel]]` hosted-tsx `ui/panel.tsx`（state:read, config:read, action:call）。
-  面板为多文件模块结构：`panel.tsx` 入口组装 + `types.ts` / `utils.ts` / `styles.ts` 共享层，
-  六个顶级页签——`calendar.tsx` 日历 / `settings_cycle.tsx` 周期 / `settings_inject.tsx` 注入 /
-  `settings_mood.tsx`+`settings_diary.tsx`+`settings_tone.tsx` 情绪（情绪系统+碎片+语气感知）/ `diary.tsx` 日记（时光日记时间线+个人日记书页）/
-  `manage.tsx` 管理（危险区+角色名单）；设置类页签各自带 `savebar.tsx` 吸底保存条，
-  顶部 `statusbar.tsx`（含 `ring.tsx` 圆环）常驻；
+  面板为多文件模块结构：`panel.tsx` 入口组装 + `types.ts` / `utils.ts` / `styles.ts` 共享层
+  （styles.ts = 面板玻璃层），1.3.0 起另有 `styles_book.ts`（日记两本的"桌面物件层"：
+  纸/墨/装订/木架调色板，与玻璃层互不相通，第二个 `<style>` 并列注入）；
+  页签清单与内容在 panel.tsx（`tabs` 数组 + 就地渲染的 cycle/mood/settings 三页）：
+  顶级入口组件 `overview.tsx` 总览 / `calendar.tsx` 日历 / `diary.tsx` 三本日记 /
+  `moment.tsx` 时光 / `features.tsx`+`capintro.tsx` 功能与页内介绍 /
+  `settings_cycle|inject|mood|emotion|tone|diary.tsx` 六张设置卡（由 panel.tsx 按页拼装）、
+  `appearance.tsx` 面板外观 / `manage.tsx` 危险区与角色名单 / `onboarding.tsx` 新手向导；
+  设置类页签各自带 `savebar.tsx` 吸底保存条，顶部 `statusbar.tsx`（含 `ring.tsx` 圆环）常驻；
+  **日记书本层的三条长期约束（1.3.0，改 diary.tsx/styles_book.ts 前先读）**：
+  ① 正文里的 `【这段时间】/【我在想】/【对他的感觉】/【想说的】` 分节**只在显示层解析**
+  （`splitSections`），存储与注入文本不得改——该词表与 `core/journal.py` 的 prompt 共用；
+  ② 阅读视图的 sticky 页脚依赖 `.tm-content` 是唯一滚动容器，**纸页祖先链一律不得加
+  `overflow`/`contain`**（加了就退化成普通块），丝带/贴角等外扩一律 clip-path/负外边距自处理；
+  ③ 书本物件（装订孔/丝带/朱印/书脊皮）全用 CSS 画，不引入 SVG；
   受 hosted-tsx 约束：仅声明式单绑定导出、无循环依赖、`export const` 类型注解不能含顶层逗号
   （泛型用类型别名绕开），**不支持 SVG**（运行时 mount 用 createElement 而非 createElementNS，
-  图形一律用 CSS/div 实现，如 ring.tsx 的月相盘），提交前跑 `npm run check-hosted-tsx -- plugin/plugins/forever_companion`。
+  图形一律用 CSS/div 实现，如 ring.tsx 的月相盘），提交前跑 `npm run check-hosted-tsx -- plugin/plugins/forever_companion`
+  （仓外开发：`node tools/check_hosted_link.mjs .` 需 `NEKO_HOSTED_SCANNER` 指向宿主 hostedTsxModule.mjs）。
+  **依赖预算硬顶 32 文件 / 512 KiB**：1.3.0 后为 25 文件 / 345 KiB，加 ui 文件前先算这笔账。
   另有一个校验门抓不到的链接器坑（0.6.2 修复）：JSX 闭合标签 `</...>` 的 `/` 会被运行时
   链接器误判为正则字面量起始（前一字符 `<` 在其正则启发式集合内），其后所有 `export` 声明被吞，
   面板整页空白——因此每个 ui 文件内 export 声明必须排在任何 JSX 闭合标签之前

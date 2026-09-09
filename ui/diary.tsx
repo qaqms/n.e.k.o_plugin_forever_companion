@@ -1,8 +1,16 @@
-// 日记页：页内 Tabs 切换 时光日记（日期分组时间线 + 加载更多）/ 个人日记（目录 + 单页纸质阅读）
-// / 我的日记（关于主人的互动评价：目录 + 单篇阅读 + 素材进度）
+// 日记页：页内 Tabs 切换 时光日记（日期分组时间线 + 加载更多）/ 个人日记（书架 + 手写本）
+// / 我的日记（关于主人的互动评价：档案架 + 铅印卷宗 + 素材进度）
+//
+// 1.3.0 拟真书本重做：个人日记与我的日记换成两套「物件」语言——
+//   目录 = 书架上的书脊（竖排日期 + 心情色作书脊皮，悬停整本抽出）
+//   个人日记 = 她手写的线装本（布脊 + 线装孔 + 题签 + 楷体暖纸 + 丝带 + 首字下沉）
+//   我的日记 = 第三者留下的铅印卷宗（冷灰打孔纸 + 等宽口径行 + 宋体压痕 + 朱印落款）
+// 正文分节（【这段时间】等）在**显示层**解析：存储与注入文本一个字都不改，
+// 那些小标题是 prompt 共用的（core/journal.py 中文声明制），改不得。
 // hosted-tsx 约束：唯一 export 在任何 JSX 闭合标签之前；辅助组件放文件尾部靠函数声明提升被引用
 import { Button, Card, EmptyState, Tabs } from "@neko/plugin-ui"
 import { useEffect, useLocalState, useRef, useState } from "@neko/plugin-ui"
+import { BOOK_STYLES } from "./styles_book"
 import type {
   DiaryItem, JournalPage, JournalPageHeader, ReviewBrief, ReviewEntry, ReviewProgress, TFunc,
 } from "./types"
@@ -155,6 +163,9 @@ export function DiaryPane(props: {
 
   return (
     <div className="tm-pane">
+      {/* 书本层样式与 PANEL_STYLES 并列注入（后注入 = 同特异性下胜出）；
+          UA 样式表里 style{display:none}，不会成为 .tm-pane 的 grid 项 */}
+      <style key="tmb-book-styles">{BOOK_STYLES}</style>
       <Tabs
         id="tide-diary-tabs"
         activeId={tab}
@@ -204,7 +215,7 @@ export function DiaryPane(props: {
             id: "journal",
             label: t("panel.journal.tabJournal", { defaultValue: "个人日记" }),
             content: (
-              <Card title={t("panel.journal.title", { defaultValue: "个人日记" })}>
+              <Card className="tmb-card" title={t("panel.journal.title", { defaultValue: "个人日记" })}>
                 <div className="tm-journal-toolbar">
                   <span className="tm-diary-count">
                     {t("panel.journal.count", { defaultValue: "共 {n} 页" }).replace("{n}", String(pages.length || journalIndex.length))}
@@ -231,9 +242,10 @@ export function DiaryPane(props: {
                     description={t("panel.journal.emptyDesc", { defaultValue: "点右上角「请她写一篇」递个邀请；当她愿意写时，第一页会出现在这里。" })}
                   />
                 ) : visiblePage ? (
-                  <PageReader
+                  <JournalBook
                     t={t}
                     page={visiblePage}
+                    position={openIdx + 1}
                     totalPages={pages.length}
                     hasPrev={openIdx > 0}
                     hasNext={openIdx < pages.length - 1}
@@ -242,7 +254,7 @@ export function DiaryPane(props: {
                     onNext={() => { if (openIdx < pages.length - 1) setOpenPageNo(pages[openIdx + 1].page_no || null) }}
                   />
                 ) : (
-                  <TocView t={t} index={pages.length ? pages : journalIndex} onOpen={(no) => { setOpenPageNo(no) }} loading={bookLoading} />
+                  <JournalShelf t={t} index={pages.length ? pages : journalIndex} onOpen={(no) => { setOpenPageNo(no) }} loading={bookLoading} />
                 )}
               </Card>
             ),
@@ -251,7 +263,7 @@ export function DiaryPane(props: {
             id: "review",
             label: t("panel.review.tabReview", { defaultValue: "我的日记" }),
             content: (
-              <Card title={t("panel.review.title", { defaultValue: "我的日记" })}>
+              <Card className="tmb-card" title={t("panel.review.title", { defaultValue: "我的日记" })}>
                 <div className="tm-journal-toolbar">
                   <span className="tm-diary-count">
                     {t("panel.review.count", { defaultValue: "共 {n} 篇" }).replace("{n}", String(reviewEntries.length))}
@@ -282,13 +294,13 @@ export function DiaryPane(props: {
                   {t("panel.review.hint", { defaultValue: "对我的记录" })}
                 </div>
                 {visibleReview ? (
-                  <ReviewReader
+                  <ReviewBook
                     t={t}
                     entry={visibleReview}
                     onBack={() => { setOpenReviewTs(null) }}
                   />
                 ) : (
-                  <ReviewProgressView
+                  <ReviewShelf
                     t={t}
                     progress={reviewProgress}
                     entries={reviewEntries}
@@ -369,8 +381,10 @@ function DiaryRow(props: { key?: string; t: TFunc; item: DiaryItem; onDelete: (t
   )
 }
 
-// 个人日记目录：每页一行（页码圆徽 + 日期区间 + 心情彩色圆点 + 段数），点开进入单页阅读
-function TocView(props: {
+// 个人日记书架：一排"站着的书"——每页一根书脊（顶端页码方块 + 竖排起始日期 +
+// 书根段数），书脊皮色 = 那段时间的心情均值（与全站心情圆点同口径 moodDotColor）；
+// 悬停整本抽出，点一根＝抽出来翻开。旧版迁移页在脊上贴一枚角签
+function JournalShelf(props: {
   t: TFunc
   index: Array<JournalPageHeader & { entries?: Array<{ text?: string }> }>
   onOpen: (pageNo: number) => void
@@ -381,36 +395,41 @@ function TocView(props: {
     return <div className="tm-derived">{loading ? t("panel.journal.loading", { defaultValue: "翻开日记本…" }) : ""}</div>
   }
   return (
-    <div className="tm-toc">
-      {index.map((page) => (
-        <button
-          key={String(page.page_no || "")}
-          type="button"
-          className="tm-toc-row"
-          onClick={() => onOpen(Number(page.page_no || 0))}
-        >
-          <span className="tm-toc-no">{t("panel.journal.pageShort", { defaultValue: "页" })}{page.page_no}</span>
-          <span className="tm-toc-range">{journalRangeLabel(page) || t("panel.journal.noDate", { defaultValue: "未注明日期" })}</span>
-          <span
-            className="tm-mood-dot"
-            title={t(journalTrendKey(page.mood_avg), { defaultValue: "" })}
-            style={{ background: page.mood_avg === null || page.mood_avg === undefined ? "rgba(148,163,184,.5)" : moodDotColor(page.mood_avg) }}
-          />
-          <span className="tm-toc-meta">
-            {t("panel.journal.entryCount", { defaultValue: "{n} 段" }).replace("{n}", String(page.entry_count ?? 0))}
-          </span>
-          {page.legacy ? <span className="tm-toc-legacy">{t("panel.journal.legacy", { defaultValue: "旧版周记" })}</span> : null}
-          <span className="tm-toc-arrow">›</span>
-        </button>
-      ))}
+    <div className="tmb-shelf">
+      {index.map((page) => {
+        const no = Number(page.page_no || 0)
+        return (
+          <button
+            key={String(no)}
+            type="button"
+            className="tmb-spine"
+            title={shelfTip(t, no, journalRangeLabel(page), t(journalTrendKey(page.mood_avg), { defaultValue: "" }))}
+            style={{ "--tmb-spine-base": shelfInk(page.mood_avg) } as Record<string, string>}
+            onClick={() => onOpen(no)}
+          >
+            <span className="tmb-spine-top" />
+            <span className="tmb-spine-no">{no}</span>
+            <span className="tmb-spine-date">{spineDate(page.started_at)}</span>
+            <span className="tmb-spine-spacer" />
+            <span className="tmb-spine-foot">{String(page.entry_count ?? 0)}</span>
+            {page.legacy ? <span className="tmb-spine-flag">{t("panel.journal.legacyShort", { defaultValue: "旧" })}</span> : null}
+          </button>
+        )
+      })}
     </div>
   )
 }
 
-// 单页纸质阅读视图：衬线字体 + 大行距 + 纸张底色；顶栏返回目录，底栏上一页/下一页
-function PageReader(props: {
+// 手写本阅读视图：布面书脊（线装三孔 + 竖排题签）+ 暖纸页 + 丝带书签 + sticky 页脚
+// （目录与翻页常驻下缘，正文随外层自然滚动 = 连续卷轴 + 分页视觉）。
+// 每段续写是一张自己的纸（自己的边与影），正文里的【小标题】在显示层解析成分节
+function JournalBook(props: {
   t: TFunc
   page: JournalPage
+  // 架上第几本（1 起，随淘汰变）——与 page_no（全书累计页码，永不重编）是两个数，
+  // 各到一个位：页眉用页码（版权页那个），页脚用架上位置（与上一页/下一页同口径）。
+  // 混用会在淘汰发生后显成「63 / 52」这种废话（1.3.0 真机前自查发现）
+  position: number
   totalPages: number
   hasPrev: boolean
   hasNext: boolean
@@ -418,41 +437,77 @@ function PageReader(props: {
   onPrev: () => void
   onNext: () => void
 }) {
-  const { t, page, totalPages, hasPrev, hasNext, onBack, onPrev, onNext } = props
-  const trendKey = journalTrendKey(page.mood_avg)
+  const { t, page, position, totalPages, hasPrev, hasNext, onBack, onPrev, onNext } = props
+  const sheets = (page.entries || []).map((entry, idx) => ({
+    key: String(entry.ts || idx),
+    when: fmtTs(entry.ts),
+    secs: splitSections(entry.text),
+  }))
+  // 首字下沉全页只给一次：定位到第一个真有正文的节
+  let leadE = -1
+  let leadS = -1
+  for (let e = 0; e < sheets.length && leadE < 0; e++) {
+    for (let s = 0; s < sheets[e].secs.length; s++) {
+      if (sheets[e].secs[s].paras.length) { leadE = e; leadS = s; break }
+    }
+  }
+  const segLabel = t("panel.journal.entryCount", { defaultValue: "{n} 段" }).replace("{n}", String(sheets.length))
   return (
-    <div className="tm-book">
-      <div className="tm-book-topbar">
-        <Button onClick={onBack}>{t("panel.journal.backToToc", { defaultValue: "← 目录" })}</Button>
-        <span className="tm-book-pageno">
-          {t("panel.journal.pageN", { defaultValue: "第 {n} 页" }).replace("{n}", String(page.page_no || ""))}
-          {page.legacy ? ` · ${t("panel.journal.legacy", { defaultValue: "旧版周记" })}` : ""}
-        </span>
-        <span className="tm-book-meta">{journalRangeLabel(page)}</span>
-        <span className="tm-book-trend">
-          <span
-            className="tm-mood-dot"
-            style={{ background: page.mood_avg === null || page.mood_avg === undefined ? "rgba(148,163,184,.5)" : moodDotColor(page.mood_avg) }}
-          />
-          {t(trendKey, { defaultValue: "" })}
-        </span>
+    <div className="tmb-book">
+      <div className="tmb-book-strip">
+        <span className="tmb-book-stitch" />
+        <span className="tmb-book-title">{t("panel.journal.spineTitle", { defaultValue: "她的日记" })}</span>
       </div>
-      <div className="tm-book-entries tm-paper">
-        {(page.entries || []).map((entry, idx) => (
-          <div className="tm-book-entry" key={String(entry.ts || idx)}>
-            <div className="tm-book-entry-ts">{fmtTs(entry.ts)}</div>
-            <div className="tm-book-entry-text">{entry.text}</div>
-          </div>
-        ))}
-      </div>
-      <div className="tm-book-nav">
-        <Button onClick={onPrev} disabled={!hasPrev}>
-          {t("panel.journal.prev", { defaultValue: "上一页" })}
-        </Button>
-        <span className="tm-book-indicator">{page.page_no} / {totalPages}</span>
-        <Button onClick={onNext} disabled={!hasNext}>
-          {t("panel.journal.next", { defaultValue: "下一页" })}
-        </Button>
+      <div className="tmb-page">
+        <span className="tmb-ribbon" />
+        <div className="tmb-head">
+          <span className="tmb-head-kicker">{t("panel.journal.kicker", { defaultValue: "她的手写" })}</span>
+          <span className="tmb-head-no">
+            {t("panel.journal.pageN", { defaultValue: "第 {n} 页" }).replace("{n}", String(page.page_no || ""))}
+          </span>
+          <span className="tmb-head-meta">{journalRangeLabel(page) || t("panel.journal.noDate", { defaultValue: "未注明日期" })}</span>
+          {page.legacy ? <span className="tmb-head-meta">{t("panel.journal.legacy", { defaultValue: "旧版周记" })}</span> : null}
+          <span className="tmb-head-spacer" />
+          <span className="tmb-head-trend">
+            <span className="tm-mood-dot" style={{ background: shelfInk(page.mood_avg) }} />
+            {t(journalTrendKey(page.mood_avg), { defaultValue: "" })}
+          </span>
+        </div>
+        <div className="tmb-page-body">
+          {sheets.map((sheet, ei) => (
+            <div className="tmb-entry" key={sheet.key}>
+              {sheet.when ? <div className="tmb-entry-when">{sheet.when}</div> : null}
+              {sheet.secs.map((sec, si) => (
+                <div className="tmb-sec" key={String(si)}>
+                  {sec.title ? <div className="tmb-sec-title">{sec.title}</div> : null}
+                  {sec.paras.map((para, pi) => (
+                    <div
+                      key={String(pi)}
+                      className={ei === leadE && si === leadS && pi === 0 ? "tmb-text tmb-text--lead" : "tmb-text"}
+                    >
+                      {para}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+        <div className="tmb-foot">
+          <button type="button" className="tmb-btn" onClick={onBack}>
+            {t("panel.journal.backToShelf", { defaultValue: "← 放回书架" })}
+          </button>
+          <span className="tmb-foot-mid">
+            <button type="button" className="tmb-btn" onClick={onPrev} disabled={!hasPrev}>
+              {t("panel.journal.prev", { defaultValue: "上一页" })}
+            </button>
+            <span className="tmb-ind">{position} / {totalPages}</span>
+            <span className="tmb-leaf-ind">{segLabel}</span>
+            <button type="button" className="tmb-btn" onClick={onNext} disabled={!hasNext}>
+              {t("panel.journal.next", { defaultValue: "下一页" })}
+            </button>
+          </span>
+        </div>
       </div>
     </div>
   )
@@ -486,8 +541,9 @@ function journalRangeLabel(page: JournalPageHeader): string {
   return `${start} ~ ${last}`
 }
 
-// 我的日记目录 + 素材进度：进度条显示距下一次成文攒了多少轮；点开一篇进入阅读
-function ReviewProgressView(props: {
+// 我的日记档案架：一根根档案盒脊（硬纸壳 + 竖排成文日期 + 书根轮数 + 盒号），
+// 冷色不参与心情（这本是第三者写的）；上方留一条等宽口径的素材进度
+function ReviewShelf(props: {
   t: TFunc
   progress: ReviewProgress
   entries: ReviewEntry[]
@@ -498,7 +554,7 @@ function ReviewProgressView(props: {
   const { t, progress, entries, loaded, loading, onOpen } = props
   const turns = Number(progress.turns || 0)
   const threshold = Math.max(1, Number(progress.turns_threshold || 50))
-  const ratio = Math.min(1, turns / threshold)
+  const pct = Math.min(100, Math.round((turns / threshold) * 100))
   if (!entries.length) {
     return loaded ? (
       <EmptyState
@@ -511,57 +567,169 @@ function ReviewProgressView(props: {
   }
   return (
     <div className="tm-review">
-      <div className="tm-review-progress">
-        <span className="tm-diary-count">
-          {t("panel.review.progress", { defaultValue: "下一份素材：{n} / {total} 轮" })
-            .replace("{n}", String(turns))
-            .replace("{total}", String(threshold))}
-        </span>
-        <div className="tm-review-bar">
-          <div className="tm-review-bar-fill" style={{ width: `${Math.round(ratio * 100)}%` }} />
+      <div className="tmb-meter">
+        <div className="tmb-meter-row">
+          <span>
+            {t("panel.review.progress", { defaultValue: "下一份素材：{n} / {total} 轮" })
+              .replace("{n}", String(turns))
+              .replace("{total}", String(threshold))}
+          </span>
+          <span className="tmb-head-spacer" />
+          <span>{pct}%</span>
+        </div>
+        <div className="tmb-meter-track">
+          <div className="tmb-meter-fill" style={{ width: `${pct}%` }} />
         </div>
       </div>
-      <div className="tm-toc">
-        {entries.map((entry) => (
-          <button
-            key={String(entry.ts || "")}
-            type="button"
-            className="tm-toc-row"
-            onClick={() => onOpen(String(entry.ts || ""))}
-          >
-            <span className="tm-toc-no">{t("panel.review.pieceShort", { defaultValue: "篇" })}</span>
-            <span className="tm-toc-range">{String(entry.ts || "").slice(0, 10) || t("panel.journal.noDate", { defaultValue: "未注明日期" })}</span>
-            <span className="tm-toc-meta">
-              {t("panel.review.turnsMeta", { defaultValue: "{n} 轮" }).replace("{n}", String(entry.turns ?? 0))}
-            </span>
-            <span className="tm-toc-arrow">›</span>
-          </button>
-        ))}
+      <div className="tmb-shelf">
+        {entries.map((entry, i) => {
+          const ts = String(entry.ts || "")
+          // 盒上不写会变的号：entries 倒序且最旧一篇会被裁，任何“第 N 篇”都会随淘汰
+          // 整体平移（上周卷 3 这周变卷 2）。改卷宗本身永不发的身份：
+          // 徒章=互动轮数（书根那个字是它的单位）、竖排=成文日、区间进悬停
+          const turns = String(entry.turns ?? 0)
+          return (
+            <button
+              key={ts || String(i)}
+              type="button"
+              className="tmb-spine tmb-spine--file"
+              title={fileTip(t, ts, spanShort(entry.span), turns)}
+              onClick={() => onOpen(ts)}
+            >
+              <span className="tmb-spine-top" />
+              <span className="tmb-spine-no">{turns}</span>
+              <span className="tmb-spine-date">{spineDate(ts)}</span>
+              <span className="tmb-spine-spacer" />
+              <span className="tmb-spine-foot">{t("panel.review.turnsUnit", { defaultValue: "轮" })}</span>
+            </button>
+          )
+        })}
       </div>
     </div>
   )
 }
 
-// 我的日记单篇阅读：纸质视图 + 返回目录；评价正文成段展示
-function ReviewReader(props: { t: TFunc; entry: ReviewEntry; onBack: () => void }) {
+// 铅印卷宗阅读视图：冷灰打孔纸 + 卷首等宽口径行（轮数/区间/她自主起的情绪次数）
+// + 宋体压痕正文 + 一枚流在文末靠右的朱印落款（盖章必不正）
+function ReviewBook(props: { t: TFunc; entry: ReviewEntry; onBack: () => void }) {
   const { t, entry, onBack } = props
+  const paras = splitParas(entry.text)
+  const turns = String(entry.turns ?? 0)
+  const span = spanShort(entry.span)
+  const selfActions = String(entry.self_action_count ?? 0)
   return (
-    <div className="tm-book">
-      <div className="tm-book-topbar">
-        <Button onClick={onBack}>{t("panel.journal.backToToc", { defaultValue: "← 目录" })}</Button>
-        <span className="tm-book-pageno">{String(entry.ts || "").slice(0, 10)}</span>
-        <span className="tm-book-meta">
-          {t("panel.review.turnsMeta", { defaultValue: "{n} 轮" }).replace("{n}", String(entry.turns ?? 0))}
-        </span>
-        <span className="tm-book-meta">
-          {String(entry.span || "").replace("~", " ~ ")}
-        </span>
+    <div className="tmb-book">
+      <div className="tmb-book-strip tmb-book-strip--file">
+        <span className="tmb-book-holes" />
+        <span className="tmb-book-title tmb-book-title--file">{t("panel.review.spineTitle", { defaultValue: "相处卷宗" })}</span>
       </div>
-      <div className="tm-book-entries tm-paper">
-        <div className="tm-book-entry">
-          <div className="tm-book-entry-text">{entry.text}</div>
+      <div className="tmb-page tmb-page--file">
+        <div className="tmb-head">
+          <span className="tmb-head-kicker">{t("panel.review.kicker", { defaultValue: "第三者记录" })}</span>
+          <span className="tmb-head-no">{String(entry.ts || "").slice(0, 10) || t("panel.journal.noDate", { defaultValue: "未注明日期" })}</span>
+          <span className="tmb-head-spacer" />
+          <span className="tmb-head-meta">{span}</span>
+        </div>
+        <div className="tmb-file-title">{t("panel.review.docTitle", { defaultValue: "关于这段时间的记录" })}</div>
+        <div className="tmb-dossier">
+          <span className="tmb-dossier-item">
+            <em className="tmb-dossier-label">{t("panel.review.fieldTurns", { defaultValue: "互动轮数" })}</em>
+            <b className="tmb-dossier-value">{turns}</b>
+          </span>
+          <span className="tmb-dossier-item">
+            <em className="tmb-dossier-label">{t("panel.review.fieldSpan", { defaultValue: "统计区间" })}</em>
+            <b className="tmb-dossier-value">{span || "--"}</b>
+          </span>
+          <span className="tmb-dossier-item">
+            <em className="tmb-dossier-label">{t("panel.review.fieldSelfActions", { defaultValue: "她自主起的情绪" })}</em>
+            <b className="tmb-dossier-value">{selfActions}</b>
+          </span>
+        </div>
+        <div className="tmb-page-body">
+          <div className="tmb-seal">{t("panel.review.seal", { defaultValue: "观察者记" })}</div>
+          {paras.map((para, pi) => (
+            <div className="tmb-text tmb-text--file" key={String(pi)}>{para}</div>
+          ))}
+        </div>
+        <div className="tmb-foot">
+          <button type="button" className="tmb-btn" onClick={onBack}>
+            {t("panel.review.backToShelf", { defaultValue: "← 放回架上" })}
+          </button>
+          <span className="tmb-foot-mid">
+            <span className="tmb-leaf-ind">
+              {t("panel.review.turnsMeta", { defaultValue: "{n} 轮" }).replace("{n}", turns)}
+            </span>
+          </span>
         </div>
       </div>
     </div>
   )
+}
+
+// ---- 书本视图的显示层辅助（全部纯函数；存储与注入文本零改动）----
+
+// 后端拼装规则（core/journal.py）：每个非空字段一行「【小标题】正文」，
+// 只填"想说的"时不加标题。此处按行反解成节，标题原样显示（中文声明制，
+// 是她说出口的词，不做二次翻译），后续无标题的行并入当前节
+function splitSections(text?: string): Array<{ title: string; paras: string[] }> {
+  const secs: Array<{ title: string; paras: string[] }> = []
+  for (const line of String(text || "").split("\n")) {
+    const body = line.trim()
+    const hit = /^【([^】]{1,12})】([\s\S]*)$/.exec(body)
+    if (hit) {
+      const tail = hit[2].trim()
+      secs.push({ title: hit[1].trim(), paras: tail ? [tail] : [] })
+      continue
+    }
+    if (!body) continue
+    if (!secs.length) secs.push({ title: "", paras: [body] })
+    else secs[secs.length - 1].paras.push(body)
+  }
+  return secs
+}
+
+// 我的日记正文：按行切段（模型成文是一篇成段评价，段落即自然段）
+function splitParas(text?: string): string[] {
+  const out: string[] = []
+  for (const line of String(text || "").split("\n")) {
+    const body = line.trim()
+    if (body) out.push(body)
+  }
+  return out
+}
+
+// 书脊皮色：与该页心情走向圆点同一函数（近零自动落灰 = 这本没有明显心情）
+function shelfInk(mood?: number | null): string {
+  return mood === null || mood === undefined ? "rgba(148,163,184,.55)" : moodDotColor(mood)
+}
+
+// 书脊上的竖排日期：只用起始日（一根脊装不下区间），完整区间在 title 里
+function spineDate(ts?: string): string {
+  return String(ts || "").replace("T", " ").slice(5, 10) || "--"
+}
+
+// "2026-08-01~2026-08-07" → "08-01 ~ 08-07"（等宽口径行与盒脊悬停共用）
+function spanShort(span?: string): string {
+  const parts = String(span || "").split("~").map((p) => p.trim().slice(5, 10)).filter((p) => p)
+  return parts.join(" ~ ")
+}
+
+// 悬停说明（个人日记）：第 N 页 · 日期区间 · 她的心情
+// 这里的 N 是 page_no（全书累计页码，与页眉同一个数），永不重编
+function shelfTip(t: TFunc, no: number, range: string, trend: string): string {
+  const parts: string[] = [t("panel.journal.pageN", { defaultValue: "第 {n} 页" }).replace("{n}", String(no))]
+  if (range) parts.push(range)
+  if (trend) parts.push(trend)
+  return parts.join(" · ")
+}
+
+// 悬停说明（我的日记）：成文日 · 统计区间 · 互动轮数——全部取存储里现成的值，
+// 不派生任何会随淘汰平移的序号
+function fileTip(t: TFunc, ts: string, span: string, turns: string): string {
+  const parts: string[] = [
+    `${t("panel.review.tipComposed", { defaultValue: "成文" })} ${ts.slice(0, 10) || "--"}`,
+  ]
+  if (span) parts.push(`${t("panel.review.fieldSpan", { defaultValue: "统计区间" })} ${span}`)
+  parts.push(t("panel.review.turnsMeta", { defaultValue: "{n} 轮" }).replace("{n}", turns))
+  return parts.join(" · ")
 }

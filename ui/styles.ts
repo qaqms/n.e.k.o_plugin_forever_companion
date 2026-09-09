@@ -513,30 +513,10 @@ export const PANEL_STYLES = `
 .tm-diary-more { display: flex; justify-content: center; padding-top: 2px; }
 .tm-diary-end { text-align: center; color: var(--muted); font-size: 12px; padding: 4px 0 2px; }
 
-/* 个人日记工具行 + 目录：页码圆徽 + 日期区间 + 心情彩色圆点（复用状态栏配色算法） */
+/* 个人日记/我的日记工具行 + 心情圆点（复用状态栏配色算法）。
+   1.3.0：目录与书页改拟真书本（书脊/纸页），样式见 ui/styles_book.ts */
 .tm-journal-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .tm-journal-actions { display: inline-flex; align-items: center; gap: 8px; }
-.tm-toc { display: grid; gap: 8px; }
-.tm-toc-row {
-  display: flex; align-items: center; gap: 10px; text-align: left; width: 100%;
-  padding: 10px 12px; border-radius: var(--radius-md); cursor: pointer;
-  border: 1px solid rgba(255, 255, 255, 0.7); background: rgba(255, 255, 255, 0.5);
-  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
-}
-.tm-toc-row:hover { transform: translateX(3px); background: rgba(255, 255, 255, 0.72); box-shadow: 0 4px 14px rgba(64, 158, 255, 0.18); }
-.tm-toc-no {
-  flex: 0 0 auto; width: 36px; height: 36px; border-radius: 999px;
-  display: inline-flex; align-items: center; justify-content: center; gap: 1px;
-  background: rgba(245, 237, 220, 0.85); border: 1px solid rgba(231, 220, 195, 0.7);
-  font-weight: 750; font-size: 11.5px;
-}
-.tm-toc-range { font-weight: 650; font-size: 13px; }
-.tm-toc-meta { color: var(--muted); font-size: 12px; }
-.tm-toc-legacy {
-  padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 650;
-  background: rgba(148, 163, 184, 0.18); color: var(--muted);
-}
-.tm-toc-arrow { margin-left: auto; color: var(--muted); font-size: 16px; }
 .tm-mood-dot {
   width: 10px; height: 10px; border-radius: 999px; display: inline-block; flex: 0 0 auto;
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.7);
@@ -565,27 +545,8 @@ export const PANEL_STYLES = `
   font-size: 13px; color: var(--text);
 }
 
-/* 个人日记书页：纸质页 + 页眉（页码/日期区间/心情走向）+ 段落时间轴 + 翻页导航 */
-.tm-book { display: grid; gap: 10px; }
-.tm-book-topbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.tm-book-header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-.tm-book-pageno { font-size: 14px; font-weight: 750; }
-.tm-book-meta { color: var(--muted); font-size: 12px; }
-.tm-book-trend { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
-/* 纸质阅读页：衬线字体 + 大行距，像她亲手写在本子上的字 */
-.tm-book-entries {
-  display: grid; gap: 10px; padding: 12px 14px; border-radius: var(--radius-md);
-  background: linear-gradient(180deg, rgba(253, 250, 240, 0.75) 0%, rgba(250, 245, 232, 0.6) 100%);
-  border: 1px solid rgba(231, 220, 195, 0.6);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
-}
-.tm-paper { font-family: Georgia, "Noto Serif SC", "Songti SC", "SimSun", serif; }
-.tm-book-entry { display: grid; gap: 3px; }
-.tm-book-entry + .tm-book-entry { border-top: 1px dashed rgba(180, 165, 130, 0.35); padding-top: 10px; }
-.tm-book-entry-ts { color: rgba(146, 132, 106, 0.9); font-size: 11px; font-variant-numeric: tabular-nums; }
-.tm-book-entry-text { font-size: 13.5px; line-height: 1.95; white-space: pre-wrap; color: #3f3a2f; }
-.tm-book-nav { display: flex; align-items: center; justify-content: center; gap: 12px; }
-.tm-book-indicator { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; min-width: 48px; text-align: center; }
+/* 1.3.0：旧「米色卡片」书页（.tm-book* / .tm-paper）已整体换成拟真书本，
+   书架/纸页/丝带/朱印一律见 ui/styles_book.ts */
 
 @keyframes tm-pane-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes tm-slide-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
@@ -671,20 +632,10 @@ export const PANEL_STYLES = `
     color: var(--text);
     background: linear-gradient(180deg, rgba(13, 21, 38, 0.95) 0%, rgba(13, 21, 38, 0.82) 100%);
   }
-  .tm-toc-row { border-color: rgba(148, 163, 184, 0.16); background: rgba(15, 23, 42, 0.45); }
-  .tm-toc-row:hover { background: rgba(15, 23, 42, 0.68); }
-  .tm-toc-no { background: rgba(38, 33, 24, 0.8); border-color: rgba(180, 165, 130, 0.3); }
   .tm-mood-dot { box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.8); }
   .tm-review-bar { background: rgba(148, 163, 184, 0.18); }
   .tm-review-settings { border-top-color: rgba(148, 163, 184, 0.22); }
   .tm-number-input { background: rgba(15, 23, 42, 0.5); border-color: rgba(148, 163, 184, 0.3); color: var(--text); }
-  .tm-book-entries {
-    background: linear-gradient(180deg, rgba(38, 33, 24, 0.7) 0%, rgba(32, 28, 20, 0.6) 100%);
-    border-color: rgba(180, 165, 130, 0.28);
-    box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.08);
-  }
-  .tm-book-entry-text { color: #d8d2c2; }
-  .tm-book-entry-ts { color: rgba(168, 155, 126, 0.9); }
 
 }
 
