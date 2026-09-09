@@ -507,19 +507,28 @@ class SensesMixin:
         record = review_record(_now_utc().isoformat(timespec="seconds"), stats_snapshot, text)
         # 写入前快照：落盘失败要整体回滚——过去"先追加内存+清零素材、再写
         # （且不检查结果）"，真失败（磁盘满/DB 锁）会让这一篇与整段素材永久丢失，
-        # 面板却显示成功
+        # 面板却显示成功。1.3.0 档案室：回滚范围含 archive——篇目/素材/卷宗档
+        # 三件套一起退回快照，盘上仍是旧内容，下一趟 tick 可重试
         prev_review = list(shard.review)
         prev_stats = dict(shard.review_stats)
-        shard.review = append_review(shard.review, record)
+        prev_archive = list(shard.review_archive)
+        shard.review, evicted = append_review(shard.review, record)
         shard.review_stats = review_new_stats()  # 成文后清零重新累计（review 的 new_stats，勿与 stats 的同名混淆）
         res = await self._save_shard_review(lanlan, shard)
+        # 淘汰的那一卷不丢：搬家进档案室（无淘汰时空入参不碰存储，零额外写）
+        res_archive = await self._append_review_archive(lanlan, shard, evicted)
         if isinstance(res, Err):
             # 回滚内存到快照：盘上还是旧内容，内存必须与盘上同构，否则篇目
             # "存在"于本次会话、重启即人间蒸发；素材清零同样撤销，门槛仍成立，
             # 下一趟 tick / 下一次面板触发可重试（不因一次写失败永久卡死）
             shard.review = prev_review
             shard.review_stats = prev_stats
+            shard.review_archive = prev_archive
             return False, "persist_failed"
+        if isinstance(res_archive, Err) and evicted:
+            # 篇目 blob 已成、只有搬家失手：内存 archive 已带新卷，下一次淘汰
+            # 整包重写会自愈；本篇不白写，只留痕不回报失败
+            self.logger.warning("review archive write failed for {} (self-heals on next eviction)", lanlan)
         # 相处统计：第一篇我的日记里程碑（不覆盖最早值）；这次 stats 写失败仅
         # _store_write 留 warning，篇目已安全落盘，可接受
         shard.stats = record_milestone(shard.stats, "first_review")

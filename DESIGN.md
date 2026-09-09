@@ -170,12 +170,21 @@
   槽位调用（碎片同款通道，默认 summary 槽）+ recent 窗口摘样作语境
 - **成文口吻**：中性观察者（第三人称"他/她"），纯文字成段、无评分无徽标；
   prompt 明确要求如实记录负面行为不粉饰、不虚构素材外的事实
-- **呈现**：面板日记页第三页签（目录 + 单篇纸质阅读 + 素材进度条）；
-  `get_review`/`write_review_now`（素材不足 10 轮拒绝硬写）/`clear_review`
-  三个入口；dashboard 带 `review_brief` 轻量概要进 5s 轮询
+- **素材快照进卷宗（1.3.0 完善）**：成文时把本次用过的语气分布/心情均值/
+  原话摘录（至多 6 条、单条 40 字）随正文固化进篇目（review_record 的
+  tone/mood_avg/quotes 三栏），stats 清零后卷宗页仍能回看「本卷依据」；
+  旧篇目缺字段容忍，面板对应栏自动隐藏
+- **呈现**：面板日记页第三页签（档案架 + 卷宗阅读页可跨卷翻页 + 双门槛
+  素材进度：轮数条 + 天数副行 + 到期徽标）；`get_review(scope=shelf|archive)`
+  /`get_review_archive`/`write_review_now`（素材不足 10 轮拒绝硬写）/`clear_review`
+  入口；dashboard 带 `review_brief` + `review_archive_brief` 轻量概要进 5s 轮询；
+  面板翻阅走已白名单的 get_review 加参数通道（1.3.0 藏书阁 403 教训同款防御）
 - **数据**：`review@<角色>` 一个 key 存 `{entries, stats}`（成文时篇目追加与
-  stats 清零一次写入，避免中途崩溃错位）；保留 52 篇淘汰最旧；prune/reset
-  一并清理；调试入口 `debug_review`（素材统计 + 资格判定 + force 成文）
+  stats 清零一次写入，避免中途崩溃错位）；保留 52 篇，写满后淘汰最旧一卷
+  **搬进档案室 `review_archive@<角色>`**（1.3.0，与藏书阁同款纪律：只追加、
+  独立 key、上限 104 卷再满才真删；清空/角色删除/prune 一并清）；
+  调试入口 `debug_review`（素材统计 + 资格判定 + force 成文）、
+  `debug_review_fill`（假卷宗注入/还原，entries 可给 53~60 走真实落盘链验溢出搬家）
 
 
 ## 版本日志（已迁出）
@@ -232,7 +241,8 @@ CHANGELOG，契约性变化改本文件正文——两边各司其职，不再�
 - state/config: `[tide]` / `[mood]` / `[fragments]` / `[journal]` / `[review]` / `[emotion_sense]` 配置段 +
   PluginStore 键（0.5.0 起按角色分片 `cycle@<角色名>` / `mood@<角色名>` / `diary@<角色名>` /
   `journal@<角色名>`（0.7.0 起，旧 `weekly@` 迁入后保留备份）/ `review@<角色名>`
-  （0.8.0 起，`{entries, stats}` 合一存储），加 `lanlan_index` / `settings` /
+  （0.8.0 起，`{entries, stats}` 合一存储）/ `journal_archive@<角色名>` /
+  `review_archive@<角色名>`（1.3.0 起，藏书阁与档案室：淘汰搬家只追加、独立 key），加 `lanlan_index` / `settings` /
   `proactive_state` 三个全局键；1.2.0 起另有全局外观键 `panel_appearance` /
   `gallery_index` / `gallery_img/<id>`（旧单图 `panel_bg` 仅迁移读，保留备份））
 - lifecycle/background work: startup 时刷新运行配置并注册；timer 每 10s 轮询总线与到期检查；

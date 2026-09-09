@@ -35,6 +35,7 @@ from ..core.state import (
     _journal_archive_key,
     _journal_key,
     _LanlanShard,
+    _review_archive_key,
     _review_key,
     _stats_key,
 )
@@ -185,11 +186,11 @@ class DebugEntriesMixin:
         (
             "debug_review_fill",
             "调试：我的日记假卷宗注入/还原",
-            "用确定性假篇目（中性观察者口吻、冷暖轮换）填满「我的日记」档案架——验证盒脊/卷宗阅读页/朱印落位；真实篇目与素材先整包备份，restore=true 一键还原。",
+            "用确定性假篇目（中性观察者口吻、冷暖轮换带本卷依据快照）填满「我的日记」档案架——验证盒脊/卷宗阅读页/朱印落位/档案室搬家链路；注入超 52 卷时旧卷经真实落盘链入档案室。真实篇目、素材与档案室先整包备份，restore=true 一键还原。",
             {
                 "type": "object",
                 "properties": {
-                    "entries": {"type": "integer", "description": "注入篇目数（默认 4，上限 8）"},
+                    "entries": {"type": "integer", "description": "注入篇目数（默认 4，上限 60；>52 验溢出入档案室）"},
                     "restore": {"type": "boolean", "description": "true = 从备份还原真实篇目与素材（默认 false = 注入）"},
                     **_DEBUG_LANLAN_PROP,
                 },
@@ -579,9 +580,11 @@ class DebugEntriesMixin:
     ):
         """我的日记秒级验收（1.3.0）：假卷宗上架/还原，debug_journal_fill 同款纪律。
 
-        注入档：真实 review@ 整包（篇目+素材）备份到 |pre-debug 键（首次才备），
-        档案架换成确定性假篇目（字段全是存储里现成的口径：面板卷宗页/盒脊/
-        朱印一次验齐）；restore 档：整包还原 + 清备份。只动当前角色 review 一键。
+        注入档：真实 review@（篇目+素材）与 review_archive@（档案室）整包备份到
+        |pre-debug 键（首次才备），档案架换成确定性假篇目（字段全是存储里现成的
+        口径：面板卷宗页/盒脊/朱印/本卷依据一次验齐）；restore 档：整包还原 +
+        清备份。只动当前角色 review 两键。entries 可给 53~60：注入超活架上限，
+        溢出的旧卷经真实落盘链搬家进档案室（验的是真链路，不是面板假渲染）。
         """
         name, shard = await self._debug_target_shard(lanlan)
         backup_key = f"{_review_key(name)}|pre-debug"
@@ -595,38 +598,60 @@ class DebugEntriesMixin:
             ]
             stats = raw.get("stats")
             shard.review_stats = dict(stats) if isinstance(stats, dict) else {}
+            # 档案室一并还原（旧版备份无 archive 字段：保持现状不动）
+            archive = raw.get("archive")
+            res_archive = Ok(None)
+            if isinstance(archive, list):
+                shard.review_archive = [
+                    dict(item) for item in archive if isinstance(item, dict)
+                ]
+                res_archive = await self._store_write(
+                    _review_archive_key(name), list(shard.review_archive),
+                    f"review archive restore for {name}",
+                )
             res = await self._save_shard_review(name, shard)
             await self.store.set(backup_key, None)
             self.logger.info("debug review fill restored for {}", name)
-            persist_err = self._persist_error(res)
+            persist_err = self._persist_error(res, res_archive)
             if persist_err is not None:
                 return persist_err
             return Ok({
                 "restored": True,
                 "lanlan": name,
                 "entries_total": len(shard.review),
-                "note": "真实篇目与素材统计已还原，备份已清除。",
+                "archive_total": len(shard.review_archive),
+                "note": "真实篇目、素材统计与档案室已还原，备份已清除。",
             })
-        n = max(1, min(int(entries or 4), 8))
+        n = max(1, min(int(entries or 4), 60))
         backup = await self.store.get(backup_key)
         if not isinstance(backup, Err) and backup.value is None:
             saved = await self.store.set(
                 backup_key,
-                {"entries": list(shard.review), "stats": dict(shard.review_stats)},
+                {
+                    "entries": list(shard.review),
+                    "stats": dict(shard.review_stats),
+                    "archive": list(shard.review_archive),
+                },
             )
             if isinstance(saved, Err):
                 return Err(SdkError("备份真实数据失败，已中止注入"))
         shard.review = fabricate_demo_reviews(n)
+        # 走真实落盘链：注入超 52 卷时 _save_shard_review 的溢出兜底会把旧卷
+        # 搬进档案室——秒级验收也能验到搬家链路本身
         res = await self._save_shard_review(name, shard)
-        self.logger.info("debug review fill seeded for {} (entries {})", name, n)
+        self.logger.info(
+            "debug review fill seeded for {} (entries {}, live {}, archive {})",
+            name, n, len(shard.review), len(shard.review_archive),
+        )
         persist_err = self._persist_error(res)
         if persist_err is not None:
             return persist_err
         return Ok({
             "seeded": True,
             "lanlan": name,
-            "entries_total": n,
-            "note": "打开日记页「我的日记」即见档案架与卷宗（假篇目带 demo 标记）；测完 restore=true 还原。",
+            "entries_total": len(shard.review),
+            "archive_total": len(shard.review_archive),
+            "note": "打开日记页「我的日记」即见档案架与卷宗（假篇目带 demo 标记；注入超 52 卷时溢出入档案室）；测完 restore=true 还原。",
         })
 
     async def _debug_stats(

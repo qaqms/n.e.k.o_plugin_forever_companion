@@ -141,19 +141,38 @@ export type Appearance = {
   text_weight: number
 }
 
+// 我的日记素材快照（1.3.0）：成文时随正文固化进篇目的「本卷依据」——
+// tone 按计数降序、mood_avg 可空（无采样）、quotes 至多 6 条单条≤40 字
+export type ReviewQuote = { kind?: string; quote?: string }
+
 // 我的日记：已成文的一篇评价（get_review 返回，时间倒序）
 export type ReviewEntry = {
   ts?: string
   turns?: number
   span?: string
   self_action_count?: number
+  // 1.3.0 素材快照：旧篇目缺字段容忍（卷宗页对应栏自动隐藏）
+  tone?: Record<string, number>
+  mood_avg?: number | null
+  quotes?: ReviewQuote[]
+  demo?: boolean
   text?: string
 }
 
-// 我的日记素材进度（get_review 返回 / dashboard review_brief 轻量版）
+// 我的日记档案室概览（1.3.0，review_archive_brief 用）：与藏书阁 brief
+// 同款纪律——只显存储里现成的事实（卷数 + 时段），不派生会平移的序号
+export type ReviewArchiveBrief = {
+  entries?: number
+  first_ts?: string
+  last_ts?: string
+}
+
+// 我的日记素材进度（get_review 返回 / dashboard review_brief 轻量版）：
+// 双门槛都可见（1.3.0）——turns 与 days 任先到先写，due/due_reason 供面板提示
 export type ReviewProgress = {
   turns?: number
   turns_threshold?: number
+  days?: number
   days_threshold?: number
   span?: string
   due?: boolean
@@ -255,6 +274,8 @@ export type State = {
   journal_index?: JournalPageHeader[]
   // 藏书阁（1.3.0）：合订本概览；全量翻阅走 get_journal_archive 按需拉取
   journal_archive_brief?: JournalArchiveBrief
+  // 我的日记档案室（1.3.0）：旧卷宗合档概览，面板据此决定画不画那只档案盒
+  review_archive_brief?: ReviewArchiveBrief
   // 个人日记邀请挂起态（1.2.3）：递过邀请、她还没落笔
   journal_invite_pending?: boolean
   lanlan?: string

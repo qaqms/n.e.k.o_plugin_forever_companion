@@ -109,7 +109,8 @@ def test_fabricate_demo_reviews_shape(tm):
     assert all(e.get("demo") for e in entries)
     for e in entries:
         assert e["turns"] > 0 and "~" in e["span"] and "\n" in e["text"]
-        assert set(e) == {"ts", "turns", "span", "self_action_count", "text", "demo"}
+        # 1.3.0 完善：假卷宗同步带「本卷依据」快照三栏，验卷宗页各栏渲染
+        assert set(e) == {"ts", "turns", "span", "self_action_count", "tone", "mood_avg", "quotes", "text", "demo"}
 
 
 def test_debug_review_fill_seed_and_restore(tm, plugin_factory):
@@ -124,12 +125,14 @@ def test_debug_review_fill_seed_and_restore(tm, plugin_factory):
     assert all(pg.get("demo") for pg in shard.review)
     backup = p.store.data["review@灵|pre-debug"]
     assert backup["entries"][0]["text"] == "真实篇" and backup["stats"]["turns"] == 9
+    assert backup["archive"] == [], "1.3.0 档案室一并入备份"
     assert len(p.store.data["review@灵"]["entries"]) == 4
 
     res2 = run(p._debug_review_fill(restore=True, lanlan="灵"))
     assert isinstance(res2, tm.Ok) and res2.value["restored"] is True
     assert [pg["text"] for pg in shard.review] == ["真实篇"]
     assert shard.review_stats["turns"] == 9
+    assert res2.value["archive_total"] == 0
     assert p.store.data.get("review@灵|pre-debug") is None
 
 

@@ -111,11 +111,15 @@ def test_parse_review_response_strips_wrappers(tm) -> None:
 def test_append_review_evicts_oldest(tm) -> None:
     entries = []
     for i in range(tm._REVIEW_MAX_ENTRIES):
-        entries = tm.append_review(entries, tm.review_record(f"2026-01-{i + 1:02d}", {"turns": i}, f"第{i}篇"))
+        entries, ev = tm.append_review(entries, tm.review_record(f"2026-01-{i + 1:02d}", {"turns": i}, f"第{i}篇"))
+        assert ev == [], "未超上限不得带出淘汰卷"
     assert len(entries) == tm._REVIEW_MAX_ENTRIES
-    entries = tm.append_review(entries, tm.review_record("2026-03-01", {"turns": 99}, "新篇"))
+    # 1.3.0 档案室：超限追加返回 (新篇表, 被淘汰卷)——被淘汰卷随返回值带出，
+    # 由调用方搬进 review_archive@（签名不兼容是故意的，防漏改静默丢卷）
+    entries, evicted = tm.append_review(entries, tm.review_record("2026-03-01", {"turns": 99}, "新篇"))
     assert len(entries) == tm._REVIEW_MAX_ENTRIES
-    assert entries[0]["text"] == "第1篇"  # 最旧被淘汰
+    assert [e["text"] for e in evicted] == ["第0篇"], "最旧一卷被带出"
+    assert entries[0]["text"] == "第1篇"  # 活架最旧推进到第二卷
     assert entries[-1]["text"] == "新篇"
 
 
@@ -231,7 +235,7 @@ def test_maybe_write_review_gates(plugin_factory) -> None:
 def test_get_and_clear_review_entries(plugin_factory, tm) -> None:
     p = _with_turns(plugin_factory(), 30)
     shard = run(p._ensure_shard("default"))
-    shard.review = tm.append_review([], tm.review_record("2026-08-01T00:00:00", {"turns": 30}, "第一篇"))
+    shard.review, _ev = tm.append_review([], tm.review_record("2026-08-01T00:00:00", {"turns": 30}, "第一篇"))
     res = run(p.get_review())
     assert res.value["entries"][0]["text"] == "第一篇"
     assert res.value["progress"]["turns"] == 30

@@ -12,9 +12,9 @@ import { Button, Card, EmptyState, Tabs, useToast } from "@neko/plugin-ui"
 import { useEffect, useLocalState, useRef, useState } from "@neko/plugin-ui"
 import { BOOK_STYLES } from "./styles_book"
 import type {
-  DiaryItem, JournalPage, JournalPageHeader, JournalArchiveBrief, ReviewBrief, ReviewEntry, ReviewProgress, TFunc,
+  DiaryItem, JournalPage, JournalPageHeader, JournalArchiveBrief, ReviewArchiveBrief, ReviewBrief, ReviewEntry, ReviewProgress, TFunc,
 } from "./types"
-import { fragmentKindKey, journalTrendKey, moodDotColor } from "./utils"
+import { fragmentKindKey, journalTrendKey, moodDotColor, toneLabelKey } from "./utils"
 
 export function DiaryPane(props: {
   t: TFunc
@@ -30,6 +30,9 @@ export function DiaryPane(props: {
   // 用 types.ts 的 ReviewBrief（含 1.2.3 的 writing/last_result）：内联复刻一份
   // 窄类型会让 reviewBrief.writing 过不了 hosted-tsx 的类型检查（TS2339）
   reviewBrief?: ReviewBrief
+  // 档案室（1.3.0）：活架攒满下架的旧卷宗合档——与藏书阁同款：概览进轮询，
+  // 全量按需拉取；面板据此在档案架末尾画那只档案盒，点开即只读翻阅
+  reviewArchiveBrief?: ReviewArchiveBrief
   onClearDiary: () => void
   onDeleteFragment: (ts: string) => void
   onLoadJournal: () => Promise<JournalPage[]>
@@ -38,14 +41,17 @@ export function DiaryPane(props: {
   onLoadMoreDiary: (offset: number) => Promise<{ items: DiaryItem[]; hasMore: boolean }>
   onInviteJournal: () => void
   onLoadReview: () => Promise<{ entries: ReviewEntry[]; progress: ReviewProgress }>
+  // 档案室全量拉取（失败回 null 区别于真空列表，面板据此弹错不静默）
+  onLoadReviewArchive: () => Promise<ReviewEntry[] | null>
   onWriteReviewNow: () => void
   onClearReview: () => void
   settingsChildren?: any
 }) {
   const {
     t, diary, diaryTotal, fragmentTotal, journalIndex, journalArchiveBrief, invitePending, lanlan, reviewBrief,
+    reviewArchiveBrief,
     onClearDiary, onDeleteFragment, onLoadJournal, onLoadJournalArchive, onLoadMoreDiary, onInviteJournal,
-    onLoadReview, onWriteReviewNow, onClearReview, settingsChildren,
+    onLoadReview, onLoadReviewArchive, onWriteReviewNow, onClearReview, settingsChildren,
   } = props
   const toast = useToast()
 
@@ -90,6 +96,20 @@ export function DiaryPane(props: {
   const [openReviewTs, setOpenReviewTs] = useState<string | null>(null)
   const visibleReview = openReviewTs === null ? null
     : (reviewEntries.find((item) => String(item.ts || "") === openReviewTs) || null)
+  // 跨卷翻页（1.3.0）：篇目按时间倒序（新卷在前），前一卷=列表前一项（更新），
+  // 后一卷=后一项（更旧）——与日记本同口径只翻当前列表，不跨架串档
+  const reviewIdx = openReviewTs === null ? -1
+    : reviewEntries.findIndex((item) => String(item.ts || "") === openReviewTs)
+  // 档案室（1.3.0）：旧卷宗合档——状态机与藏书阁同款（懒拉、brief 卷数过期判定、
+  // 翻阅中不自动重拉：淘汰低频且翻阅按 ts 定位，新卷入档不挪位）
+  const [reviewArchive, setReviewArchive] = useState<ReviewEntry[]>([])
+  const [reviewArchiveLoaded, setReviewArchiveLoaded] = useState(false)
+  const [reviewArchiveLoading, setReviewArchiveLoading] = useState(false)
+  const [openReviewArchiveTs, setOpenReviewArchiveTs] = useState<string | null>(null)
+  const reviewArchiveCount = Number((reviewArchiveBrief && reviewArchiveBrief.entries) || 0)
+  const reviewArchIdx = openReviewArchiveTs === null ? -1
+    : reviewArchive.findIndex((item) => String(item.ts || "") === openReviewArchiveTs)
+  const visibleReviewArchive = reviewArchIdx >= 0 ? reviewArchive[reviewArchIdx] : null
 
   // 重拉我的日记（挂载/切角色/轮询发现写完新篇时自动共用）
   async function reloadReview() {
@@ -106,6 +126,34 @@ export function DiaryPane(props: {
     } finally {
       setReviewLoading(false)
     }
+  }
+
+  // 翻开档案室（1.3.0）：按需拉全量（brief 卷数变化即视为过期），从最新一卷读起
+  async function openReviewArchive() {
+    if (reviewArchiveLoading) return
+    let list = reviewArchive
+    if (!reviewArchiveLoaded || list.length !== reviewArchiveCount) {
+      setReviewArchiveLoading(true)
+      try {
+        const fetched = await onLoadReviewArchive()
+        if (fetched === null) {
+          // 与藏书阁同款：拉不到当场说清，不演"点了没反应"
+          toast.error(t("panel.review.archiveLoadError", { defaultValue: "没能取到旧卷宗（通道不可用），稍后再点一次试试" }))
+          return
+        }
+        list = fetched
+        setReviewArchive(list)
+        setReviewArchiveLoaded(true)
+      } catch (err) {
+        console.warn("[forever_companion] load review archive failed:", err)
+        toast.error(t("panel.review.archiveLoadError", { defaultValue: "没能取到旧卷宗（通道不可用），稍后再点一次试试" }))
+        return
+      } finally {
+        setReviewArchiveLoading(false)
+      }
+    }
+    if (!list.length) return
+    setOpenReviewArchiveTs(String(list[0].ts || ""))
   }
 
   // 重拉个人日记整本（挂载/切角色/轮询发现她写了新页或续写时自动共用）
@@ -131,6 +179,9 @@ export function DiaryPane(props: {
     setDiaryHasMore(false)
     setOpenPageNo(null)
     setOpenReviewTs(null)
+    setOpenReviewArchiveTs(null)
+    setReviewArchive([])
+    setReviewArchiveLoaded(false)
     setOpenArchiveNo(null)
     setArchivePages([])
     setArchiveLoaded(false)
@@ -368,11 +419,30 @@ export function DiaryPane(props: {
                 <div className="tm-derived">
                   {t("panel.review.hint", { defaultValue: "对我的记录" })}
                 </div>
-                {visibleReview ? (
+                {visibleReviewArchive ? (
+                  <ReviewBook
+                    t={t}
+                    entry={visibleReviewArchive}
+                    position={reviewArchIdx + 1}
+                    totalFiles={reviewArchive.length}
+                    hasPrev={reviewArchIdx > 0}
+                    hasNext={reviewArchIdx >= 0 && reviewArchIdx < reviewArchive.length - 1}
+                    onBack={() => { setOpenReviewArchiveTs(null) }}
+                    onPrev={() => { if (reviewArchIdx > 0) setOpenReviewArchiveTs(String(reviewArchive[reviewArchIdx - 1].ts || "")) }}
+                    onNext={() => { if (reviewArchIdx >= 0 && reviewArchIdx < reviewArchive.length - 1) setOpenReviewArchiveTs(String(reviewArchive[reviewArchIdx + 1].ts || "")) }}
+                    archiveLabel={t("panel.review.archiveBadge", { defaultValue: "档案室·旧卷宗" })}
+                  />
+                ) : visibleReview ? (
                   <ReviewBook
                     t={t}
                     entry={visibleReview}
+                    position={reviewIdx + 1}
+                    totalFiles={reviewEntries.length}
+                    hasPrev={reviewIdx > 0}
+                    hasNext={reviewIdx >= 0 && reviewIdx < reviewEntries.length - 1}
                     onBack={() => { setOpenReviewTs(null) }}
+                    onPrev={() => { if (reviewIdx > 0) setOpenReviewTs(String(reviewEntries[reviewIdx - 1].ts || "")) }}
+                    onNext={() => { if (reviewIdx >= 0 && reviewIdx < reviewEntries.length - 1) setOpenReviewTs(String(reviewEntries[reviewIdx + 1].ts || "")) }}
                   />
                 ) : (
                   <ReviewShelf
@@ -382,6 +452,17 @@ export function DiaryPane(props: {
                     loaded={reviewLoaded}
                     loading={reviewLoading}
                     onOpen={(ts) => { setOpenReviewTs(ts) }}
+                    stack={reviewArchiveCount > 0 ? (
+                      <ArchiveStack
+                        t={t}
+                        brief={reviewArchiveBrief || {}}
+                        loading={reviewArchiveLoading}
+                        onOpen={openReviewArchive}
+                        file
+                        seal={t("panel.review.archiveSeal", { defaultValue: "档" })}
+                        tip={t("panel.review.archiveTip", { defaultValue: "攒满下架的旧卷宗都封存在这里——点开只读翻阅" })}
+                      />
+                    ) : null}
                   />
                 )}
               </Card>
@@ -623,7 +704,10 @@ function journalRangeLabel(page: JournalPageHeader): string {
 }
 
 // 我的日记档案架：一根根档案盒脊（硬纸壳 + 竖排成文日期 + 书根轮数 + 盒号），
-// 冷色不参与心情（这本是第三者写的）；上方留一条等宽口径的素材进度
+// 冷色不参与心情（这本是第三者写的）；上方一条等宽口径的素材进度——
+// 1.3.0 补齐双门槛：轮数进度条之外天数维度与到期判定也可见（满 N 轮或满 M 天
+// 任先到先写，过去只显轮数那条，天数到了用户看不出为什么突然动笔）；
+// 架末尾那只档案盒（stack）即档案室入口（空则不画）
 function ReviewShelf(props: {
   t: TFunc
   progress: ReviewProgress
@@ -631,11 +715,16 @@ function ReviewShelf(props: {
   loaded: boolean
   loading: boolean
   onOpen: (ts: string) => void
+  // 档案室入口（1.3.0）：与日记书架的合订本摞同位同款，由调用侧画好传入
+  stack?: any
 }) {
-  const { t, progress, entries, loaded, loading, onOpen } = props
+  const { t, progress, entries, loaded, loading, onOpen, stack } = props
   const turns = Number(progress.turns || 0)
   const threshold = Math.max(1, Number(progress.turns_threshold || 50))
   const pct = Math.min(100, Math.round((turns / threshold) * 100))
+  const days = Number(progress.days || 0)
+  const daysThreshold = Math.max(1, Number(progress.days_threshold || 7))
+  const daysPct = Math.min(100, Math.round((days / daysThreshold) * 100))
   if (!entries.length) {
     return loaded ? (
       <EmptyState
@@ -656,10 +745,26 @@ function ReviewShelf(props: {
               .replace("{total}", String(threshold))}
           </span>
           <span className="tmb-head-spacer" />
+          {progress.due ? (
+            <span className="tmb-meter-due">{t("panel.review.dueNow", { defaultValue: "到时候了，会自己动笔" })}</span>
+          ) : null}
           <span>{pct}%</span>
         </div>
         <div className="tmb-meter-track">
           <div className="tmb-meter-fill" style={{ width: `${pct}%` }} />
+        </div>
+        {/* 天数维度（1.3.0）：轮数没满但日子到了同样成文——两条门槛都要看得见 */}
+        <div className="tmb-meter-row tmb-meter-row--sub">
+          <span>
+            {t("panel.review.daysProgress", { defaultValue: "或满 {total} 天（现第 {d} 天）" })
+              .replace("{total}", String(daysThreshold))
+              .replace("{d}", String(days))}
+          </span>
+          <span className="tmb-head-spacer" />
+          <span>{daysPct}%</span>
+        </div>
+        <div className="tmb-meter-track">
+          <div className="tmb-meter-fill" style={{ width: `${daysPct}%` }} />
         </div>
       </div>
       <div className="tmb-shelf">
@@ -685,24 +790,49 @@ function ReviewShelf(props: {
             </button>
           )
         })}
+        {stack}
       </div>
     </div>
   )
 }
 
 // 铅印卷宗阅读视图：冷灰打孔纸 + 卷首等宽口径行（轮数/区间/她自主起的情绪次数）
-// + 宋体压痕正文 + 一枚流在文末靠右的朱印落款（盖章必不正）
-function ReviewBook(props: { t: TFunc; entry: ReviewEntry; onBack: () => void }) {
-  const { t, entry, onBack } = props
+// + 1.3.0「本卷依据」快照栏（语气分布/心情走向/原话摘录——成文时固化的素材，
+// 旧篇目缺字段整栏隐藏）+ 朱印落款 + 跨卷翻页（与日记本同款：前一卷/后一卷
+// 只翻当前列表，档案室模式题签换口径同一套纸两处出身）
+function ReviewBook(props: {
+  t: TFunc
+  entry: ReviewEntry
+  position: number
+  totalFiles: number
+  hasPrev: boolean
+  hasNext: boolean
+  onBack: () => void
+  onPrev: () => void
+  onNext: () => void
+  // 档案室模式（1.3.0）：题签换口径——卷首日期/区间/依据都是存储里现成的事实
+  archiveLabel?: string
+}) {
+  const { t, entry, position, totalFiles, hasPrev, hasNext, onBack, onPrev, onNext, archiveLabel } = props
   const paras = splitParas(entry.text)
   const turns = String(entry.turns ?? 0)
   const span = spanShort(entry.span)
   const selfActions = String(entry.self_action_count ?? 0)
+  // 本卷依据：三项都取自 review_record 的快照字段，缺任一项只缺那一行
+  const toneEntries = Object.entries(entry.tone || {}).filter(([, n]) => Number(n) > 0)
+  const toneParts = toneEntries.map(([label, n]) => {
+    const key = toneLabelKey(label)
+    const word = key ? t(key, { defaultValue: label }) : label
+    return `${word}×${Number(n)}`
+  })
+  const moodAvg = entry.mood_avg === null || entry.mood_avg === undefined ? null : Number(entry.mood_avg)
+  const quotes = Array.isArray(entry.quotes) ? entry.quotes.filter((q) => String(q && q.quote || "").trim()) : []
+  const hasEvidence = toneParts.length > 0 || moodAvg !== null || quotes.length > 0
   return (
     <div className="tmb-book">
       <div className="tmb-book-strip tmb-book-strip--file">
         <span className="tmb-book-holes" />
-        <span className="tmb-book-title tmb-book-title--file">{t("panel.review.spineTitle", { defaultValue: "相处卷宗" })}</span>
+        <span className="tmb-book-title tmb-book-title--file">{archiveLabel || t("panel.review.spineTitle", { defaultValue: "相处卷宗" })}</span>
       </div>
       <div className="tmb-page tmb-page--file">
         <div className="tmb-head">
@@ -726,6 +856,31 @@ function ReviewBook(props: { t: TFunc; entry: ReviewEntry; onBack: () => void })
             <b className="tmb-dossier-value">{selfActions}</b>
           </span>
         </div>
+        {hasEvidence ? (
+          <div className="tmb-evidence">
+            <div className="tmb-evidence-title">{t("panel.review.evidence", { defaultValue: "本卷依据" })}</div>
+            {toneParts.length ? (
+              <div className="tmb-evidence-line">
+                <span className="tmb-evidence-label">{t("panel.review.evidenceTone", { defaultValue: "她的语气分布" })}</span>
+                <span className="tmb-evidence-value">{toneParts.join(" · ")}</span>
+              </div>
+            ) : null}
+            {moodAvg !== null ? (
+              <div className="tmb-evidence-line">
+                <span className="tmb-evidence-label">{t("panel.review.evidenceMood", { defaultValue: "她的心情走向" })}</span>
+                <span className="tmb-evidence-value">
+                  {t(journalTrendKey(moodAvg), { defaultValue: "" })}（{moodAvg >= 0 ? "+" : ""}{moodAvg.toFixed(2)}）
+                </span>
+              </div>
+            ) : null}
+            {quotes.map((q, qi) => (
+              <div className="tmb-quote" key={String(qi)}>
+                <span className="tmb-quote-kind">{t(fragmentKindKey(q.kind), { defaultValue: "他说" })}</span>
+                <span className="tmb-quote-text">「{String(q.quote || "")}」</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <div className="tmb-page-body">
           <div className="tmb-seal">{t("panel.review.seal", { defaultValue: "观察者记" })}</div>
           {paras.map((para, pi) => (
@@ -737,9 +892,16 @@ function ReviewBook(props: { t: TFunc; entry: ReviewEntry; onBack: () => void })
             {t("panel.review.backToShelf", { defaultValue: "← 放回架上" })}
           </button>
           <span className="tmb-foot-mid">
+            <button type="button" className="tmb-btn" onClick={onPrev} disabled={!hasPrev}>
+              {t("panel.review.prevFile", { defaultValue: "前一卷" })}
+            </button>
+            <span className="tmb-ind">{position} / {totalFiles}</span>
             <span className="tmb-leaf-ind">
               {t("panel.review.turnsMeta", { defaultValue: "{n} 轮" }).replace("{n}", turns)}
             </span>
+            <button type="button" className="tmb-btn" onClick={onNext} disabled={!hasNext}>
+              {t("panel.review.nextFile", { defaultValue: "后一卷" })}
+            </button>
           </span>
         </div>
       </div>
@@ -805,27 +967,33 @@ function shelfTip(t: TFunc, no: number, range: string, trend: string): string {
 }
 
 // 藏书阁的合订本（1.3.0）：书架末尾横叠的一小摞——下架的旧页都在这儿，只读翻阅。
-// 不标本数、不提 52 上限（1.3.0 显示层纪律：不在活架上加计数）；悬停只给时段事实
+// 不标本数、不提 52 上限（1.3.0 显示层纪律：不在活架上加计数）；悬停只给时段事实。
+// 1.3.0 我的日记档案室复用本组件：file 换冷灰档案盒配色，seal/tip 换口径
 function ArchiveStack(props: {
   t: TFunc
-  brief: JournalArchiveBrief
+  brief: JournalArchiveBrief | ReviewArchiveBrief
   loading: boolean
   onOpen: () => void
+  file?: boolean
+  seal?: string
+  tip?: string
 }) {
-  const { t, brief, loading, onOpen } = props
+  const { t, brief, loading, onOpen, file, seal, tip } = props
   const from = String(brief.first_ts || "").slice(0, 10)
   const to = String(brief.last_ts || "").slice(0, 10)
-  const tip = [
-    t("panel.journal.archiveTip", { defaultValue: "写满下架的旧页，合订在这一摞里——点开只读翻阅" }),
+  const fullTip = [
+    tip || t("panel.journal.archiveTip", { defaultValue: "写满下架的旧页，合订在这一摞里——点开只读翻阅" }),
     from ? `${from} – ${to || "?"}` : "",
-    loading ? t("panel.journal.archiveLoading", { defaultValue: "取合订本…" }) : "",
+    loading ? (file
+      ? t("panel.review.archiveLoading", { defaultValue: "取旧卷宗…" })
+      : t("panel.journal.archiveLoading", { defaultValue: "取合订本…" })) : "",
   ].filter((p) => p).join(" · ")
   return (
-    <button type="button" className="tmb-stack" title={tip} onClick={onOpen}>
+    <button type="button" className={file ? "tmb-stack tmb-stack--file" : "tmb-stack"} title={fullTip} onClick={onOpen}>
       <span className="tmb-stack-slab tmb-stack-slab--back" />
       <span className="tmb-stack-slab tmb-stack-slab--mid" />
       <span className="tmb-stack-slab tmb-stack-slab--top">
-        <span className="tmb-stack-seal">{t("panel.journal.archiveSeal", { defaultValue: "藏" })}</span>
+        <span className="tmb-stack-seal">{seal || t("panel.journal.archiveSeal", { defaultValue: "藏" })}</span>
         <span className="tmb-stack-ribbon" />
       </span>
     </button>

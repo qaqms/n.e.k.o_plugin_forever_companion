@@ -30,6 +30,8 @@ from ..core.state import (
     _JOURNAL_ARCHIVE_MAX_PAGES,
     _JOURNAL_MAX_PAGES,
     _KNOWN_CATGIRLS_CACHE_TTL,
+    _REVIEW_ARCHIVE_MAX_ENTRIES,
+    _REVIEW_MAX_ENTRIES,
     _STORE_CAPS_GLOBAL,
     _STORE_CYCLE,
     _STORE_DIARY,
@@ -47,6 +49,7 @@ from ..core.state import (
     _mood_key,
     _MoodState,
     _parse_iso_ts,
+    _review_archive_key,
     _review_key,
     _review_stats_key,
     _snapshot_proactive,
@@ -159,6 +162,12 @@ class ShardsMixin:
             stats_res = await self._store_read(_review_stats_key(lanlan))
             if isinstance(stats_res, Ok) and isinstance(stats_res.value, dict):
                 shard.review_stats = dict(stats_res.value)
+        # 档案室（1.3.0）：活架淘汰下来的旧卷宗合档，只读翻阅；与藏书阁同法载入
+        review_archive_res = await self._store_read(_review_archive_key(lanlan))
+        if isinstance(review_archive_res, Ok) and isinstance(review_archive_res.value, list):
+            shard.review_archive = [
+                dict(item) for item in review_archive_res.value if isinstance(item, dict)
+            ]
         # 相处统计（1.1.0）：stats@<角色>；首载时从三本日记时间戳一次性回填
         # "那天有互动"的活跃标记（轮数无法回填，只点亮天数让热力图有起点）
         stats_store_res = await self._store_read(_stats_key(lanlan))
@@ -746,11 +755,46 @@ class ShardsMixin:
     async def _save_shard_review(self, lanlan: str, shard: _LanlanShard) -> Result[None]:
         """我的日记落盘：成文篇目与素材统计合并写进一个 key（stats 随篇目一起走，
         成文时原子清零——两个独立 key 反而会在中途崩溃时出现篇目已加而 stats
-        未清的错位；加载侧对旧独立 stats key 只读迁移）。"""
-        return await self._store_write(
+        未清的错位；加载侧对旧独立 stats key 只读迁移）。
+
+        1.3.0 档案室：与 _save_shard_journal 同款兜底——内存里超出活架上限的
+        旧卷（磁盘残留/调试注入超长等一切截断路径）先搬进档案室再写篇目 blob；
+        工具/成文路径的淘汰篇由 append_review 返回值带出、调用点另行入阁。"""
+        overflow: list[JsonObject] = []
+        if len(shard.review) > _REVIEW_MAX_ENTRIES:
+            overflow = shard.review[:-_REVIEW_MAX_ENTRIES]
+        shard.review = list(shard.review[-_REVIEW_MAX_ENTRIES:])
+        res_review = await self._store_write(
             _review_key(lanlan),
             {"entries": list(shard.review), "stats": dict(shard.review_stats)},
             f"review for {lanlan}",
+        )
+        if not overflow:
+            return res_review
+        res_archive = await self._append_review_archive(lanlan, shard, overflow)
+        if isinstance(res_review, Err):
+            return res_review
+        return res_archive
+
+    async def _append_review_archive(
+        self, lanlan: str, shard: _LanlanShard, reviews: list[JsonObject]
+    ) -> Result[None]:
+        """档案室追加（1.3.0）：把淘汰卷宗按时间正序 append 进 review_archive@ 并落盘。
+
+        与藏书阁 _append_journal_archive 同款纪律：阁内再满才从最旧一卷真删；
+        空入参不碰存储；只追加、不进 review@ blob——成文热路径永远只重写 52 篇那块。
+        """
+        if not reviews:
+            return Ok(None)
+        for item in reviews:
+            if isinstance(item, dict):
+                shard.review_archive.append(dict(item))
+        if len(shard.review_archive) > _REVIEW_ARCHIVE_MAX_ENTRIES:
+            shard.review_archive = shard.review_archive[-_REVIEW_ARCHIVE_MAX_ENTRIES:]
+        return await self._store_write(
+            _review_archive_key(lanlan),
+            list(shard.review_archive),
+            f"review archive for {lanlan}",
         )
 
     async def _save_shard_stats(self, lanlan: str, shard: _LanlanShard) -> Result[None]:

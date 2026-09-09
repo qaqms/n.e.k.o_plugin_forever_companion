@@ -469,6 +469,21 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     }
   }
 
+  // 档案室（1.3.0）：旧卷宗全量按需拉取（淘汰低频，点开那一次拉齐即可）。
+  // 走 get_review(scope=archive) 而非新入口 get_review_archive：宿主运行中
+  // 覆盖导入不重扫静态入口白名单，新入口要整启宿主才可达（藏书阁同款防御）；
+  // 失败返回 null 由面板就地弹错，不再"点了没反应"
+  async function onLoadReviewArchive() {
+    try {
+      const payload = unwrapCallResult(await props.api.call("get_review", { scope: "archive" }))
+      const r = (payload || {}) as Record<string, any>
+      return Array.isArray(r.entries) ? (r.entries as ReviewEntry[]) : []
+    } catch (err) {
+      console.warn("[forever_companion] load review archive failed:", err)
+      return null
+    }
+  }
+
   async function onWriteReviewNow() {
     try {
       // 受理式入口（1.2.3）：后端秒回"已开始写"，真正的成文在后台一拍内起跑；
@@ -812,6 +827,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
               invitePending={!!state.journal_invite_pending}
               lanlan={state.lanlan}
               reviewBrief={state.review_brief}
+              reviewArchiveBrief={state.review_archive_brief}
               onClearDiary={onClearDiary}
               onDeleteFragment={onDeleteFragment}
               onLoadJournal={onLoadJournal}
@@ -820,6 +836,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
               onLoadMoreDiary={onLoadMoreDiary}
               onInviteJournal={onInviteJournal}
               onLoadReview={onLoadReview}
+              onLoadReviewArchive={onLoadReviewArchive}
               onWriteReviewNow={onWriteReviewNow}
               onClearReview={onClearReview}
               settingsChildren={(

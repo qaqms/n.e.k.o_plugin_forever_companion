@@ -436,6 +436,34 @@ export const BOOK_STYLES = `
 .tmb-meter-row { display: flex; align-items: baseline; gap: 8px; font-family: var(--tmb-mono); font-size: 10.5px; color: rgba(52, 64, 78, 0.92); letter-spacing: 0.01em; }
 .tmb-meter-track { height: 5px; border-radius: 1px; background: rgba(72, 86, 104, 0.18); box-shadow: inset 0 1px 1px rgba(18, 26, 36, 0.18); overflow: hidden; }
 .tmb-meter-fill { height: 100%; background: linear-gradient(90deg, rgba(94, 108, 126, 0.85), rgba(58, 72, 90, 0.9)); }
+/* 双门槛副行（1.3.0）：天数维度比轮数低一级字号与透明度，主次不互摸 */
+.tmb-meter-row--sub { font-size: 9.5px; opacity: 0.78; }
+/* 到期徽标：朱色等宽小章——"到时候了"是事实陈述不是庆祝，不给动效 */
+.tmb-meter-due {
+  font-size: 9.5px; letter-spacing: 0.04em; padding: 0 5px; border-radius: 2px;
+  color: #8c3b2e; border: 1px solid rgba(140, 59, 46, 0.55); background: rgba(246, 232, 222, 0.5);
+}
+/* 本卷依据（1.3.0）：成文时固化的素材快照——卷宗附页的口吻，
+   虚线压顶与正文分层，等宽小字列事实（语气分布/心情走向/原话摘录） */
+.tmb-evidence {
+  position: relative; z-index: 1;
+  margin: 2px 0 10px; padding: 7px 10px 8px;
+  border-top: 1px dashed rgba(72, 86, 104, 0.5); border-bottom: 1px dashed rgba(72, 86, 104, 0.28);
+  background: rgba(255, 255, 255, 0.22);
+  display: grid; gap: 4px;
+}
+.tmb-evidence-title {
+  font-family: var(--tmb-song); font-size: 11px; letter-spacing: 0.18em; color: rgba(52, 64, 78, 0.85);
+}
+.tmb-evidence-line { display: flex; align-items: baseline; gap: 8px; font-family: var(--tmb-mono); font-size: 10.5px; color: rgba(45, 51, 59, 0.95); }
+.tmb-evidence-label { flex: 0 0 auto; opacity: 0.72; letter-spacing: 0.04em; }
+.tmb-evidence-value { min-width: 0; overflow-wrap: anywhere; }
+/* 原话摘录：卷宗里的口供行——kind 小标签 + 等宽引文，不抢正文视觉 */
+.tmb-quote { display: flex; align-items: baseline; gap: 6px; font-size: 10.5px; font-family: var(--tmb-mono); color: rgba(45, 51, 59, 0.92); overflow-wrap: anywhere; }
+.tmb-quote-kind {
+  flex: 0 0 auto; font-family: var(--tmb-song); font-size: 9.5px; letter-spacing: 0.06em;
+  padding: 0 4px; border: 1px solid rgba(72, 86, 104, 0.42); border-radius: 2px; color: rgba(52, 64, 78, 0.85);
+}
 
 /* 藏书阁（1.3.0）：书架末尾横叠的一小摞——写满下架的旧页都在这儿，只读翻阅。
    不标本数、不提 52 上限（显示层纪律：不在活架上加计数）；布面取书脊同族
@@ -485,6 +513,25 @@ export const BOOK_STYLES = `
   background: linear-gradient(180deg, var(--tmb-ribbon), rgba(120, 40, 34, 0.9));
   clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%);
   box-shadow: 0 1px 2px rgba(40, 20, 10, 0.35);
+}
+/* 档案室的档案盒摞（1.3.0）：同一摞板子的冷灰孪生——硬纸壳取盒脊同族色，
+   丝带换成一张探出的口取纸标签（卷宗盒里夹的是标签不是丝带） */
+.tmb-stack--file .tmb-stack-slab {
+  background: linear-gradient(180deg, rgba(101, 113, 130, 0.92) 0%, rgba(70, 82, 99, 0.95) 62%, rgba(52, 63, 78, 0.96) 100%);
+  border-color: rgba(30, 40, 54, 0.5);
+  box-shadow: 0 2px 5px rgba(18, 26, 36, 0.3), inset 0 1px 0 rgba(240, 245, 251, 0.14);
+}
+.tmb-stack--file .tmb-stack-slab::before {
+  background: linear-gradient(180deg, rgba(244, 247, 251, 0.88), rgba(214, 222, 232, 0.72));
+  box-shadow: inset 0 0 0 1px rgba(72, 86, 104, 0.2);
+}
+.tmb-stack--file:hover .tmb-stack-slab--top { box-shadow: 0 5px 10px rgba(18, 26, 36, 0.4), inset 0 1px 0 rgba(240, 245, 251, 0.2); }
+.tmb-stack--file .tmb-stack-ribbon {
+  left: 9px; top: 8px; width: 16px; height: 13px;
+  background: linear-gradient(180deg, rgba(250, 251, 253, 0.96), rgba(226, 232, 240, 0.92));
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 84%, 0 100%);
+  border: 1px solid rgba(72, 86, 104, 0.35);
+  box-shadow: 0 1px 2px rgba(18, 26, 36, 0.28);
 }
 
 /* ============================================================
@@ -543,6 +590,14 @@ export const BOOK_STYLES = `
   .tmb-meter-track { background: rgba(148, 164, 184, 0.2); box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.4); }
   .tmb-meter-fill { background: linear-gradient(90deg, rgba(150, 168, 190, 0.9), rgba(110, 128, 152, 0.95)); }
   .tmb-meter-row { color: rgba(195, 207, 221, 0.95); }
+  .tmb-meter-due { color: #e0a291; border-color: rgba(224, 162, 145, 0.55); background: rgba(60, 34, 28, 0.5); }
+  .tmb-evidence { border-top-color: rgba(148, 164, 184, 0.34); border-bottom-color: rgba(148, 164, 184, 0.18); background: rgba(0, 0, 0, 0.18); }
+  .tmb-evidence-title { color: rgba(195, 207, 221, 0.9); }
+  .tmb-evidence-line, .tmb-quote { color: rgba(205, 216, 228, 0.94); }
+  .tmb-quote-kind { border-color: rgba(148, 164, 184, 0.34); color: rgba(195, 207, 221, 0.9); }
+  .tmb-stack--file .tmb-stack-slab { background: linear-gradient(180deg, rgba(64, 74, 90, 0.95) 0%, rgba(46, 56, 70, 0.96) 62%, rgba(34, 43, 56, 0.98) 100%); border-color: rgba(8, 12, 18, 0.6); }
+  .tmb-stack--file .tmb-stack-slab::before { background: linear-gradient(180deg, rgba(198, 210, 224, 0.5), rgba(160, 174, 192, 0.4)); }
+  .tmb-stack--file .tmb-stack-ribbon { background: linear-gradient(180deg, rgba(222, 230, 240, 0.92), rgba(188, 199, 214, 0.88)); border-color: rgba(8, 12, 18, 0.5); }
   .tmb-text--lead::first-letter { color: rgba(214, 184, 128, 0.95); }
   .tmb-page-body::before { background: linear-gradient(90deg, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.34)); }
   .tmb-stack-slab { background: linear-gradient(180deg, rgba(76, 56, 38, 0.95) 0%, rgba(52, 37, 24, 0.96) 62%, rgba(36, 25, 15, 0.98) 100%); border-color: rgba(14, 10, 4, 0.55); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 246, 226, 0.08); }

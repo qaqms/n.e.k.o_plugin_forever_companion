@@ -19,6 +19,13 @@ prompt 的素材块组装、模型回复的解析截断、篇目的追加与淘�
      "actions": [{"action", "origin"}], # 情绪动作事件（origin=user/自主）
      "fragments": [quote, ...]}         # 期间新增碎片的原话摘录（含 kind 标注）
 
+1.3.0 完善（对齐个人日记的藏书阁纪律）：
+- 成文时素材快照（tone/mood_avg/quotes）固化进篇目（review_record），stats
+  清零后卷宗页仍能回看「本卷依据」；
+- 活架攒满 52 篇淘汰最旧一卷不再静默丢：append_review 把被淘汰卷随
+  返回值带出，由调用方搬进档案室 review_archive@（只追加、独立 key、
+  上限 104 卷，只给用户翻阅）。
+
 常量（门槛/截断/prompt）来自 state.py；导入用 try/except 双路径，兼容包加载
 （plugins.forever_companion）与裸导入（同 cycle.py 被 test_cycle.py 裸导入的先例）
 两种姿势。
@@ -150,6 +157,18 @@ def can_force_write(stats: JsonObject) -> bool:
     return int(stats.get("turns") or 0) >= _REVIEW_MIN_TURNS_FORCED
 
 
+def elapsed_days(stats: JsonObject, *, now: datetime | None = None) -> int:
+    """双门槛的天数维度：距统计起点已满几天（纯函数，面板进度条用）。
+
+    与 review_due 同口径（都从 started_at 起算）；无起点/坏数据给 0。
+    """
+    started = _parse_iso_ts(stats.get("started_at"))
+    if started is None:
+        return 0
+    current = now or _now_utc()
+    return max(0, (current - started).days)
+
+
 def build_review_prompt(
     stats: JsonObject,
     *,
@@ -244,7 +263,9 @@ def parse_review_response(raw: str) -> str:
 def fabricate_demo_reviews(count: int = 4, *, now: datetime | None = None) -> list[JsonObject]:
     """调试注入（debug_review_fill）：确定性假「我的日记」篇目——中性观察者
     口吻、零随机可复现。结构对齐 review_record（ts/turns/span/self_action_count/
-    text），额外带 demo 标记供分辨；正文多段，验证卷宗阅读页排版与朱印落位。
+    text + 1.3.0 快照三栏 tone/mood_avg/quotes），额外带 demo 标记供分辨；
+    正文多段，验证卷宗阅读页排版与朱印落位。count 可超活架上限 52——配
+    debug_review_fill 走真实落盘链，溢出的旧卷自行搬家进档案室（验真链路）。
     """
     current = now or _now_utc()
     templates = (
@@ -267,15 +288,33 @@ def fabricate_demo_reviews(count: int = 4, *, now: datetime | None = None) -> li
     )
     turn_plan = (86, 41, 63, 28)
     self_actions = (0, 2, 3, 1)
+    # 快照三栏轮转：暖/冷/中/微亮四档，验卷宗页「本卷依据」各栏存在/缺失两态
+    tone_plan = (
+        {"happy": 34, "neutral": 12, "surprised": 3},
+        {"sad": 9, "angry": 5, "neutral": 7},
+        {"happy": 21, "surprised": 4},
+        {"neutral": 11, "sad": 3},
+    )
+    mood_plan = (0.38, -0.22, 0.06, 0.19)
+    quote_plan = (
+        [{"kind": "like", "quote": "今天路过那家店，又想起你爱吃的桂花糕"}],
+        [{"kind": "overstep", "quote": "你根本不理解我，算了不说了"}, {"kind": "important", "quote": "下周体检，记得早点睡"}],
+        [],
+        [{"kind": "important", "quote": "小时候那碗糖水，下次做给我看"}],
+    )
     pages: list[JsonObject] = []
-    for i in range(max(0, min(int(count), len(templates)))):
+    for i in range(max(0, min(int(count), 60))):
         end = current - timedelta(days=(count - 1 - i) * 7)
         start = end - timedelta(days=6, hours=2)
+        rot = i % 4
         pages.append({
             "ts": end.isoformat(timespec="seconds"),
             "turns": turn_plan[i % len(turn_plan)],
             "span": f"{start.date().isoformat()}~{end.date().isoformat()}",
             "self_action_count": self_actions[i % len(self_actions)],
+            "tone": dict(tone_plan[rot]),
+            "mood_avg": mood_plan[rot],
+            "quotes": [dict(q) for q in quote_plan[rot]],
             "text": templates[i % len(templates)][:_REVIEW_ENTRY_MAX_CHARS],
             "demo": True,
         })
@@ -283,8 +322,34 @@ def fabricate_demo_reviews(count: int = 4, *, now: datetime | None = None) -> li
 
 
 def review_record(ts_iso: str, stats: JsonObject, text: str) -> JsonObject:
-    """成文结果 → 我的日记篇目（含期间概要，供面板目录行展示）。"""
+    """成文结果 → 我的日记篇目（含期间概要与素材快照，供卷宗页展示）。
+
+    1.3.0 补上「本卷依据」：成文时素材（语气分布/心情均值/原话摘录）随正文
+    一并固化进篇目——过去只存轮数/区间/自主情绪三个数，stats 清零后模型
+    真正写卷宗用过的证据永久丢失，卷宗页无从展示。各快照字段都有硬截断，
+    不随素材量膨胀；旧篇目缺字段容忍（显示层自行隐藏对应栏）。
+    """
     actions = stats.get("actions") if isinstance(stats.get("actions"), list) else []
+    # 语气分布：只保留计数 >0 的项，按计数降序（卷宗页直接照序渲染）
+    tone_raw = stats.get("tone") if isinstance(stats.get("tone"), dict) else {}
+    tone = {
+        str(k): int(v)
+        for k, v in sorted(tone_raw.items(), key=lambda kv: -int(kv[1] or 0))
+        if int(v or 0) > 0
+    }
+    # 心情均值：与 prompt 素材块同款算法（截断样本求均值，保留 2 位）
+    samples = stats.get("affect_samples") if isinstance(stats.get("affect_samples"), list) else []
+    vals = [float(v) for v in samples if isinstance(v, (int, float))]
+    mood_avg = round(sum(vals) / len(vals), 2) if vals else None
+    # 原话摘录：至多 6 条、每条截 40 字（与 prompt 素材块同源，存档更短）
+    quotes: list[JsonObject] = []
+    fragments = stats.get("fragments") if isinstance(stats.get("fragments"), list) else []
+    for item in fragments[:6]:
+        if not isinstance(item, dict):
+            continue
+        quote = str(item.get("quote") or "").strip()[:40]
+        if quote:
+            quotes.append({"kind": str(item.get("kind") or ""), "quote": quote})
     return {
         "ts": ts_iso,
         "turns": int(stats.get("turns") or 0),
@@ -293,14 +358,41 @@ def review_record(ts_iso: str, stats: JsonObject, text: str) -> JsonObject:
         "self_action_count": sum(
             1 for a in actions if isinstance(a, dict) and str(a.get("origin") or "self") == "self"
         ),
+        # 素材快照（1.3.0）：卷宗页「本卷依据」栏的数据源
+        "tone": tone,
+        "mood_avg": mood_avg,
+        "quotes": quotes,
         "text": str(text or "")[:_REVIEW_ENTRY_MAX_CHARS],
     }
 
 
-def append_review(entries: list[JsonObject], record: JsonObject) -> list[JsonObject]:
-    """追加一篇评价（时间正序），超上限淘汰最旧；不 mutate 入参。"""
+def append_review(
+    entries: list[JsonObject], record: JsonObject
+) -> tuple[list[JsonObject], list[JsonObject]]:
+    """追加一篇评价（时间正序），返回 (新篇表, 被淘汰篇)。超上限淘汰最旧——
+    1.3.0 起淘汰不再是静默的丢：被淘汰卷随返回值带出，由调用方 append 进
+    档案室（review_archive@）；不 mutate 入参。旧调用点把返回值当列表用的
+    姿势已废，真机/测试同轮更新（签名不兼容是故意的，防漏改静默入不了阁）。"""
     fresh = [dict(item) for item in entries if isinstance(item, dict)]
     fresh.append(dict(record))
+    evicted: list[JsonObject] = []
     if len(fresh) > _REVIEW_MAX_ENTRIES:
+        evicted = fresh[:-_REVIEW_MAX_ENTRIES]
         fresh = fresh[-_REVIEW_MAX_ENTRIES:]
-    return fresh
+    return fresh, evicted
+
+
+def review_archive_brief(entries: list[JsonObject]) -> JsonObject:
+    """档案室概览（纯函数，进 5s 轮询的极轻量载荷）：卷数 + 时段。
+
+    与藏书阁 archive_brief 同款显示层纪律：只显存储里现成的事实（成文日），
+    不派生任何会随淘汰平移的序号。first_ts = 最旧一卷成文日，last_ts = 最新一卷。
+    """
+    items = [p for p in entries if isinstance(p, dict)]
+    if not items:
+        return {"entries": 0}
+    return {
+        "entries": len(items),
+        "first_ts": str(items[0].get("ts") or ""),
+        "last_ts": str(items[-1].get("ts") or ""),
+    }

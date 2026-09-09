@@ -108,6 +108,16 @@ def _review_stats_key(lanlan: str) -> str:
     return f"review_stats@{lanlan}"
 
 
+def _review_archive_key(lanlan: str) -> str:
+    """档案室（1.3.0）：「我的日记」攒满 52 篇后被淘汰的旧卷宗合档。
+
+    与藏书阁（journal_archive@）同款纪律：淘汰不再是静默的丢，而是静默的
+    搬家。只追加、不入 review@ 当前 blob——成文热路径永远只重写 52 篇那块；
+    时间正序（最旧在前），新篇永远追加在末尾。
+    """
+    return f"review_archive@{lanlan}"
+
+
 def _stats_key(lanlan: str) -> str:
     """相处统计（1.1.0）：按天聚合的长期累计（徽章/热力图/月报），按角色分片。
 
@@ -265,6 +275,9 @@ _REVIEW_DEFAULT_DAYS = 7
 _REVIEW_ENTRY_MAX_CHARS = 900
 # 保留篇数上限（超出淘汰最旧；评价不是流水账，一年 52 篇足够回看）
 _REVIEW_MAX_ENTRIES = 52
+# 档案室（1.3.0）卷宗上限：活架 52 篇淘汰下来的旧卷宗只搬家不丢弃，
+# 与藏书阁同款 2× 容量（两年份的档案架）；阁内再满才从最旧一卷真删
+_REVIEW_ARCHIVE_MAX_ENTRIES = 104
 # 自动成文的最小素材量：轮数不足此值时"立即写一篇"拒绝硬写（防空话连篇）
 _REVIEW_MIN_TURNS_FORCED = 10
 # 成文素材：最近对话摘样的轮数上限（成文时一次性从宿主 recent 拉取）
@@ -491,6 +504,7 @@ class _LanlanShard:
         "journal_archive",
         "review_stats",
         "review",
+        "review_archive",
         "stats",
         "last_injected_message_ts",
         "user_message_count_since_inject",
@@ -531,6 +545,8 @@ class _LanlanShard:
         # 重新累计，见 review.py）；review = 已成文的评价篇目（时间正序列表）
         self.review_stats: JsonObject = {}
         self.review: list[JsonObject] = []
+        # 档案室（1.3.0）：活架攒满 52 篇后淘汰的旧卷宗，只读翻阅；与 journal_archive 同法
+        self.review_archive: list[JsonObject] = []
         # 面板「立即写一篇」异步队列（1.2.3）：pending_review_write = 排队时刻
         # （0 = 无待写）；成文结果 {ts, written, reason} 供面板轮询弹完成 toast。
         # 都只存内存：插件重启即弃，面板写作中态随之消失，用户可重新点击

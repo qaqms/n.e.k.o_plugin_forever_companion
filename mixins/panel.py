@@ -40,8 +40,16 @@ from ..core.cycle import (
 )
 from ..core.journal import archive_brief, page_header
 from ..core.onboarding import build_readiness, make_guide_record, wizard_pending
-from ..core.review import new_stats as review_new_stats
-from ..core.review import review_due
+from ..core.review import (
+    elapsed_days as review_elapsed_days,
+)
+from ..core.review import (
+    new_stats as review_new_stats,
+)
+from ..core.review import (
+    review_archive_brief,
+    review_due,
+)
 from ..core.state import (
     _FRAGMENT_DEFAULT_SLOT,
     _GALLERY_THUMB_MAX_CHARS,
@@ -64,6 +72,7 @@ from ..core.state import (
     _MoodState,
     _now_utc,
     _parse_iso_ts,
+    _review_archive_key,
     _review_key,
     _review_stats_key,
     _stats_key,
@@ -289,6 +298,9 @@ class PanelEntriesMixin:
                 "writing": bool(shard.pending_review_write) or lanlan in self._review_writing,
                 "last_result": shard.review_write_result,
             },
+            # 档案室（1.3.0）：旧卷宗合档概览（极轻量：卷数 + 时段）——面板据此
+            # 决定画不画档案架末尾那只档案盒；全量翻阅走 get_review(scope=archive)
+            "review_archive_brief": review_archive_brief(shard.review_archive),
             # 模型通道状态灯（情绪页"模型通道"卡）：ok / free_route / no_model / disabled
             "channel_status": channel_status,
             # 能力中心总览（1.2.7）：功能页数据源随 5s 轮询下发（纯内存小载荷）。
@@ -1409,11 +1421,20 @@ class PanelEntriesMixin:
         name=tr("entries.get_review.name", default="翻看我的日记"),
         description=tr(
             "entries.get_review.description",
-            default="翻看「我的日记」：关于主人互动方式的客观评价（全部篇目 + 素材进度）。仅作用于当前角色。",
+            default="翻看「我的日记」：关于主人互动方式的客观评价（全部篇目 + 素材进度）。scope=archive 时改翻档案室旧卷宗。仅作用于当前角色。",
         ),
-        input_schema={"type": "object", "properties": {}},
+        input_schema={
+            "type": "object",
+            "properties": {
+                "scope": {
+                    "type": "string",
+                    "enum": ["", "shelf", "archive"],
+                    "description": "缺省/shelf=档案架现卷；archive=档案室旧卷宗（只读）",
+                },
+            },
+        },
     )
-    async def get_review(self, **_: Any):
+    async def get_review(self, scope: str = "", **_: Any):
         lanlan, shard = await self._current_shard_async()
         stats = dict(shard.review_stats)
         due, reason = review_due(
@@ -1421,19 +1442,44 @@ class PanelEntriesMixin:
             turns_threshold=self._review_turns_threshold(),
             days_threshold=self._review_days_threshold(),
         )
-        # 素材进度：面板目录行/进度条用（turns 现值 + 门槛 + 期间起止）
+        # 素材进度：面板目录行/进度条用（turns 现值 + 双门槛 + 天数维度 + 到期判定）
+        progress = {
+            "turns": int(stats.get("turns") or 0),
+            "turns_threshold": self._review_turns_threshold(),
+            "days": review_elapsed_days(stats),
+            "days_threshold": self._review_days_threshold(),
+            "span": f"{str(stats.get('started_at') or '')[:10]}~{str(stats.get('last_turn_at') or '')[:10]}",
+            "due": due,
+            "due_reason": reason,
+        }
+        # 1.3.0 档案室：旧卷宗翻阅默认走本入口的 scope=archive 通道——宿主在
+        # 运行中覆盖导入时不会重扫静态入口白名单，新入口 get_review_archive
+        # 要整启宿主才可达（藏书阁实机踩坑同款防御）；两通道同数据
+        want_archive = str(scope or "").strip().lower() == "archive"
+        source = shard.review_archive if want_archive else shard.review
         return Ok({
-            "entries": list(reversed(shard.review)),  # 时间倒序：最新一篇在前
+            "entries": list(reversed(source)),  # 时间倒序：最新一卷在前
             "lanlan": lanlan,
-            "progress": {
-                "turns": int(stats.get("turns") or 0),
-                "turns_threshold": self._review_turns_threshold(),
-                "days_threshold": self._review_days_threshold(),
-                "span": f"{str(stats.get('started_at') or '')[:10]}~{str(stats.get('last_turn_at') or '')[:10]}",
-                "due": due,
-                "due_reason": reason,
-            },
+            "scope": "archive" if want_archive else "shelf",
+            "progress": progress,
         })
+
+    @ui.action(
+        label=tr("actions.get_review_archive.label", default="翻阅档案室旧卷宗"),
+        tone="default",
+    )
+    @plugin_entry(
+        id="get_review_archive",
+        name=tr("entries.get_review_archive.name", default="翻阅档案室旧卷宗"),
+        description=tr(
+            "entries.get_review_archive.description",
+            default="只读翻阅档案室：「我的日记」攒满下架的旧卷宗合档。面板翻阅默认走 get_review(scope=archive) 同数据通道（兼容宿主运行中覆盖导入不重扫静态入口白名单）；本入口供 API/跨插件与整启后使用。仅作用于当前角色。",
+        ),
+        input_schema={"type": "object", "properties": {}},
+    )
+    async def get_review_archive(self, **_: Any):
+        lanlan, shard = await self._current_shard_async()
+        return Ok({"entries": list(reversed(shard.review_archive)), "lanlan": lanlan})
 
     @ui.action(
         label=tr("actions.write_review_now.label", default="立即写一篇"),
@@ -1484,25 +1530,31 @@ class PanelEntriesMixin:
     @ui.action(
         label=tr("actions.clear_review.label", default="清空我的日记"),
         tone="danger",
-        confirm=tr("actions.clear_review.confirm", default="将删除当前角色的全部「我的日记」评价（累计素材一并清零），不可恢复，确认？"),
+        confirm=tr("actions.clear_review.confirm", default="将删除当前角色的全部「我的日记」评价（含档案室旧卷宗，累计素材一并清零），不可恢复，确认？"),
         refresh_context=True,
     )
     @plugin_entry(
         id="clear_review",
         name=tr("entries.clear_review.name", default="清空我的日记"),
-        description=tr("entries.clear_review.description", default="删除当前角色的全部「我的日记」评价并清零素材统计。不可恢复。"),
+        description=tr("entries.clear_review.description", default="删除当前角色的全部「我的日记」评价与档案室旧卷宗，并清零素材统计。不可恢复。"),
         input_schema={"type": "object", "properties": {}},
     )
     async def clear_review(self, **_: Any):
         lanlan, shard = await self._current_shard_async()
         count = len(shard.review)
+        archive_count = len(shard.review_archive)
         shard.review = []
         shard.review_stats = review_new_stats()
+        shard.review_archive = []
         res_review = await self._save_shard_review(lanlan, shard)
-        persist_err = self._persist_error(res_review)
+        # 档案室一并清空（写空列表 blob，与藏书阁 prune 同口径的彻底清理）
+        res_archive = await self._store_write(
+            _review_archive_key(lanlan), [], f"clear review archive for {lanlan}"
+        )
+        persist_err = self._persist_error(res_review, res_archive)
         if persist_err is not None:
             return persist_err
-        return Ok({"cleared": count, "lanlan": lanlan})
+        return Ok({"cleared": count, "archive_cleared": archive_count, "lanlan": lanlan})
 
     @ui.action(
         label=tr("actions.get_stats.label", default="查看相处统计"),
@@ -1662,6 +1714,7 @@ class PanelEntriesMixin:
             _journal_key(name), _weekly_key(name),  # weekly@ 为 0.7.0 前的旧周记 key，一并清
             _journal_archive_key(name),  # 藏书阁合订本（1.3.0）：角色份一并清
             _review_key(name), _review_stats_key(name),  # 我的日记（0.8.0）：篇目与旧独立 stats key
+            _review_archive_key(name),  # 档案室（1.3.0）：旧卷宗合档一并清，不留孤儿卷
             _stats_key(name),  # 相处统计（1.1.0）
             _caps_key(name),  # 能力否决集（1.2.7）：角色份一并清，不留残留开关
         ):
