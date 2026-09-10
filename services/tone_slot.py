@@ -180,6 +180,40 @@ def _resolve_tone_slot(
     return {"model": model, "api_key": api_key, "base_url": base_url}
 
 
+def _exc_shape(exc: BaseException) -> str:
+    """异常 → 脱敏诊断串：只取类型名与（若有的）HTTP 状态码，**永不** str(exc)。
+
+    隐私契约（DESIGN「隐私与日志脱敏契约」）：urllib 异常的原始 message 可能携带
+    完整 URL——自定义端点里嵌 userinfo 或 `?api-key=` 查询参数的服务商（宿主日志
+    脱敏正则不覆盖连字符变体）会随异常串原样落进插件日志文件。类型名 + code
+    足够区分 DNS/拒绝连接/401/429 这一类诊断分级（宿主规范：优先记录脱敏后的
+    长度、ID 和错误类型）。
+    """
+    code = getattr(exc, "code", None)
+    if isinstance(code, int):
+        return f"{type(exc).__name__}(code={code})"
+    return type(exc).__name__
+
+
+def _payload_shape(payload: object) -> str:
+    """响应 payload → 结构摘要（类型/顶层键名/条数/字节长度），不输出任何值。
+
+    "返回不是可用的 OpenAI 形态"这件事由形态字段完全判定（缺 choices、error 信封、
+    网关劫持页的 HTML 顶层非 dict），键名与长度足够定位；payload 值可能被上游
+    回显成对话内容，按契约不进日志。
+    """
+    if isinstance(payload, dict):
+        parts = [f"keys={sorted(str(k)[:24] for k in payload)[:6]}"]
+        choices = payload.get("choices")
+        if isinstance(choices, list):
+            parts.append(f"choices={len(choices)}")
+        parts.append(f"bytes={len(str(payload))}")
+        return "dict " + " ".join(parts)
+    if isinstance(payload, (bytes, str)):
+        return f"{type(payload).__name__} bytes={len(payload)}"
+    return type(payload).__name__
+
+
 def _post_chat_completion(
     base_url: str, api_key: str, model: str, prompt: str, logger: Any = None
 ) -> str | None:
@@ -206,9 +240,11 @@ def _post_chat_completion(
             payload = _json.loads(resp.read().decode("utf-8"))
     except Exception as exc:  # noqa: BLE001 - 直连失败仍降级，但必须留痕（1.2.2 审查轮）
         # warning 而非 debug：debug 不进日志文件，面板提示"详见插件日志"时会
-        # 出现"让用户查、又查不到"的诊断盲区；调用点都有分钟级节流，不会刷屏
+        # 出现"让用户查、又查不到"的诊断盲区；调用点都有分钟级节流，不会刷屏。
+        # 1.3.0 第十轮：只记脱敏形态（类型+code），裸 exc 串可能带自定义端点
+        # URL/凭据，见 _exc_shape 的隐私契约
         if logger is not None:
-            logger.warning("tone direct chat completion failed: {}: {}", exc.__class__.__name__, exc)
+            logger.warning("tone direct chat completion failed: {}", _exc_shape(exc))
         return None
     choices = payload.get("choices") if isinstance(payload, dict) else None
     if isinstance(choices, list) and choices:
@@ -218,12 +254,11 @@ def _post_chat_completion(
             if isinstance(content, str):
                 return content
     # HTTP 通了但响应不是可用的 OpenAI 形态（错误体被 200 返回/网关劫持页等）：
-    # 过去同样静默 None，与"请求失败"无从区分——留一条带前 80 字符的 warning
+    # 过去同样静默 None，与"请求失败"无从区分——留一条结构摘要 warning（1.3.0
+    # 第十轮起只记形态不记内容：旧版把响应前 80 字符切片直打日志，而响应值
+    # 可能被上游回显成对话内容，违反隐私契约（旧写法字串已被回归门全文本钉死）
     if logger is not None:
-        logger.warning(
-            "tone direct chat completion returned no usable content: payload head={!r}",
-            str(payload)[:80],
-        )
+        logger.warning("tone direct chat completion returned no usable content: {}", _payload_shape(payload))
     return None
 
 

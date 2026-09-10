@@ -249,7 +249,8 @@ SDK 的 OS 活动快照，与 study_companion 同款，隐私态下自动静默�
 
 **模型与隐私**：默认跟随宿主的情感模型配置；也可在设置里下拉选择宿主已配置的
 其他模型槽位（对话/总结/校正/视觉/Agent）。选择非默认槽位时，插件读取宿主本地
-`core_config.json` 解析该槽位的模型与端点并直连（数据出域，介意可关闭）。
+`core_config.json` 解析该槽位的模型与端点并直连（数据出域，介意可关闭；
+全部出域通道、截断长度与日志脱敏契约见「隐私与数据边界」节）。
 宿主未配任何模型时此功能自动休眠（日志可见），其余功能不受影响。
 依赖宿主三个内部端点（recent_file / emotion.analysis / health），
 属官方插件同款直连惯例但无版本承诺，宿主改版可能失效。
@@ -405,6 +406,39 @@ Plugin Manager → 永远的陪伴：
   三条路与宿主记忆系统互补不冲突
 - **零依赖**：纯标准库实现
 
+## 隐私与数据边界
+
+**本地优先**：周期/情绪/三本日记/统计/配置全部存在插件自己的存储里；
+插件不向任何第三方服务器发请求、无遥测、无作者侧回传——插件发起的
+网络请求只有两个去向：**宿主本机回环端点**与**你自己在宿主里配置的
+模型服务商端点**。
+
+会送到模型侧的对话文本只有三条通道，各自可关（截断长度以代码为准）：
+
+| 通道 | 送什么 | 送到哪 | 怎么关 |
+|------|--------|--------|--------|
+| 语气感知 `[emotion_sense]` | 她的本轮回复（≤500 字）+ 你的消息（≤300 字，传导用） | 默认槽位走**宿主本机回环**端点；选非默认槽位时插件读宿主本地 `core_config.json` 直连该槽位端点 | `[emotion_sense].enabled=false` 或面板「情绪」页关闭 |
+| 时光日记碎片 `[fragments]` | 你的最新一句（≤300 字）+ 她回复片段（≤120 字，仅作语境） | 同上（默认 summary 槽直连） | `[fragments].enabled=false` |
+| 我的日记成文 `[review]` | 相处统计 + 期间碎片原话（≤6 条、每条≤60 字）+ 最近对话摘样（≤8 轮、每边≤80 字） | 同上 | `[review].enabled=false` |
+
+三条通道的**服务商都是你自己在宿主里配的**（端点是你保存过的 URL）；
+默认配置下只有语气感知走宿主回环不出插件的手，另两条默认走宿主
+summary 槽——介意的话面板里把功能关掉即全本地，关后只剩本机回环通信。
+
+**明文 API key 的边界**：插件从宿主本地 `core_config.json` 读取目标槽位
+服务商的 key，**只用于拼对该服务商请求的 Authorization 头**；key 不写任何
+日志、不进面板回显（调试入口只显协议+主机名+`…`）、不发送给除该服务商
+以外的任何地址。
+
+**日志脱敏（1.3.0 第十轮契约）**：宿主规范要求"不把原始对话、密钥或
+私有 payload 写进日志"。本插件的直连失败留痕只记错误类型/状态码/结构
+摘要；碎片捕获只记原话长度不记内容；成文失败只记回复形态分类。由常驻
+回归门（tests/test_privacy_hygiene.py：行为门+AST 静态门，均带反向对照）
+钉死，后续改动一旦把内容写回日志即红。
+
+另：生活感知只读宿主官方 SDK 的 OS 活动快照（在不在/是否专注，不含
+屏幕内容），宿主隐私态下自动静默。
+
 ## 配置（plugin.toml `[tide]` / `[mood]` / `[fragments]` / `[journal]` / `[review]` / `[stats]` / `[capabilities]` / `[emotion_sense]`）
 
 > 多角色说明（0.5.0 起）：下表中前 6 项周期参数（`enabled` 到 `ovulation_window`，
@@ -506,15 +540,15 @@ Plugin Manager → 永远的陪伴：
 | `bus heartbeat: bucket=default empty` | 总线正常但桶里没有用户消息（你没在聊天，或消息没被宿主发布） |
 | `bus heartbeat: no user_message in last N records` | 桶里有记录但不是用户消息（会附带最新记录类型，反馈时请带上） |
 | `mood action applied: ...` / `mood recovered ...` | 情绪动作生效/解除 |
-| `fragment captured: lanlan=... kind=...` | 时光日记捕获到一条碎片（kind/原话） |
+| `fragment captured: lanlan=... kind=... quote_len=...` | 时光日记捕获到一条碎片（kind + 原话长度；1.3.0 第十轮起原话内容不进日志，面板日记页可看） |
 | `fragment capture dormant: slot ... unresolved` | 碎片提取模型槽位未配置，功能休眠（去面板选槽位） |
 | `journal invite pushed for ...` | 个人日记邀请已递（写不写由她决定） |
 | `journal invite NOT submitted for ... via ... (force=...)` | 邀请没能上线（宿主背压/通道不可用/超大）：面板当场如实报「没能送到」，手动档的水位已回滚、可立刻重按（1.2.4 起留痕；此前递空了也只显示"已当面递到"并一直挂"正等她落笔"） |
 | `review composed for ... (turns=...)` | 我的日记成文一篇（期间轮数/累计篇数） |
 | `review compose dormant: slot ... unresolved` | 成文模型槽位未配置，我的日记休眠（去面板选槽位） |
-| `review compose failed for <角色>: ...` | 我的日记成文失败原因（1.2.2 审查轮起留痕）：`request failed`=直连端点不通（上一行有具体异常）；`empty or unparsable reply (len=..., head=...)`=模型回复为空或剥壳后无正文，带前 40 字符预览可判断话风问题 |
+| `review compose failed for <角色>: ...` | 我的日记成文失败原因（1.2.2 审查轮起留痕）：`request failed`=直连端点不通（上一行有具体异常）；`empty or unparsable reply (len=..., shape=...)`=模型回复为空或剥壳后无正文；1.3.0 第十轮起 shape 是形态分类（json-like/html-like/fenced-like/plain，不含回复内容）可判断话风问题 |
 | `queued review compose raised for <角色>: <异常类>: <信息>` | 排队成文跑出了未预期异常（1.2.4 起兜住并留痕）：面板会弹"这一篇还没写成"，篇目与素材都未受影响，可重按 |
-| `tone direct chat completion failed: <异常类>: <信息>` / `... returned no usable content: payload head=...` | 直连小模型失败（语气感知/碎片提取/我的日记成文共用通道）：前者请求异常，后者 HTTP 通了但响应不是可用的 OpenAI 形态。1.2.2 审查轮起从 debug 升为 warning——面板提示"详见插件日志"自此可查 |
+| `tone direct chat completion failed: <异常类>(code=<状态码>)` / `... returned no usable content: dict keys=... bytes=...` | 直连小模型失败（语气感知/碎片提取/我的日记成文共用通道）：前者请求异常（类型名+若有 HTTP 状态码；1.3.0 第十轮起不再记异常原文——旧版裸 `exc` 可能携带含凭据的端点 URL），后者 HTTP 通了但响应不是可用的 OpenAI 形态（只记结构摘要不记内容）。1.2.2 审查轮起从 debug 升为 warning——面板提示"详见插件日志"自此可查 |
 | `reconcile nudge pushed during ...` | 冷战中检测到你在道歉/哄她，已提醒她该调心情转晴工具了 |
 | `re-registered N missing llm tools` | 检测到工具丢失并重注册（正常情况不应反复出现） |
 | `plugin store ready after N attempts` | 启动时持久存储延迟通电，插件已把它唤醒（N=1 即一次成功） |

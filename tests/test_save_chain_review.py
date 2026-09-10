@@ -399,7 +399,11 @@ def test_review_compose_failure_logs_detailed_reason(tm, boot_factory, monkeypat
 
 def test_tone_direct_completion_logs_warnings(tm, boot_factory, monkeypatch):
     """直连小模型的失败留痕从 debug 升为 warning（debug 不进日志文件），并区分
-    "请求异常"与"HTTP 通了但响应非 OpenAI 形态"（后者过去完全静默）。"""
+    "请求异常"与"HTTP 通了但响应非 OpenAI 形态"（后者过去完全静默）。
+
+    1.3.0 第十轮隐私契约：旧版要求坏响应留痕带响应值预览，而响应值可能被
+    上游回显成对话内容——改只记结构（顶层键名）；反向拦截另见
+    tests/test_privacy_hygiene.py 行为门。"""
     p = boot_factory(current_lanlan="default")
     logger = _RecLogger()
     p.logger = logger
@@ -424,5 +428,9 @@ def test_tone_direct_completion_logs_warnings(tm, boot_factory, monkeypatch):
     monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=None: _Resp())
     assert p._post_chat_completion("http://x", "k", "m", "hi") is None
     assert any(
-        "no usable content" in w and "upstream rejected" in w for w in logger.warnings
-    ), f"坏响应形态必须留痕带前缀预览，got: {logger.warnings}"
+        "no usable content" in w and "keys=" in w and "error" in w for w in logger.warnings
+    ), f"坏响应形态必须留痕带结构摘要，got: {logger.warnings}"
+    # 隐私契约：响应值（上游回显串）不得进日志
+    assert not any(
+        "upstream rejected" in w for w in logger.warnings
+    ), f"响应值回显进日志了（违反第十轮隐私契约）: {logger.warnings}"

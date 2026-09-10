@@ -1090,3 +1090,52 @@ pytest / ruff / hosted 链接门 / `neko-plugin check <路径>` / `check-hosted-
 - **验证（第九轮）**：pytest 411 全绿（406 + 5 条契约门）；ruff 全绿；
   五道回归门全部反向对照（塞中文/f-string 码/TSX 缺键/单语言缺键/旧句复活，逐条确认真会红）；
   hosted 链接门 / hosted-tsx / `neko-plugin check` 见 release_gate 全链。
+
+### 1.3.0 第十轮：隐私与日志脱敏契约（问题清单 §2.2 清账）
+
+- **根因/动机**：宿主规范（best-practices + 发布检查清单）要求"日志与进程输出均
+  不包含原始对话、密钥或私有 payload"，但直连通道（语气感知/碎片提取/我的日记
+  成文共用）的留痕形态有四处在界外：①失败日志记裸 `exc`——urllib 家族异常
+  message 可能携带完整端点 URL，自定义服务商以 `?api-key=` 查询参数或
+  `user:pass@` userinfo 形态带凭据时（宿主 logging_config REDACT 正则不覆盖
+  连字符 `api-key` 与裸 `sk-` 形态，兜不住）key 原样落进插件日志文件；
+  ②无可用内容日志记响应前 80 字符切片——网关错误页/回显型上游会把对话
+  内容映进响应；③`fragment captured` 把用户原话 `quote=` 直写日志（对话原文
+  进日志文件，最重的一处）；④成文失败日志带模型回复前 40 字符预览。
+- **修法**：`services/tone_slot.py` 新增 `_exc_shape`（类型名 + 若有 `.code` 则
+  状态码，永不 str(exc)）与 `_payload_shape`（顶层键名/choices 条数/字节长度，
+  零值输出）两个脱敏 helper，两条 warning 收编；`mixins/senses.py` 碎片日志改
+  `quote_len=`、成文失败改 `shape=` 形态分类（json-like/html-like/fenced-like/
+  plain，"判断话风问题"的初衷保住）。诊断线索不降级：类型名/状态码/长度/键名
+  都在，缺的只有内容本体——面板与日记页本来就有内容可看，日志只需定位。
+- **回归门 `tests/test_privacy_hygiene.py`（7 条，全反向对照）**：两条行为门——
+  假 urlopen 抛"message 里塞满 key/端点/prompt 哨兵串"的异常、返回"值里回显
+  对话"的坏 JSON，断言 logger 全部输出零命中哨兵且诊断形态（类型名/code=/
+  keys=/bytes=）在位；正路不回归（可用回复零 warning）。一条 AST 静态门——
+  出货代码里 logger 数据实参禁直出 `api_key/prompt/quote/user_text/her_text/raw/
+  core_cfg/resolved/text` 及其下标/切片/属性链（根是 Call 的 helper 包裹形态豁免：
+  脱敏发生在被调用侧；`payload.get("<字面量>")` 信封字段豁免：那是 error 码位
+  不是正文）；加已淘汰写法整文件文本钉死（含注释——历史说明不得残留可被
+  复制粘贴复活的违规样例，本轮 senses/tone_slot 新注释因此用"前 80 字符切片"
+  措辞绕开三串字面量本身）。反向对照直接喂违规源码字符串给扫描器，不碰真文件。
+- **旧契约收编**：`test_save_chain_review.test_tone_direct_completion_logs_warnings`
+  过去正向钉"坏响应留痕必须带 `upstream rejected` 预览"——那正是本轮禁掉的
+  行为；改为断言结构摘要在位 + 响应值**不得**出现（旧断言原样保留即自相矛盾，
+  属契约更迭非放宽）。
+- **文档**：README 新增「隐私与数据边界」节——三条出域通道一张表（送什么/截断
+  多少/送到哪/怎么关，截断数字对拍代码 500/300/120/6×60/8×80）、明文 key 的
+  边界声明（只本地读、只进该服务商 Authorization 头、不进日志/面板回显）、
+  日志脱敏摘要、全不出域的关法组合；修日志阅读指南三行（failed/no usable
+  content / fragment captured / review compose failed 的新形态）；语气感知节
+  交叉引用。DESIGN 新增「隐私与日志脱敏契约」节（凭据/异常/响应/内容四面 +
+  回归门形态，长期有效）。
+- **顺带核账（不动）**：`bus memory read failed: {exc}` 等传输层异常留痕不含
+  对话内容（Result.error 是 SDK 信封）；`cycle.TideConfigError` 的 `{text!r}` 是
+  配置解析入参（锚点日期）非对话——均界内，静态门规则 A 不报（根是嵌套 Call
+  的名字不进数据实参射程）。JSONDecodeError 的 str() 只含位置不含文件内容
+  （实测），core_config 读取失败的 debug 留痕不泄 key。
+- **验证（第十轮）**：pytest 418 全绿（411 + 7 条隐私门）；ruff 全绿；
+  静态门反向对照（api_key 直出/resolved["api_key"] 下标/user_text[:200] 切片/
+  已禁字面量复活，逐条确认真会红）、豁免面反向不误报（_exc_shape/
+  payload.get("error")/len(quote)/_slot_dormancy_hint(core_cfg…)）；
+  hosted 链接门 / hosted-tsx / `neko-plugin check` 见 release_gate 全链。

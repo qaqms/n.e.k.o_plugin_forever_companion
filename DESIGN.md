@@ -212,6 +212,30 @@ UI context 三处被宿主解析，**动作返回值不在解析链里**（`call
   （reset_all 先例）；label/confirm 与后端 `@ui.action` 同一对 `actions.*` 键。
 
 
+## 隐私与日志脱敏契约（1.3.0 第十轮，长期有效）
+
+宿主规范（docs/zh-CN/plugins/best-practices.md + 发布检查清单）：不把原始对话、
+用户输入的密钥或私有 payload 写进日志或进程输出；诊断优先记**脱敏后的长度、
+ID 和错误类型**。本插件的落地形态：
+
+- **凭据面**：`core_config.json` 的 key 只在内存解析链里流动（`_resolve_tone_slot`
+  → `_post_chat_completion` 形参），永不写日志、永不进面板回显（debug 入口只显
+  `scheme://netloc/…`，key 永不回传）；
+- **异常面**：直连失败留痕只准 `_exc_shape(exc)`（类型名 + 若有 `.code` 则状态码）。
+  裸 `exc` 禁入 logger：urllib 家族异常 message 可能携带完整 URL，自定义端点的
+  `?api-key=` 查询参数/userinfo 凭据不在宿主 logging_config REDACT 正则的覆盖面里；
+- **响应面**：非 OpenAI 形态留痕只准 `_payload_shape`（顶层键名/条数/字节长度）；
+  响应值可能被上游回显成对话内容，零值输出；
+- **内容面**：碎片捕获记 `quote_len=` 不记原话；我的日记成文失败记 `shape=`
+  分类不记回复预览；分析文本进 prompt 是功能本身（出域三条通道见 README
+  「隐私与数据边界」表），但 prompt/原话/摘样永不进日志；
+- **回归门**：`tests/test_privacy_hygiene.py`——两条行为门（假异常/假响应里注入
+  key/URL/对话哨兵串，断言日志零命中）+ 一条 AST 静态门（logger 数据实参禁直出
+  `api_key/prompt/quote/user_text/her_text/raw/core_cfg/resolved/text` 及其下标/切片
+  链；`len()`/`_exc_shape()` 等 helper 包裹豁免）+ 已淘汰写法整文件文本钉死（含
+  注释，历史说明不得残留可复制的违规样例）；均带反向对照。
+
+
 ## 版本日志（已迁出）
 
 0.7.1 起的全部版本变更条目已原文归档到仓根 **CHANGELOG.md**（同样不进发行包）。

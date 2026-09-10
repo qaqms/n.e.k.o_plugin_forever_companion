@@ -318,8 +318,12 @@ class SensesMixin:
         # 我的日记素材：碎片原话是"他说话方式"的最硬例证（含过激言行）
         self._feed_review_fragment(shard, record)
         await self._save_shard_diary(lanlan, shard)
+        # 1.3.0 第十轮隐私契约：旧版把用户对话原文直接打进日志文件（原话字段
+        # 的 repr 形态），宿主规范（best-practices）禁止对话内容进日志。现在
+        # 改记长度：面板日记页本来就有原话可见，日志只需定位"哪天记了哪条"
         self.logger.info(
-            "fragment captured: lanlan={} kind={} quote={!r}", lanlan, record["kind"], record["quote"]
+            "fragment captured: lanlan={} kind={} quote_len={}", lanlan, record["kind"],
+            len(str(record.get("quote") or "")),
         )
         await self._maybe_fragment_fight_nudge(lanlan, shard, record, now)
         return True
@@ -496,11 +500,20 @@ class SensesMixin:
             # 留痕分级（1.2.2 审查轮）：面板提示"稍后再试（详见插件日志）"，
             # 过去这条路径完全静默（请求失败也只有 debug 级）——让用户查无可查。
             # raw=None 请求失败（_post_chat_completion 已另有 warning）；
-            # 否则是回复为空/剥壳后无正文，带上长度与前 40 字符预览便于判断话风
+            # 否则是回复为空/剥壳后无正文。1.3.0 第十轮隐私契约：旧版带前 40 字符
+            # 预览（head=）——那是基于对话成文的模型回复，可能回显相处内容；
+            # 改记形态分类（JSON/HTML/围栏/纯文本），"判断话风问题"仍然够用
             if raw is None:
                 detail = "request failed (see 'tone direct chat completion' warning above)"
             else:
-                detail = f"empty or unparsable reply (len={len(raw)}, head={str(raw)[:40]!r})"
+                head = str(raw).lstrip()[:1]
+                shape = {
+                    "{": "json-like",
+                    "[": "json-like",
+                    "<": "html-like",
+                    "`": "fenced-like",
+                }.get(head, "plain")
+                detail = f"empty or unparsable reply (len={len(raw)}, shape={shape})"
             self.logger.warning("review compose failed for {}: {}", lanlan, detail)
             return False, "compose_failed"
         stats_snapshot = dict(shard.review_stats)
