@@ -1000,3 +1000,39 @@ DESIGN 定下的下轮任务并入本版本（1.3.0 尚未发行，同版续写�
   `debug_entries.py` 直接调 `self.store` 绕过 1.2.2 统一出口、以及
   `emotion_sense._load_core_config` 在 async 路径做阻塞 `read_text`（5s 缓存
   缓解）属另两类账，不在本轮范围。
+
+
+### 1.3.0 第八轮：发版校验链打通（独立仓跑不到宿主门的问题根治）
+
+**根因**：本仓是宿主仓的**同级**目录，而宿主工具链假设插件住在
+`<host>/plugin/plugins/<id>/`，于是两类命令在独立仓里跑不了：
+
+- `neko-plugin check forever_companion` 按 id 找不到目录（只能传路径）；
+- `frontend/plugin-manager` 的 `check-hosted-tsx` 用 `realpathSync` 断言目标仍在
+  宿主仓内（`assertPathInsideRepo`），**所以 junction/符号链接也过不了**，必须真实副本。
+  第五轮说明里的「宿主仓内 check-hosted-tsx 0 错」一直靠手工复制，没有可复现入口。
+
+**做法**：新增 `tools/release_gate.py`，把五道门一次跑完、任一红即非零退出：
+pytest / ruff / hosted 链接门 / `neko-plugin check <路径>` / `check-hosted-tsx`。
+最后一道由脚本自己管副本生命周期——复制到宿主仓 `plugin/plugins/
+.forever_companion-gate-probe`（点前缀，与内置插件一眼区分）→ 跑门 →
+**finally 无条件清理**：宿主 .gitignore 没有本插件条目，留残就是给人家仓库刷脏。
+`--keep` 可保留副本便于反复迭代，`--only hosted,link` 跑子集，`--host-root`/
+`$NEKO_HOST_ROOT` 指定宿主仓位置。
+
+**两个 Windows 坑（都实测踩过）**：
+① `npm` 在 Windows 上是 `npm.cmd`，`subprocess(shell=False)` 不走 PATHEXT，直接传
+  `"npm"` 抛 WinError 2 —— 统一经 `shutil.which` 解析再执行；
+② 控制台默认码面 GBK，summary 里一个 emoji 就能让**全绿的运行**以 traceback 收场、
+  CI 判成门禁失败 —— 脚本顶部把 stdout/stderr 重设为 UTF-8 并容忍不可编码字符。
+
+**`.vscode` 配置纠偏**：`nekoPlugin.repoRoot` 是脚手架按 `plugin/plugins/<id>` 深度
+生成的 `../../..`，在独立仓布局下解析到 `D:\`（错三层）——同级布局应为 `../N.E.K.O`；
+`python.analysis.extraPaths` 同步。tasks.json 全部改走路径形式，并新增 release gate
+为默认构建任务（pytest/ruff/link 在插件目录跑，neko-plugin 系在宿主仓根跑，cwd 分开）。
+
+**顺带核实**：`neko-plugin sync <路径>` 与 `build <路径>` 都接受路径形式（build 实测
+产出成功，探测产物已删）。`check -r` 的发版路径因此同样可脚本化。
+
+- **验证（第八轮）**：`tools/release_gate.py` 全链五门 OK、退出码 0、跑完宿主仓
+  `git status` 干净无残留；pytest 406 全绿；ruff 全绿。本轮不改运行时代码。
