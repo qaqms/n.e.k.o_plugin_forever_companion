@@ -423,6 +423,34 @@ def test_prune_lanlan_success(plugin_factory_full, tm) -> None:
     assert "幽灵" not in p._shards
 
 
+def test_prune_lanlan_sweeps_debug_backups(plugin_factory_full, tm) -> None:
+    """prune 必须扫掉调试注入备份：新键与 1.3.0 旧 `|pre-debug` 键名都算。
+
+    1.3.0 第六轮之前 prune 完全不碰这些键——删掉角色后备份永久孤儿，且同名
+    重建角色会被上一世的注入档污染（restore 还原出别人的日记）。
+    """
+    p = plugin_factory_full(http=_HostHttp(current="YUI", known={"YUI"}))
+    _make_orphan(p, tm)
+    ghost = "幽灵"
+    for key in (
+        tm._debug_backup_key("journal", ghost), tm._debug_backup_key("review", ghost),
+        tm._debug_backup_key("stats", ghost),
+        tm._legacy_debug_backup_key(tm._journal_key(ghost)),
+    ):
+        p.store.data[key] = {"journal": [], "archive": []}
+
+    res = run(p.prune_lanlan(lanlan=ghost))
+    assert getattr(res, "value", None) == {"pruned": ghost}
+    for key in (
+        tm._debug_backup_key("journal", ghost), tm._debug_backup_key("review", ghost),
+        tm._debug_backup_key("stats", ghost),
+        tm._legacy_debug_backup_key(tm._journal_key(ghost)),
+        tm._legacy_debug_backup_key(tm._review_key(ghost)),
+        tm._legacy_debug_backup_key(tm._stats_key(ghost)),
+    ):
+        assert key not in p.store.data, f"prune 后残留孤儿备份键：{key}"
+
+
 def test_prune_lanlan_rejects_still_existing(plugin_factory_full) -> None:
     p = plugin_factory_full(http=_HostHttp(current="YUI", known={"YUI", "小灵"}))
     run(p._ensure_shard("小灵"))

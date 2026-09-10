@@ -64,10 +64,12 @@ from ..core.state import (
     _caps_key,
     _cfg_section,
     _cycle_key,
+    _debug_backup_key,
     _diary_key,
     _journal_archive_key,
     _journal_key,
     _LanlanShard,
+    _legacy_debug_backup_key,
     _mood_key,
     _MoodState,
     _now_utc,
@@ -235,11 +237,11 @@ class PanelEntriesMixin:
                 "enabled": self._emotion_sense_enabled(shard),
                 "dormant_reason": "",
             },
-            "fragments": self._channel_dormancy(
+            "fragments": await self._channel_dormancy(
                 self._fragments_enabled(shard),
                 str(self._fragments_cfg.get("slot") or "").strip() or _FRAGMENT_DEFAULT_SLOT,
             ),
-            "review": self._channel_dormancy(
+            "review": await self._channel_dormancy(
                 self._review_enabled(shard),
                 str(self._review_cfg.get("slot") or "").strip() or _REVIEW_DEFAULT_SLOT,
             ),
@@ -340,7 +342,7 @@ class PanelEntriesMixin:
             self.logger.debug("stats summary view failed: {}", exc)
             return {"summary": {}, "badges": []}
 
-    def _channel_dormancy(self, enabled: bool, slot: str) -> JsonObject:
+    async def _channel_dormancy(self, enabled: bool, slot: str) -> JsonObject:
         """直连通道状态灯：{enabled, dormant_reason}。reason ∈ ok/free_route/no_model/disabled。
 
         诊断复用 diagnose_slot_dormancy（tone_slot.py）；free_route = 宿主免费路由
@@ -348,7 +350,7 @@ class PanelEntriesMixin:
         """
         if not enabled:
             return {"enabled": False, "dormant_reason": "disabled"}
-        reason = diagnose_slot_dormancy(self._load_core_config(), slot)
+        reason = diagnose_slot_dormancy(await self._aload_core_config(), slot)
         # reason 为 "free_route"/"no_model" 时通道休眠；解析成功与否最终由
         # _resolve_tone_slot 决定，这里给面板的灯做的是"为什么不行"的归类
         return {"enabled": True, "dormant_reason": reason}
@@ -1491,7 +1493,7 @@ class PanelEntriesMixin:
         # 通过就打排队标记立即返回；成文由 tick 的 _drain_pending_review_writes
         # 执行，结果经 dashboard 的 review_brief.writing / last_result 回流面板。
         lanlan, shard = await self._current_shard_async()
-        passed, reason, _resolved = self._review_write_gate(shard, force=True)
+        passed, reason, _resolved = await self._review_write_gate(shard, force=True)
         if not passed:
             notes = {
                 "disabled": "我的日记开关未开启（[review].enabled）。",
@@ -1499,7 +1501,7 @@ class PanelEntriesMixin:
                     f"素材还不够（目前 {int(shard.review_stats.get('turns') or 0)} 轮，"
                     f"至少 {_REVIEW_MIN_TURNS_FORCED} 轮才值得写一篇），再聊聊吧。"
                 ),
-                "slot_unresolved": _slot_dormancy_hint(self._load_core_config(), str(self._review_cfg.get("slot") or "").strip() or _REVIEW_DEFAULT_SLOT),
+                "slot_unresolved": _slot_dormancy_hint(await self._aload_core_config(), str(self._review_cfg.get("slot") or "").strip() or _REVIEW_DEFAULT_SLOT),
             }
             return Ok({"written": False, "queued": False, "accepted": False, "lanlan": lanlan, "reason": reason, "note": notes.get(reason, reason)})
         if shard.pending_review_write or lanlan in self._review_writing:
@@ -1706,6 +1708,11 @@ class PanelEntriesMixin:
             _review_archive_key(name),  # 档案室（1.3.0）：旧卷宗合档一并清，不留孤儿卷
             _stats_key(name),  # 相处统计（1.1.0）
             _caps_key(name),  # 能力否决集（1.2.7）：角色份一并清，不留残留开关
+            # 调试注入备份（1.3.0 第六轮）：过去 prune 根本不扫这些键，删掉角色后
+            # pre_debug@*/与旧 |pre-debug 备份永久孤儿（且同名重建会被旧注入档污染）
+            _debug_backup_key("journal", name), _legacy_debug_backup_key(_journal_key(name)),
+            _debug_backup_key("review", name), _legacy_debug_backup_key(_review_key(name)),
+            _debug_backup_key("stats", name), _legacy_debug_backup_key(_stats_key(name)),
         ):
             # 统一删除出口（1.2.2 审查轮 P1）：未通电/真失败都留痕，行为不变
             res = await self._store_delete(key, f"prune {key}")

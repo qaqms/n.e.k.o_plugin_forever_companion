@@ -146,6 +146,17 @@ class SensesMixin:
         """读宿主 core_config.json（含明文 key），5 秒内存缓存；文件缺失/JSON 坏 → {}。"""
         return self._emotion_sense._load_core_config()
 
+    async def _aload_core_config(self) -> JsonObject:
+        """async 路径专用对偶版：把可能发生的阻塞读盘丢回线程池。
+
+        与 `core.save_characters/asave_characters` 同一约定：sync 版留给启动期与
+        sync 迁移，async 路径一律走 `a*` 版，内部就是 `asyncio.to_thread(<sync>)`。
+        经 `self._load_core_config` 现取（不是构造期快照），所以测试在实例上
+        monkeypatch `_load_core_config` 的链路不变。缓存命中时只是一次线程跳转，
+        不改变 5 秒 TTL 语义。
+        """
+        return await asyncio.to_thread(self._load_core_config)
+
     # ---- 槽位解析与直连的纯逻辑已抽到 tone_slot.py；以下保留薄委托（名称/签名/语义不变），
     # 实例级 monkeypatch（如 tests 打 _post_chat_completion/_load_core_config）的链路不变 ----
 
@@ -272,7 +283,7 @@ class SensesMixin:
             shard.last_fragment_marker = marker
             return False
         slot = str(self._fragments_cfg.get("slot") or "").strip() or _FRAGMENT_DEFAULT_SLOT
-        core_cfg = self._load_core_config()
+        core_cfg = await self._aload_core_config()
         resolved = self._resolve_tone_slot(core_cfg, slot)
         if resolved is None:
             shard.last_fragment_marker = marker
@@ -410,8 +421,8 @@ class SensesMixin:
             return
         shard.review_stats = record_fragment(shard.review_stats, str(record.get("kind") or ""), str(record.get("quote") or ""))
 
-    def _review_write_gate(self, shard: _LanlanShard, *, force: bool) -> tuple[bool, str, Any]:
-        """成文前置门控（纯同步、零模型零 IO 等待）：开关 → 门槛 → 直连槽位解析。
+    async def _review_write_gate(self, shard: _LanlanShard, *, force: bool) -> tuple[bool, str, Any]:
+        """成文前置门控（零模型开销；槽位解析读宿主配置走 async 对偶版）：开关 → 门槛 → 直连槽位解析。
 
         面板「立即写一篇」受理预检与 _review_compose 共用本函数——口径唯一，
         不会两处漂移。返回 (是否放行, 原因, 槽位解析结果)：原因沿用历史词表
@@ -434,7 +445,7 @@ class SensesMixin:
             if not due:
                 return False, reason, None
         slot = str(self._review_cfg.get("slot") or "").strip() or _REVIEW_DEFAULT_SLOT
-        core_cfg = self._load_core_config()
+        core_cfg = await self._aload_core_config()
         resolved = self._resolve_tone_slot(core_cfg, slot)
         if resolved is None:
             now_mono = time.monotonic()
@@ -470,7 +481,7 @@ class SensesMixin:
         直连成文 → 解析截断 → 篇目追加 + stats 原子清零落盘。槽位解析不出 key
         时功能休眠（节流 warning），失败静默降级绝不拖垮 tick。返回 (是否写了, 原因)。
         """
-        passed, reason, resolved = self._review_write_gate(shard, force=force)
+        passed, reason, resolved = await self._review_write_gate(shard, force=force)
         if not passed or resolved is None:
             return False, reason or "gate_rejected"
         # 成文素材：累计统计 + 最近几轮对话摘样（一次性拉取宿主 recent 窗口）

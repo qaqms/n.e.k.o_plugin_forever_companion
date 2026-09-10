@@ -123,7 +123,7 @@ def test_debug_review_fill_seed_and_restore(tm, plugin_factory):
     assert isinstance(res, tm.Ok), res
     assert res.value["entries_total"] == 4
     assert all(pg.get("demo") for pg in shard.review)
-    backup = p.store.data["review@灵|pre-debug"]
+    backup = p.store.data["pre_debug@review@灵"]
     assert backup["entries"][0]["text"] == "真实篇" and backup["stats"]["turns"] == 9
     assert backup["archive"] == [], "1.3.0 档案室一并入备份"
     assert len(p.store.data["review@灵"]["entries"]) == 4
@@ -133,7 +133,7 @@ def test_debug_review_fill_seed_and_restore(tm, plugin_factory):
     assert [pg["text"] for pg in shard.review] == ["真实篇"]
     assert shard.review_stats["turns"] == 9
     assert res2.value["archive_total"] == 0
-    assert p.store.data.get("review@灵|pre-debug") is None
+    assert p.store.data.get("pre_debug@review@灵") is None
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +227,7 @@ def test_debug_journal_fill_seed_and_restore(tm, plugin_factory):
     assert shard.journal[0]["page_no"] == 4, "翻 3 页应挤下最旧 3 页"
     assert [pg["page_no"] for pg in shard.journal_archive] == [1, 2, 3]
     # 注入前状态已整包备份（含从未入阁的空档）
-    backup = p.store.data["journal@灵|pre-debug"]
+    backup = p.store.data["pre_debug@journal@灵"]
     assert [pg["page_no"] for pg in backup["journal"]] == [1]
     assert backup["archive"] == []
     # 落盘同步：两键都在盘上
@@ -239,4 +239,4 @@ def test_debug_journal_fill_seed_and_restore(tm, plugin_factory):
     assert res2.value["restored"] is True
     assert [pg["page_no"] for pg in shard.journal] == [1], "真实日记原样回来"
     assert shard.journal_archive == []
-    assert p.store.data.get("journal@灵|pre-debug") is None, "还原后备份作废"
+    assert p.store.data.get("pre_debug@journal@灵") is None, "还原后备份作废"

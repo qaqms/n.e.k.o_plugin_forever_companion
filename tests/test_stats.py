@@ -483,7 +483,7 @@ def test_debug_stats_seed_restore_clear_flow(plugin_factory) -> None:
     # seed：备份真实数据并注入假数据
     res = run(p._debug_stats(seed=True))
     assert res.value["seeded"] is True
-    backup = run(p.store.get("stats@default|pre-debug"))
+    backup = run(p.store.get("pre_debug@stats@default"))
     assert backup.value["first_seen"] == real_first_seen
     assert st.days_together(shard.stats, p._stats_today()) == 122
     assert st.summary_payload(shard.stats, p._stats_today())["total_turns"] != real_turns
@@ -493,14 +493,14 @@ def test_debug_stats_seed_restore_clear_flow(plugin_factory) -> None:
     # 连续 seed 不覆盖最早的备份（还原永远回到最初真实数据）
     run(p._handle_new_user_message(2000.0, "再来一条", "default"))
     run(p._debug_stats(seed=True))
-    backup2 = run(p.store.get("stats@default|pre-debug"))
+    backup2 = run(p.store.get("pre_debug@stats@default"))
     assert backup2.value["first_seen"] == real_first_seen
 
     # restore：还原真实数据、清掉备份
     res = run(p._debug_stats(restore=True))
     assert res.value["restored"] is True
     assert shard.stats["first_seen"] == real_first_seen
-    backup3 = run(p.store.get("stats@default|pre-debug"))
+    backup3 = run(p.store.get("pre_debug@stats@default"))
     assert backup3.value is None
     # 再 restore：无备份提示
     res = run(p._debug_stats(restore=True))

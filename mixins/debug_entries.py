@@ -15,7 +15,7 @@ import asyncio
 import time
 from typing import Any
 
-from plugin.sdk.plugin import Err, Ok, SdkError
+from plugin.sdk.plugin import Err, Ok, Result, SdkError
 
 from ..core.fragments import build_fragment_prompt, parse_fragment_response
 from ..core.journal import (
@@ -32,9 +32,11 @@ from ..core.state import (
     _JOURNAL_MAX_PAGES,
     _TIMED_ACTIONS,
     _TONE_COLD_LABELS,
+    _debug_backup_key,
     _journal_archive_key,
     _journal_key,
     _LanlanShard,
+    _legacy_debug_backup_key,
     _review_archive_key,
     _review_key,
     _stats_key,
@@ -56,6 +58,42 @@ class DebugEntriesMixin:
     _DEBUG_LANLAN_PROP: JsonObject = {
         "lanlan": {"type": "string", "description": "目标角色名（缺省 = 宿主当前角色）"},
     }
+
+    # ---- 调试备份：真实数据进、真实数据出的唯一通道（一律走 _store_* 统一出口） ----
+
+    async def _debug_backup_load(self, which: str, data_key: str, lanlan: str) -> tuple[str, Any]:
+        """读注入前备份。返回 (状态, 值)，状态 ∈ found / absent / unreadable。
+
+        - "found"      已有备份（值即备份内容）
+        - "absent"     确认从未注入过 —— 调用方应当当场补备份
+        - "unreadable" 两个键名都读失败 —— 调用方**必须中止注入**：此时既不能
+          覆盖已有备份（可能把好备份刷成假页），也不能注入（真数据将无从还原）。
+          过去这里用 `not isinstance(res, Err)` 表达同一意图，但读失败后仍继续
+          注入，等于把"备份失败即中止"写成只防写不防读。
+
+        新键 `pre_debug@<which>@<角色>` 优先，回落旧 `<数据键>|pre-debug`：1.3.0
+        正在真机使用，改键名不能让"已注入未还原"的现场丢备份。
+        """
+        absent_seen = False
+        for key in (_debug_backup_key(which, lanlan), _legacy_debug_backup_key(data_key)):
+            res = await self._store_read(key)
+            if isinstance(res, Err):
+                continue  # 留痕由 _store_read 负责
+            if res.value is not None:
+                return "found", res.value
+            absent_seen = True
+        return ("absent", None) if absent_seen else ("unreadable", None)
+
+    async def _debug_backup_save(self, which: str, lanlan: str, payload: Any) -> Result[None]:
+        """写备份（未通电预警 + 真失败留痕，语义同 _store_write）。"""
+        return await self._store_write(
+            _debug_backup_key(which, lanlan), payload, f"debug backup {which} for {lanlan}",
+        )
+
+    async def _debug_backup_drop(self, which: str, data_key: str, lanlan: str) -> None:
+        """清备份：新键与旧键名一并删，不留孤儿；失败由 _store_delete 留痕。"""
+        for key in (_debug_backup_key(which, lanlan), _legacy_debug_backup_key(data_key)):
+            await self._store_delete(key, f"debug backup for {lanlan}")
 
     _DEBUG_ENTRIES: tuple[tuple[str, str, str, JsonObject], ...] = (
         (
@@ -360,7 +398,7 @@ class DebugEntriesMixin:
     ):
         """藏书阁秒级验证（1.3.0 第二轮）：垫满活架→真翻页→生产链路淘汰入阁。
 
-        注入档：真实 journal@/journal_archive@ 先整包备份到 |pre-debug 键（首次
+        注入档：真实 journal@/journal_archive@ 先整包备份到 pre_debug@journal@ 键（首次
         才备，连续注入不覆盖最早备份），再把 52 页确定性假页垫上活架，连翻
         pages 页走 **生产 journal_write 路径**（新页按页码递增、淘汰页经
         _append_journal_archive 落盘）——验的是真链路，不是面板假渲染。
@@ -368,13 +406,12 @@ class DebugEntriesMixin:
         时光日记/统计一概不碰（debug_stats 同款纪律）。
         """
         name, shard = await self._debug_target_shard(lanlan)
-        backup_key = f"{_journal_key(name)}|pre-debug"
+        state, backup = await self._debug_backup_load("journal", _journal_key(name), name)
         if restore:
-            backup = await self.store.get(backup_key)
-            if isinstance(backup, Err) or not isinstance(backup.value, dict):
+            if state != "found" or not isinstance(backup, dict):
                 return Ok({"restored": False, "lanlan": name, "note": "没有可还原的备份（从未注入过）。"})
-            raw_j = backup.value.get("journal")
-            raw_a = backup.value.get("archive")
+            raw_j = backup.get("journal")
+            raw_a = backup.get("archive")
             shard.journal = [
                 dict(item) for item in (raw_j if isinstance(raw_j, list) else []) if isinstance(item, dict)
             ]
@@ -385,7 +422,7 @@ class DebugEntriesMixin:
             res_archive = await self._store_write(
                 _journal_archive_key(name), list(shard.journal_archive), f"journal archive for {name}",
             )
-            await self.store.set(backup_key, None)
+            await self._debug_backup_drop("journal", _journal_key(name), name)
             self.logger.info("debug journal fill restored for {}", name)
             persist_err = self._persist_error(res_journal, res_archive)
             if persist_err is not None:
@@ -397,10 +434,11 @@ class DebugEntriesMixin:
                 **self._debug_journal_fill_brief(shard),
             })
         flip = max(1, min(int(pages or 3), 8))
-        backup = await self.store.get(backup_key)
-        if not isinstance(backup, Err) and backup.value is None:
-            saved = await self.store.set(
-                backup_key,
+        if state == "unreadable":
+            return Err(SdkError("备份状态读不出来，已中止注入（读失败时覆盖真数据将无从还原）"))
+        if state == "absent":
+            saved = await self._debug_backup_save(
+                "journal", name,
                 {"journal": list(shard.journal), "archive": list(shard.journal_archive)},
             )
             if isinstance(saved, Err):
@@ -447,13 +485,15 @@ class DebugEntriesMixin:
             return Ok({"captured": False, "lanlan": name, "note": "recent.json 里没有可分析的轮次。"})
         user_text, her_text = turn
         slot = str(self._fragments_cfg.get("slot") or "").strip() or _FRAGMENT_DEFAULT_SLOT
-        resolved = self._resolve_tone_slot(self._load_core_config(), slot)
+        # 一趟只取一次：过去这里连读两遍宿主配置（None 分支又读一遍）
+        core_cfg = await self._aload_core_config()
+        resolved = self._resolve_tone_slot(core_cfg, slot)
         if resolved is None:
             return Ok({
                 "captured": False,
                 "lanlan": name,
                 "slot": slot,
-                "note": _slot_dormancy_hint(self._load_core_config(), slot),
+                "note": _slot_dormancy_hint(core_cfg, slot),
             })
         raw = await asyncio.to_thread(
             self._post_chat_completion,
@@ -504,7 +544,7 @@ class DebugEntriesMixin:
         }
         if slot and slot != "emotion":
             # 直连路径：回显解析出的 model/脱敏 base_url（只留协议+主机），永不输出 key
-            resolved = self._resolve_tone_slot(self._load_core_config(), slot)
+            resolved = self._resolve_tone_slot(await self._aload_core_config(), slot)
             if resolved is not None:
                 from urllib.parse import urlparse
 
@@ -570,18 +610,17 @@ class DebugEntriesMixin:
         """我的日记秒级验收（1.3.0）：假卷宗上架/还原，debug_journal_fill 同款纪律。
 
         注入档：真实 review@（篇目+素材）与 review_archive@（档案室）整包备份到
-        |pre-debug 键（首次才备），档案架换成确定性假篇目（字段全是存储里现成的
+        pre_debug@review@ 键（首次才备），档案架换成确定性假篇目（字段全是存储里现成的
         口径：面板卷宗页/盒脊/朱印/本卷依据一次验齐）；restore 档：整包还原 +
         清备份。只动当前角色 review 两键。entries 可给 53~60：注入超活架上限，
         溢出的旧卷经真实落盘链搬家进档案室（验的是真链路，不是面板假渲染）。
         """
         name, shard = await self._debug_target_shard(lanlan)
-        backup_key = f"{_review_key(name)}|pre-debug"
+        state, backup = await self._debug_backup_load("review", _review_key(name), name)
         if restore:
-            backup = await self.store.get(backup_key)
-            if isinstance(backup, Err) or not isinstance(backup.value, dict):
+            if state != "found" or not isinstance(backup, dict):
                 return Ok({"restored": False, "lanlan": name, "note": "没有可还原的备份（从未注入过）。"})
-            raw = backup.value
+            raw = backup
             shard.review = [
                 dict(item) for item in (raw.get("entries") or []) if isinstance(item, dict)
             ]
@@ -599,7 +638,7 @@ class DebugEntriesMixin:
                     f"review archive restore for {name}",
                 )
             res = await self._save_shard_review(name, shard)
-            await self.store.set(backup_key, None)
+            await self._debug_backup_drop("review", _review_key(name), name)
             self.logger.info("debug review fill restored for {}", name)
             persist_err = self._persist_error(res, res_archive)
             if persist_err is not None:
@@ -612,10 +651,11 @@ class DebugEntriesMixin:
                 "note": "真实篇目、素材统计与档案室已还原，备份已清除。",
             })
         n = max(1, min(int(entries or 4), 60))
-        backup = await self.store.get(backup_key)
-        if not isinstance(backup, Err) and backup.value is None:
-            saved = await self.store.set(
-                backup_key,
+        if state == "unreadable":
+            return Err(SdkError("备份状态读不出来，已中止注入（读失败时覆盖真数据将无从还原）"))
+        if state == "absent":
+            saved = await self._debug_backup_save(
+                "review", name,
                 {
                     "entries": list(shard.review),
                     "stats": dict(shard.review_stats),
@@ -653,7 +693,7 @@ class DebugEntriesMixin:
     ):
         """相处统计假数据注入/还原（时光页界面验证，零随机可复现）。
 
-        seed：真实 stats 备份到 stats@<角色>|pre-debug 后覆盖为 fabricate_demo_stats
+        seed：真实 stats 备份到 pre_debug@stats@<角色> 后覆盖为 fabricate_demo_stats
         的 120 天分布（热力图全档位/色条、徽章、月报、数字摘要全覆盖）；
         restore：从备份还原；clear：清空为空白（不备份，适合反复 seed 用）。
         三个参数互斥，都不带时只回显当前统计概要。只动当前角色的 stats 分片，
@@ -663,18 +703,22 @@ class DebugEntriesMixin:
         flags = [bool(seed), bool(restore), bool(clear)]
         if sum(flags) > 1:
             return Err(SdkError("seed / restore / clear 互斥，一次只传一个"))
-        backup_key = f"{_stats_key(name)}|pre-debug"
+        state, backup = await self._debug_backup_load("stats", _stats_key(name), name)
         today = self._stats_today()
         if seed:
-            backup = await self.store.get(backup_key)
-            if not isinstance(backup, Err) and backup.value is None:
+            if state == "unreadable":
+                return Err(SdkError("备份状态读不出来，已中止注入（读失败时覆盖真数据将无从还原）"))
+            if state == "absent":
                 # 首次 seed 才备份：连续 seed 不覆盖最早的备份（还原永远回到最初真实数据）
-                saved = await self.store.set(backup_key, dict(shard.stats))
+                saved = await self._debug_backup_save("stats", name, dict(shard.stats))
                 if isinstance(saved, Err):
                     return Err(SdkError("备份真实数据失败，已中止注入"))
             shard.stats = fabricate_demo_stats(today)
-            await self._save_shard_stats(name, shard)
+            res_stats = await self._save_shard_stats(name, shard)
             self.logger.info("debug stats seeded for {}", name)
+            persist_err = self._persist_error(res_stats)
+            if persist_err is not None:
+                return persist_err
             return Ok({
                 "seeded": True,
                 "lanlan": name,
@@ -683,13 +727,15 @@ class DebugEntriesMixin:
                 **self._debug_stats_brief(shard, today),
             })
         if restore:
-            backup = await self.store.get(backup_key)
-            if isinstance(backup, Err) or backup.value is None:
+            if state != "found" or backup is None:
                 return Ok({"restored": False, "lanlan": name, "note": "没有可还原的备份（从未 seed 过）。"})
-            shard.stats = dict(backup.value)
-            await self._save_shard_stats(name, shard)
-            await self.store.set(backup_key, None)
+            shard.stats = dict(backup)
+            res_stats = await self._save_shard_stats(name, shard)
+            await self._debug_backup_drop("stats", _stats_key(name), name)
             self.logger.info("debug stats restored for {}", name)
+            persist_err = self._persist_error(res_stats)
+            if persist_err is not None:
+                return persist_err
             return Ok({
                 "restored": True,
                 "lanlan": name,
@@ -698,7 +744,10 @@ class DebugEntriesMixin:
             })
         if clear:
             shard.stats = new_stats()
-            await self._save_shard_stats(name, shard)
+            res_stats = await self._save_shard_stats(name, shard)
+            persist_err = self._persist_error(res_stats)
+            if persist_err is not None:
+                return persist_err
             return Ok({"cleared": True, "lanlan": name, **self._debug_stats_brief(shard, today)})
         return Ok({
             "lanlan": name,

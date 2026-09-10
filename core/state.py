@@ -118,6 +118,30 @@ def _review_archive_key(lanlan: str) -> str:
     return f"review_archive@{lanlan}"
 
 
+_DEBUG_BACKUP_PREFIX = "pre_debug@"
+_LEGACY_DEBUG_BACKUP_SUFFIX = "|pre-debug"
+
+
+def _debug_backup_key(which: str, lanlan: str) -> str:
+    """调试注入前真实数据备份的 key（独立前缀族 `pre_debug@<which>@<角色>`）。
+
+    过去写成 `f"{_journal_key(name)}|pre-debug"`：把"我是备份"编码成后缀，与真实
+    数据同前缀（任何将来按前缀枚举 store 的代码都会把它当角色数据误读）。
+    which ∈ {journal, review, stats}（同一入口的 archive 键打包在同一个 blob 里）。
+    """
+    return f"{_DEBUG_BACKUP_PREFIX}{which}@{lanlan}"
+
+
+def _legacy_debug_backup_key(data_key: str) -> str:
+    """旧版备份键名（`<数据键>|pre-debug`）：只读兼容，不再新写。
+
+    1.3.0 的调试入口正在真机使用中，直接改键名会让"已注入、尚未还原"的现场落空
+    ——restore 找不到备份，等于把假页留在真日记里。所以旧键保留为回退读位，
+    还原/清理时两个键名都扫。
+    """
+    return f"{data_key}{_LEGACY_DEBUG_BACKUP_SUFFIX}"
+
+
 def _stats_key(lanlan: str) -> str:
     """相处统计（1.1.0）：按天聚合的长期累计（徽章/热力图/月报），按角色分片。
 

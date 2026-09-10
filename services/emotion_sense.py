@@ -251,9 +251,18 @@ class EmotionSenseService:
         self._core_config_cache = (now_mono, cfg)
         return cfg
 
+    async def _aload_core_config(self) -> JsonObject:
+        """`_load_core_config` 的 async 对偶：阻塞读盘丢回线程池。
+
+        经注入的 `core_config_loader` 现取（不快照），所以测试在主类实例上
+        monkeypatch `_load_core_config` 的链路照旧生效。与主类同名同语义，
+        两层各有一个 `a*` 版而不是内联 `to_thread`——对偶性是硬要求。
+        """
+        return await asyncio.to_thread(self._core_config_loader)
+
     async def _analyze_turn_tone_direct(self, text: str, slot: str) -> tuple[str, float] | None:
         """直连所选槽位的端点做五分类分析；解析不出可用端点/请求失败/回复坏 → None 静默降级。"""
-        resolved = self._resolve_slot(self._core_config_loader(), slot)
+        resolved = self._resolve_slot(await self._aload_core_config(), slot)
         if resolved is None:
             self._logger().debug("tone slot {} unresolved in host core_config, skip analysis", slot)
             return None

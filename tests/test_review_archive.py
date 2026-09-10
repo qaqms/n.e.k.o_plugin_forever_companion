@@ -281,7 +281,7 @@ def test_debug_review_fill_overflow_archives_and_restores(tm, plugin_factory) ->
     assert res2.value["restored"] is True
     assert [e["text"] for e in shard.review] == ["卷文0"], "真实卷宗原样回来"
     assert shard.review_archive == [], "注入期入阁的假卷随还原退场"
-    assert p.store.data.get("review@灵|pre-debug") is None, "还原后备份作废"
+    assert p.store.data.get("pre_debug@review@灵") is None, "还原后备份作废"
 
 
 # ---------------------------------------------------------------------------

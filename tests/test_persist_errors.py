@@ -379,3 +379,124 @@ def test_store_read_error_is_logged_and_degrades_to_default(tm, boot_factory):
     assert not shard_cycle.get("anchor_date") and "enabled" not in shard_cycle
     # Ok(None)（值不存在）不得混进"读失败"日志
     assert not any("review@灵" in w for w in logger.warnings)
+
+
+# ---------------------------------------------------------------------------
+# 7. 调试注入备份（stats 入口）：读不出来必须中止；旧键名备份必须还能还原
+# ---------------------------------------------------------------------------
+
+
+def test_debug_seed_aborts_when_backup_state_unreadable(tm, boot_factory):
+    """两个备份键名都读失败 → 中止注入，绝不覆盖真数据。
+
+    1.3.0 第六轮：过去 seed 只在"备份写失败"时中止，读失败被当成"没有备份"
+    继续注入——真数据被假页覆盖后 restore 找不到备份，等于静默丢日记。
+    """
+    real = dict(tm.new_stats())
+    real["first_seen"] = "2026-01-01"
+    store = _ErrStore(
+        tm,
+        initial={"lanlan_index": ["default"], "stats@default": real},
+        fail_get={"pre_debug@stats@default", "stats@default|pre-debug"},
+    )
+    p = _boot(tm, boot_factory, store, current_lanlan="default")
+
+    res = run(p._debug_stats(seed=True))
+
+    assert isinstance(res, tm.Err)
+    assert "备份状态读不出来" in str(res.error)
+    assert store.data["stats@default"]["first_seen"] == "2026-01-01", "读不出来时盘上必须原样"
+    assert p._get_shard("default").stats["first_seen"] == "2026-01-01", "内存也不许被假页覆盖"
+
+
+def test_debug_restore_falls_back_to_legacy_backup_key(tm, boot_factory):
+    """旧键名 `<数据键>|pre-debug` 的备份必须还能还原。
+
+    1.3.0 的调试入口正在真机使用中：改键名若不同时保留旧键回退读位，
+    "已注入、尚未还原"的升级现场会直接找不到备份——假页留在真 stats 上。
+    """
+    real = dict(tm.new_stats())
+    real["first_seen"] = "2026-02-02"
+    demo = dict(tm.new_stats())
+    demo["first_seen"] = "2020-03-03"
+    store = _ErrStore(
+        tm,
+        initial={
+            "lanlan_index": ["default"],
+            "stats@default": demo,
+            "stats@default|pre-debug": real,  # 旧键名写入的现场
+        },
+    )
+    p = _boot(tm, boot_factory, store, current_lanlan="default")
+
+    res = run(p._debug_stats(restore=True))
+
+    assert isinstance(res, tm.Ok), res
+    assert res.value["restored"] is True
+    assert p._get_shard("default").stats["first_seen"] == "2026-02-02"
+    assert store.data["stats@default"]["first_seen"] == "2026-02-02"
+    # 旧键一并清掉，不留孤儿
+    assert "stats@default|pre-debug" not in store.data
+
+
+# ---------------------------------------------------------------------------
+# 8. 调试注入备份（journal 入口）：备份状态读不出来必须中止；旧键名备份必须仍能还原
+# ---------------------------------------------------------------------------
+
+
+def _real_journal_page(page_no: int = 1) -> dict:
+    return {
+        "page_no": page_no,
+        "started_at": "2026-08-01T00:00:00+00:00",
+        "entries": [{"ts": "2026-08-01T00:00:00+00:00", "text": "真实的一页"}],
+    }
+
+
+def test_debug_fill_aborts_when_backup_state_unreadable(tm, boot_factory):
+    """两个备份键名都读失败 → 必须中止注入，绝不把真日记换成假页。
+
+    1.3.0 第六轮收编：过去 seed 路径只在 `not isinstance(res, Err)` 时补备份，
+    读失败等于"跳过备份"却**继续注入**——demo 页当场覆盖 journal@，restore
+    再也找不到原数据。备份状态不可知时唯一安全的动作是不动。
+    """
+    real = [_real_journal_page()]
+    store = _ErrStore(
+        tm,
+        initial={"lanlan_index": ["灵"], "cycle@灵": dict(_ENABLED_CYCLE), "journal@灵": real},
+        fail_get={"pre_debug@journal@灵", "journal@灵|pre-debug"},
+    )
+    p = _boot(tm, boot_factory, store, current_lanlan="灵")
+
+    res = run(p._debug_journal_fill(pages=3, lanlan="灵"))
+
+    assert isinstance(res, tm.Err), "备份状态读不出来却仍然注入 = 真数据无从还原"
+    assert "备份" in str(res.error)
+    assert store.data["journal@灵"] == real, "中止后盘上必须原样"
+    assert store.data["journal@灵"][0]["entries"][0]["text"] == "真实的一页"
+
+
+def test_debug_fill_restore_reads_legacy_backup_key(tm, boot_factory):
+    """旧键名 `<数据键>|pre-debug` 的备份必须还能还原（升级不丢现场）。
+
+    1.3.0 的调试入口正在真机使用：有人已经 seed 过、还没 restore。若改键名后
+    只扫新键，restore 会报"从未注入过"，把 52 页假数据永久留在真日记位上。
+    """
+    real = [_real_journal_page()]
+    store = _ErrStore(
+        tm,
+        initial={
+            "lanlan_index": ["灵"],
+            "cycle@灵": dict(_ENABLED_CYCLE),
+            "journal@灵": [_real_journal_page(i) for i in range(1, 53)],
+            "journal@灵|pre-debug": {"journal": real, "archive": []},
+        },
+    )
+    p = _boot(tm, boot_factory, store, current_lanlan="灵")
+
+    res = run(p._debug_journal_fill(restore=True, lanlan="灵"))
+
+    assert isinstance(res, tm.Ok), res
+    assert res.value["restored"] is True, "旧键名的备份必须能被找到并还原"
+    assert [pg["page_no"] for pg in p._get_shard("灵").journal] == [1]
+    assert store.data["journal@灵"] == real, "还原必须写回盘"
+    assert "journal@灵|pre-debug" not in store.data, "还原后旧键一并作废，不留孤儿"
