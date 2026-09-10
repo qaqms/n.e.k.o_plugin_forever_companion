@@ -566,6 +566,7 @@
   "panel.review.fieldTurns": "Раундов взаимодействия",
   "panel.review.hint": "Записи обо мне",
   "panel.review.kicker": "Запись наблюдателя",
+  "panel.review.lastFailed": "Последняя запись не удалась. Материал сохранён — попробуйте ещё раз.",
   "panel.review.nextFile": "Старое дело",
   "panel.review.notEnoughMaterial": "Материала пока мало (сейчас {turns} обменов, нужно минимум {min_turns}) — поболтайте ещё",
   "panel.review.persistFailed": "Запись написана, но не сохранилась. Материал сохранён — нажмите ещё раз.",

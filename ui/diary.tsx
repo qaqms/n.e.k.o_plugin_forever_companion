@@ -416,6 +416,14 @@ export function DiaryPane(props: {
                     {t("panel.review.writingHint", { defaultValue: "她正把这段时间写下来，写完会自动出现在这里，不用守着。" })}
                   </div>
                 ) : null}
+                {/* 成文失败常驻兜底（1.3.0 第十一轮）：失败结论不能被 toast 时序
+                    和"面板当时开着没"绑死——写失败后下一次点击受理时后端会把结论位
+                    清空（write_review_now 的作废逻辑），警示行随之消失 */}
+                {reviewBrief && !reviewBrief.writing && reviewBrief.last_result && !reviewBrief.last_result.written ? (
+                  <div className="tm-derived">
+                    {t("panel.review.lastFailed", { defaultValue: "上一篇没写成，素材还留着，可以再点一次。" })}
+                  </div>
+                ) : null}
                 <div className="tm-derived">
                   {t("panel.review.hint", { defaultValue: "对我的记录" })}
                 </div>

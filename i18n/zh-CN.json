@@ -566,6 +566,7 @@
   "panel.review.fieldTurns": "互动轮数",
   "panel.review.hint": "对我的记录",
   "panel.review.kicker": "第三者记录",
+  "panel.review.lastFailed": "上一篇没写成，素材还留着，可以再点一次。",
   "panel.review.nextFile": "后一卷",
   "panel.review.notEnoughMaterial": "素材还不够（目前 {turns} 轮，至少 {min_turns} 轮才值得写一篇），再聊聊吧",
   "panel.review.persistFailed": "这一篇写成了但没存住，素材还留着，可以再点一次",

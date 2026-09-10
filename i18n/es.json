@@ -566,6 +566,7 @@
   "panel.review.fieldTurns": "Turnos de interacción",
   "panel.review.hint": "Notas sobre mí",
   "panel.review.kicker": "Registro de un tercero",
+  "panel.review.lastFailed": "La última no llegó a escribirse. El material sigue ahí; puedes intentarlo otra vez.",
   "panel.review.nextFile": "Legajo antiguo",
   "panel.review.notEnoughMaterial": "Aún no hay bastante material ({turns} turnos; se necesitan {min_turns}) — charlad un poco más",
   "panel.review.persistFailed": "Se escribió pero no se guardó. El material se conserva: pulsa otra vez.",

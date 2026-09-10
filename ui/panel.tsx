@@ -520,26 +520,27 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   }
 
   // 队列成文的完成反馈（1.2.3）：last_result 的 ts 变化 = 刚有一篇写完/写失败。
-  // 挂载时先认领当前值——旧结论不补弹（新开面板直接看见篇目即可）。
-  // 角色切换同样按"挂载"处理（1.2.4）：last_result 是**按角色**存的内存位，
-  // 只看 ts 的话，切到另一个角色时会把她上一轮会话里早已看过的旧结论当成刚写完
-  // 补弹一次。复位必须写在本 effect 内：面板的 [state.lanlan] effect 声明在之后，
-  // 同一轮 render 里它跑到时本 effect 已经把 toast 弹出去了
+  // 角色切换按"挂载"处理（1.2.4）：last_result 是按角色存的内存位。
+  // 1.3.0 第十一轮修序：旧版把 `!result return` 挡在认领之前——挂载时没有旧结论，
+  // 认领永远不发生；真正落地的**第一条**成败结论反而被当成"挂载期旧值"吞掉
+  // （面板首次"立即写一篇"的失败反馈必消失，用户端只见按钮弹回、列表无变化）。
+  // 现在认领看"角色首帧"而不看"首条结果"：无结果帧也完成认领（seen 记 0），
+  // 随后任何 ts>0 的结果都是新事——弹。`seen===0` 旧吞币分支同步删除
+  // （ts 来自 time.time()，恒 >0，0 只会是"还没认领到真结果"的哨兵）。
+  // 复位必须写在本 effect 内：面板的 [state.lanlan] effect 声明在之后，
+  // 同一轮 render 里它跑到时本 effect 已经把 toast 弹出去了。
+  // 面板关着错过的失败另有常驻兜底：diary.tsx 的 lastFailed 内联警示行
   const reviewResultSeen = useRef<number>(0)
   const reviewResultRole = useRef<string | null>(null)
   useEffect(() => {
     const result = state.review_brief && state.review_brief.last_result
-    if (!result || !result.ts) return
     const role = state.lanlan || ""
     if (reviewResultRole.current !== role) {
       reviewResultRole.current = role
-      reviewResultSeen.current = result.ts
+      reviewResultSeen.current = (result && result.ts) || 0
       return
     }
-    if (reviewResultSeen.current === 0) {
-      reviewResultSeen.current = result.ts
-      return
-    }
+    if (!result || !result.ts) return
     if (reviewResultSeen.current === result.ts) return
     reviewResultSeen.current = result.ts
     if (result.written) {

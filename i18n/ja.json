@@ -566,6 +566,7 @@
   "panel.review.fieldTurns": "インタラクション数",
   "panel.review.hint": "私についての記録",
   "panel.review.kicker": "第三者記録",
+  "panel.review.lastFailed": "前回は書き上げられませんでした。素材は残っているので、もう一度お試しください。",
   "panel.review.nextFile": "古い巻",
   "panel.review.notEnoughMaterial": "素材がまだ足りません（現在 {turns} ターン、書くには最低 {min_turns} ターン）——もう少し話そう",
   "panel.review.persistFailed": "書き上がりましたが保存に失敗しました。素材は残っているので、もう一度お試しください",

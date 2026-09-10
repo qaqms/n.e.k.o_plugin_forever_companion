@@ -566,6 +566,7 @@
   "panel.review.fieldTurns": "상호 작용 횟수",
   "panel.review.hint": "나에 대한 기록",
   "panel.review.kicker": "제3자 기록",
+  "panel.review.lastFailed": "마지막 글이 완성되지 않았어요. 재료는 그대로 있으니 다시 눌러보세요.",
   "panel.review.nextFile": "옛 권",
   "panel.review.notEnoughMaterial": "재료가 아직 부족해요(현재 {turns}턴, 최소 {min_turns}턴은 해야 써요)—더 이야기해요",
   "panel.review.persistFailed": "다 썼지만 저장에 실패했어요. 소재는 남아 있으니 한 번 더 눌러주세요",

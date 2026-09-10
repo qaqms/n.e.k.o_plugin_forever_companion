@@ -566,6 +566,7 @@
   "panel.review.fieldTurns": "Rodadas de interação",
   "panel.review.hint": "Notas sobre mim",
   "panel.review.kicker": "Registro de terceiro",
+  "panel.review.lastFailed": "A última não chegou a ser escrita. O material continua lá; você pode tentar de novo.",
   "panel.review.nextFile": "Volume antigo",
   "panel.review.notEnoughMaterial": "Ainda falta material ({turns} turnos; são necessários pelo menos {min_turns}) — conversem mais um pouco",
   "panel.review.persistFailed": "O texto foi escrito mas não foi salvo. O material foi mantido — clique novamente para tentar.",

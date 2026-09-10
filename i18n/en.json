@@ -566,6 +566,7 @@
   "panel.review.fieldTurns": "Turns",
   "panel.review.hint": "Notes about me",
   "panel.review.kicker": "Third-party record",
+  "panel.review.lastFailed": "The last one didn't get written. The material is still kept — you can try again.",
   "panel.review.nextFile": "Older volume",
   "panel.review.notEnoughMaterial": "Not enough material yet ({turns} turns so far, at least {min_turns} to write one) — chat a bit more",
   "panel.review.persistFailed": "The entry was written but couldn't be saved. The material is kept — click again to retry.",
