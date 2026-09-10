@@ -20,6 +20,7 @@ from plugin.sdk.plugin import Err, Ok, Result, SdkError, plugin_entry, quick_act
 from ..core.appearance import (
     APPEARANCE_FILLS,
     APPEARANCE_POSITIONS,
+    ImageDataUrlError,
     appearance_defaults,
     clamp_appearance,
     gallery_add_item,
@@ -86,7 +87,7 @@ from ..core.stats import (
     month_view,
     summary_payload,
 )
-from ..services.tone_slot import _slot_dormancy_hint, diagnose_slot_dormancy
+from ..services.tone_slot import diagnose_slot_dormancy
 
 JsonObject = dict[str, Any]
 
@@ -487,7 +488,7 @@ class PanelEntriesMixin:
     async def update_settings(self, **kwargs: Any):
         updates = {k: v for k, v in kwargs.items() if k in self._EDITABLE_SETTINGS and not k.startswith("_")}
         if not updates:
-            return Err(SdkError(self.i18n.t("errors.no_valid_fields", default="没有可更新的设置字段")))
+            return Err(SdkError("no_valid_fields"))
         lanlan, shard = await self._current_shard_async()
         # 本入口的两处落盘（cycle@<角色> 与全局 settings）：任一 Err 最后回 Err
         res_cycle: Result[None] = Ok(None)
@@ -533,7 +534,9 @@ class PanelEntriesMixin:
             if "inject_mode" in updates:
                 mode = str(updates["inject_mode"])
                 if mode not in ("every_user_message", "interval_n", "on_trigger", "off"):
-                    return Err(SdkError(f"invalid inject_mode: {mode}"))
+                    # i18n 契约（1.3.0 第九轮）：面板可见错误只回稳定码，坏值进日志
+                    self.logger.warning("invalid inject_mode: {}", mode)
+                    return Err(SdkError("invalid_inject_mode"))
                 tide_patch["inject_mode"] = mode
             if "inject_interval_n" in updates:
                 tide_patch["inject_interval_n"] = max(1, min(50, int(updates["inject_interval_n"])))
@@ -546,7 +549,12 @@ class PanelEntriesMixin:
             if "timezone" in updates:
                 tz = str(updates["timezone"]).strip() or "auto"
                 if tz != "auto":
-                    ZoneInfo(tz)  # 合法性校验（auto = 系统本地时区）
+                    try:
+                        ZoneInfo(tz)  # 合法性校验（auto = 系统本地时区）
+                    except Exception:  # noqa: BLE001 - ZoneInfoNotFoundError 是 KeyError 子类
+                        # 不接进外层兼容分支的 settings_save_failed：这是参数错不是保存失败
+                        self.logger.warning("invalid timezone: {}", tz)
+                        return Err(SdkError("invalid_timezone"))
                 tide_patch["timezone"] = tz
             if "mood_enabled" in updates:
                 mood_patch["enabled"] = bool(updates["mood_enabled"])
@@ -566,7 +574,8 @@ class PanelEntriesMixin:
             if "tone_slot" in updates:
                 slot = str(updates["tone_slot"]).strip()
                 if slot and slot not in _TONE_SLOT_PREFIXES:
-                    return Err(SdkError(f"invalid tone_slot: {slot}"))
+                    self.logger.warning("invalid tone_slot: {}", slot)
+                    return Err(SdkError("invalid_tone_slot"))
                 es_patch["slot"] = slot
             # ---- 时光日记·自动碎片（[fragments]），全局 ----
             if "fragments_enabled" in updates:
@@ -574,7 +583,8 @@ class PanelEntriesMixin:
             if "fragments_slot" in updates:
                 slot = str(updates["fragments_slot"]).strip() or _FRAGMENT_DEFAULT_SLOT
                 if slot not in _TONE_SLOT_PREFIXES:
-                    return Err(SdkError(f"invalid fragments_slot: {slot}"))
+                    self.logger.warning("invalid fragments_slot: {}", slot)
+                    return Err(SdkError("invalid_fragments_slot"))
                 frag_patch["slot"] = slot
             # ---- 我的日记（[review]），全局 ----
             if "review_enabled" in updates:
@@ -584,7 +594,8 @@ class PanelEntriesMixin:
                 # emotion 槽与空串都不可选
                 slot = str(updates["review_slot"]).strip() or _REVIEW_DEFAULT_SLOT
                 if slot not in _TONE_SLOT_PREFIXES or slot == "emotion":
-                    return Err(SdkError(f"invalid review_slot: {slot}"))
+                    self.logger.warning("invalid review_slot: {}", slot)
+                    return Err(SdkError("invalid_review_slot"))
                 review_patch["slot"] = slot
             if "review_turns_threshold" in updates:
                 review_patch["turns_threshold"] = max(10, min(500, int(updates["review_turns_threshold"])))
@@ -627,10 +638,11 @@ class PanelEntriesMixin:
                 res_settings = await self._save_settings()
                 self._sync_debug_entries()
         except (TideConfigError, ValueError, TypeError) as exc:
-            return Err(SdkError(str(exc)))
+            self.logger.warning("update_settings rejected: {}: {}", type(exc).__name__, exc)
+            return Err(SdkError("settings_value_invalid"))
         except Exception as exc:  # noqa: BLE001 - 配置写失败统一报错给面板
             self.logger.warning("update_settings failed: {}", exc)
-            return Err(SdkError(f"failed to save settings: {exc}"))
+            return Err(SdkError("settings_save_failed"))
 
         # 落盘失败优先于一切回显：任一 Err 即向面板报错（参数校验的 warning
         # 只说明"没存住的值还不合法"，不掩盖写失败本身）
@@ -666,7 +678,8 @@ class PanelEntriesMixin:
         try:
             phase = self._current_phase_state(shard)
         except TideConfigError as exc:
-            return Err(SdkError(f"invalid tide config: {exc}"))
+            self.logger.warning("invalid tide config: {}", exc)
+            return Err(SdkError("invalid_tide_config"))
         return Ok({
             **build_status_payload(phase, enabled=self._enabled(shard)),
             "lanlan": lanlan,
@@ -700,7 +713,8 @@ class PanelEntriesMixin:
             anchor = parse_anchor_date(date)
             self._cycle_params_for_validation(anchor, shard)
         except (TideConfigError, ValueError) as exc:
-            return Err(SdkError(str(exc)))
+            self.logger.warning("set_anchor rejected: {}: {}", type(exc).__name__, exc)
+            return Err(SdkError("anchor_date_invalid"))
         anchor_iso = anchor.isoformat()
         # Store 权威存储（子进程无存活事件循环，后台同步任务必死，不再尝试）
         shard.cycle["anchor_date"] = anchor_iso
@@ -761,7 +775,8 @@ class PanelEntriesMixin:
         面板据此提示而不是谎报"引导已保存"。
         """
         if action not in ("done", "skip", "reopen"):
-            return Err(SdkError("action 必须是 done/skip/reopen 之一"))
+            self.logger.warning("invalid onboarding action: {}", action)
+            return Err(SdkError("invalid_onboarding_action"))
         self._guide = make_guide_record(action, _now_utc().isoformat(timespec="seconds"))
         res = await self._save_guide()
         if isinstance(res, Err):
@@ -927,15 +942,15 @@ class PanelEntriesMixin:
             if gallery_find(index, gid) is None:
                 set_res = await self._store_write(gallery_img_key(gid), image, f"gallery image {gid} (migrated)")
                 if isinstance(set_res, Err):
-                    return Err(SdkError("failed to migrate background"))
+                    return Err(SdkError("background_migrate_failed"))
                 index, _ = gallery_add_item(index, item)
                 if not await self._gallery_save_index(index):
-                    return Err(SdkError("failed to migrate background"))
+                    return Err(SdkError("background_migrate_failed"))
             save_res = await self._store_write(
                 _STORE_PANEL_APPEARANCE, appearance, "panel appearance (migrated)",
             )
             if isinstance(save_res, Err):
-                return Err(SdkError("failed to migrate background"))
+                return Err(SdkError("background_migrate_failed"))
             self.logger.info("legacy panel background migrated into gallery: id={}", gid)
             return Ok({"items": index.get("items") or [], "appearance": appearance, "migrated": True})
         return Ok({"items": index.get("items") or [], "appearance": appearance_defaults(), "migrated": False})
@@ -964,8 +979,12 @@ class PanelEntriesMixin:
             thumb_text = str(thumb or "").strip()
             if thumb_text:
                 parse_image_data_url(thumb_text, _GALLERY_THUMB_MAX_CHARS)
-        except ValueError as exc:
-            return Err(SdkError(str(exc)))
+        except ImageDataUrlError as exc:
+            self.logger.warning("gallery_add rejected image: {}", exc)
+            return Err(SdkError(exc.code))
+        except ValueError as exc:  # 防御：未来新增的非码校验失败兜底
+            self.logger.warning("gallery_add rejected image: {}", exc)
+            return Err(SdkError("image_invalid"))
         index = await self._gallery_index()
         item = {
             "id": "",
@@ -977,7 +996,7 @@ class PanelEntriesMixin:
         }
         index, added = gallery_add_item(index, item)
         if not added:
-            return Err(SdkError("gallery is full"))
+            return Err(SdkError("gallery_full"))
         item["id"] = gallery_next_id(index)
         res = await self._store_write(
             gallery_img_key(item["id"]),
@@ -985,10 +1004,10 @@ class PanelEntriesMixin:
             f"gallery image {item['id']}",
         )
         if isinstance(res, Err):
-            return Err(SdkError("failed to save image"))
+            return Err(SdkError("image_save_failed"))
         if not await self._gallery_save_index(index):
             await self._store_delete(gallery_img_key(item["id"]), f"gallery image {item['id']} (rollback)")
-            return Err(SdkError("failed to save image"))
+            return Err(SdkError("image_save_failed"))
         self.logger.info("gallery image added: id={} mime={} chars={}", item["id"], mime, size)
         return Ok({"id": item["id"], "items": index.get("items") or []})
 
@@ -1011,16 +1030,16 @@ class PanelEntriesMixin:
     async def gallery_remove(self, item_id: str = "", **_: Any):
         gid = str(item_id or "").strip()
         if not gid:
-            return Err(SdkError("item_id required"))
+            return Err(SdkError("item_id_required"))
         index = await self._gallery_index()
         if gallery_find(index, gid) is None:
-            return Err(SdkError("image not found"))
+            return Err(SdkError("image_not_found"))
         gallery_remove_item(index, gid)
         # 图本体删除是 best-effort（索引先除名即可对用户不可见；写失败留痕，
         # 残留 blob 无引用不致数据错乱）；统一删除出口在 P1 收编
         await self._store_delete(gallery_img_key(gid), f"gallery image {gid}")
         if not await self._gallery_save_index(index):
-            return Err(SdkError("failed to update gallery"))
+            return Err(SdkError("gallery_update_failed"))
         appearance = await self._saved_appearance()
         if appearance.get("bg_id") == gid:
             # 解除对该图的引用（写失败不拦删除：悬空 bg_id 在读取与保存侧自愈）
@@ -1051,18 +1070,22 @@ class PanelEntriesMixin:
     async def gallery_set_thumb(self, item_id: str = "", thumb: str = "", **_: Any):
         gid = str(item_id or "").strip()
         if not gid:
-            return Err(SdkError("item_id required"))
+            return Err(SdkError("item_id_required"))
         try:
             parse_image_data_url(thumb, _GALLERY_THUMB_MAX_CHARS)
+        except ImageDataUrlError as exc:
+            self.logger.warning("gallery_set_thumb rejected: {}", exc)
+            return Err(SdkError(exc.code))
         except ValueError as exc:
-            return Err(SdkError(str(exc)))
+            self.logger.warning("gallery_set_thumb rejected: {}", exc)
+            return Err(SdkError("image_invalid"))
         index = await self._gallery_index()
         item = gallery_find(index, gid)
         if item is None:
-            return Err(SdkError("image not found"))
+            return Err(SdkError("image_not_found"))
         item["thumb"] = str(thumb).strip()
         if not await self._gallery_save_index(index):
-            return Err(SdkError("failed to update gallery"))
+            return Err(SdkError("gallery_update_failed"))
         return Ok({"items": index.get("items") or []})
 
     @ui.action(
@@ -1085,15 +1108,15 @@ class PanelEntriesMixin:
     async def get_gallery_image(self, item_id: str = "", **_: Any):
         gid = str(item_id or "").strip()
         if not gid:
-            return Err(SdkError("item_id required"))
+            return Err(SdkError("item_id_required"))
         index = await self._gallery_index()
         item = gallery_find(index, gid)
         if item is None:
-            return Err(SdkError("image not found"))
+            return Err(SdkError("image_not_found"))
         res = await self._store_read(gallery_img_key(gid))  # 读失败经统一出口留痕
         rec = res.value if isinstance(res, Ok) else None
         if not isinstance(rec, dict) or not str(rec.get("data_url") or ""):
-            return Err(SdkError("image not found"))
+            return Err(SdkError("image_not_found"))
         return Ok({
             "data_url": str(rec.get("data_url")),
             "mime": str(rec.get("mime") or ""),
@@ -1136,7 +1159,7 @@ class PanelEntriesMixin:
         # 与其余状态一致——当场生效、重启即丢，日志可见）
         res = await self._store_write(_STORE_PANEL_APPEARANCE, appearance, "panel appearance")
         if isinstance(res, Err):
-            return Err(SdkError("failed to save appearance"))
+            return Err(SdkError("appearance_save_failed"))
         return Ok({"appearance": appearance})
 
     @plugin_entry(
@@ -1151,7 +1174,7 @@ class PanelEntriesMixin:
         shard = await self._ensure_shard(lanlan)
         previous = shard.mood.action
         if not previous:
-            return Ok({"cleared": False, "note": "当前没有生效的情绪动作。"})
+            return Ok({"cleared": False, "note": "no_active_mood"})
         # 只清动作字段：连续心情（valence/arousal）保留，靠惰性衰减自然回落，
         # 手动解除不该把余波瞬间清零（reset_all 全量重置才是 _MoodState()）
         shard.mood.action = ""
@@ -1226,10 +1249,11 @@ class PanelEntriesMixin:
         lanlan = await self._attribution_lanlan(kwargs)
         shard = await self._ensure_shard(lanlan)
         if not self._mood_enabled(shard):
-            return Err(SdkError("情绪系统未开启"))
+            return Err(SdkError("mood_system_disabled"))
         action = str(action or "").strip()
         if action not in (*_TIMED_ACTIONS, "seek_harbor"):
-            return Err(SdkError(f"unknown mood action: {action!r}"))
+            self.logger.warning("unknown mood action: {}", repr(action))
+            return Err(SdkError("unknown_mood_action"))
         res = await self._apply_mood_action(
             action=action,
             minutes=int(minutes) if minutes else None,
@@ -1240,7 +1264,7 @@ class PanelEntriesMixin:
         )
         if isinstance(res, Err):
             return res
-        return Ok({**res.value, "note": "已进入该情绪状态，行为指令已送入她的对话上下文。"})
+        return Ok({**res.value, "note": "mood_applied"})
 
     @ui.action(
         label=tr("actions.get_diary.label", default="查看时光日记"),
@@ -1289,29 +1313,16 @@ class PanelEntriesMixin:
     async def invite_journal(self, **_: Any):
         # 返回 (invited, deliver)：deliver ∈ ""(未递出：开关未开) / failed(传输拒收) /
         # respond(当面递到，她当场收到并可当场落笔) / read(冷却内静默补递)。
-        # 四种结果四种 note——传输被拒时绝不沿用"已递出"的措辞（1.2.4 审查修复）
+        # i18n 契约（1.3.0 第九轮）：四态只回 invited/mode 码，面板按码翻译
+        # （panel.journal.inviteFailed/inviteOff/invitedRespond/invitedQuiet）；
+        # 传输被拒时语义仍是"没送到"，绝不沿用"已递出"的措辞（1.2.4 审查修复不变）
         lanlan, shard = await self._current_shard_async()
         invited, deliver = await self._maybe_journal_invite(lanlan, shard, force=True)
         if not invited and deliver == "failed":
-            return Ok({
-                "invited": False, "mode": deliver, "lanlan": lanlan,
-                "note": "刚才这条邀请没能送到她手上（消息通道正忙或不可用），再按一次试试。",
-            })
+            return Ok({"invited": False, "mode": deliver, "lanlan": lanlan})
         if not invited:
-            return Ok({
-                "invited": False,
-                "lanlan": lanlan,
-                "note": "个人日记开关未开启（[journal].enabled），邀请未发送。",
-            })
-        if deliver == "respond":
-            return Ok({
-                "invited": True, "mode": deliver, "lanlan": lanlan,
-                "note": "邀请已当面递到她手上，她这会儿正想着呢——写不写由她自己决定。",
-            })
-        return Ok({
-            "invited": True, "mode": deliver, "lanlan": lanlan,
-            "note": "她刚收到过邀请，这次改成悄悄提醒——给她留点考虑的空间。",
-        })
+            return Ok({"invited": False, "lanlan": lanlan})
+        return Ok({"invited": True, "mode": deliver, "lanlan": lanlan})
 
     @ui.action(
         label=tr("actions.delete_diary_item.label", default="删除这条碎片"),
@@ -1338,11 +1349,11 @@ class PanelEntriesMixin:
         lanlan, shard = await self._current_shard_async()
         target = str(ts or "").strip()
         if not target:
-            return Err(SdkError("ts is required"))
+            return Err(SdkError("ts_required"))
         remaining = [item for item in shard.diary if str(item.get("ts") or "") != target]
         removed = len(shard.diary) - len(remaining)
         if not removed:
-            return Err(SdkError("fragment not found"))
+            return Err(SdkError("fragment_not_found"))
         shard.diary = remaining
         res_diary = await self._save_shard_diary(lanlan, shard)
         persist_err = self._persist_error(res_diary)
@@ -1495,28 +1506,31 @@ class PanelEntriesMixin:
         lanlan, shard = await self._current_shard_async()
         passed, reason, _resolved = await self._review_write_gate(shard, force=True)
         if not passed:
-            notes = {
-                "disabled": "我的日记开关未开启（[review].enabled）。",
-                "not_enough_material": (
-                    f"素材还不够（目前 {int(shard.review_stats.get('turns') or 0)} 轮，"
-                    f"至少 {_REVIEW_MIN_TURNS_FORCED} 轮才值得写一篇），再聊聊吧。"
-                ),
-                "slot_unresolved": _slot_dormancy_hint(await self._aload_core_config(), str(self._review_cfg.get("slot") or "").strip() or _REVIEW_DEFAULT_SLOT),
+            # i18n 契约（1.3.0 第九轮）：只回 reason 码与数据字段，面板按码翻译
+            # （not_enough_material → panel.review.notEnoughMaterial 插值 turns/min_turns；
+            # slot_unresolved → 复用 onboarding.channels.noModel/freeRoute；其余→writeFailed）
+            payload: JsonObject = {
+                "written": False, "queued": False, "accepted": False,
+                "lanlan": lanlan, "reason": reason,
             }
-            return Ok({"written": False, "queued": False, "accepted": False, "lanlan": lanlan, "reason": reason, "note": notes.get(reason, reason)})
+            if reason == "not_enough_material":
+                payload["turns"] = int(shard.review_stats.get("turns") or 0)
+                payload["min_turns"] = _REVIEW_MIN_TURNS_FORCED
+            elif reason == "slot_unresolved":
+                cfg = await self._aload_core_config()
+                payload["dormant_reason"] = diagnose_slot_dormancy(
+                    cfg, str(self._review_cfg.get("slot") or "").strip() or _REVIEW_DEFAULT_SLOT,
+                ) or "no_model"
+            return Ok(payload)
         if shard.pending_review_write or lanlan in self._review_writing:
             # 队列槽位只有一个：上一篇还在写/还在队里，重复点击不再叠加
             return Ok({
                 "written": False, "queued": False, "accepted": False, "lanlan": lanlan,
                 "reason": "already_writing",
-                "note": "上一篇还在写，写完会自动出现在这里，稍等一下。",
             })
         shard.pending_review_write = time.time()
         shard.review_write_result = None  # 上一次的成败结论作废，面板不再重复弹
-        return Ok({
-            "written": False, "queued": True, "accepted": True, "lanlan": lanlan,
-            "note": "已开始写这一篇，写完会自动出现在「我的日记」里，不用守着。",
-        })
+        return Ok({"written": False, "queued": True, "accepted": True, "lanlan": lanlan})
 
     @ui.action(
         label=tr("actions.clear_review.label", default="清空我的日记"),
@@ -1688,17 +1702,19 @@ class PanelEntriesMixin:
         """
         name = str(lanlan or "").strip()
         if not name:
-            return Err(SdkError("角色名不能为空"))
+            return Err(SdkError("lanlan_name_required"))
         if name not in self._lanlan_index:
-            return Err(SdkError(f"角色不在已知列表中：{name}"))
+            self.logger.warning("prune rejected: {} not in index", name)
+            return Err(SdkError("lanlan_not_in_index"))
         known = await self._fetch_known_catgirls()
         if known is None:
-            return Err(SdkError("无法获取宿主角色列表，为安全起见本次不清除；请稍后重试"))
+            return Err(SdkError("host_roster_unreachable"))
         if name in known:
-            return Err(SdkError(f"角色 {name} 仍存在于宿主中，不允许清除其数据"))
+            self.logger.warning("prune rejected: {} still in host", name)
+            return Err(SdkError("lanlan_still_in_host"))
         current = await self._resolve_current_lanlan()
         if name == current:
-            return Err(SdkError(f"{name} 是宿主当前角色，不允许清除其数据"))
+            return Err(SdkError("lanlan_is_current"))
         first_delete_err: Err | None = None
         for key in (
             _cycle_key(name), _mood_key(name), _diary_key(name),

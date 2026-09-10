@@ -335,15 +335,16 @@ def test_invite_gated_by_switches(plugin_factory) -> None:
 
 
 def test_invite_journal_entry_reports_mode(plugin_factory) -> None:
-    """面板入口三态 note：respond 当面递到 / 冷却内悄悄提醒。"""
+    """面板入口四态码：respond 当面递到 / read 冷却内悄悄提醒（i18n 契约第九轮：
+    后端只回 invited/mode 码，文案由 panel.journal.invitedRespond/invitedQuiet 翻译）。"""
     p = plugin_factory()
     run(p._ensure_shard("default"))
     res = run(p.invite_journal())
     v = res.value
     assert v["invited"] is True and v["mode"] == "respond"
-    assert "当面" in v["note"]
+    assert "note" not in v, "面板可见文案不再由后端发人话句（tests/test_i18n_contract.py 钉死）"
     res2 = run(p.invite_journal())
-    assert res2.value["mode"] == "read" and "悄悄" in res2.value["note"]
+    assert res2.value["invited"] is True and res2.value["mode"] == "read"
 
 
 # ---------- 1.2.4 审查修复：递邀的提交结果必须看 ----------
@@ -361,8 +362,7 @@ def test_forced_invite_reports_transport_failure(plugin_factory) -> None:
 
     v = run(p.invite_journal()).value
     assert v["invited"] is False and v["mode"] == "failed"
-    assert "没能送到" in v["note"]
-    assert "开关未开启" not in v["note"], "不能把传输失败误报成开关问题"
+    assert "note" not in v, "失败语义由 mode=failed 码承载（面板 inviteFailed 支），不再发裸串"
 
 
 def test_periodic_invite_failure_keeps_watermark(plugin_factory) -> None:

@@ -26,11 +26,11 @@ export function CycleSettingsCard(props: {
       {form.auto_derive ? (
         <div className="tm-derived">
           {t("panel.settings.derivedResult", { defaultValue: "演算结果" })}：
-          {t("panel.settings.tidePhaseShort", { defaultValue: "潮汐期" })} {settings.period_length ?? 5} {t("panel.days", { defaultValue: "天" })}
+          {t("panel.settings.tideNDays", { n: String(settings.period_length ?? 5), defaultValue: "潮汐期 {n} 天" })}
           {" · "}
-          {t("panel.settings.activeDayShort", { defaultValue: "活跃日" })} {t("panel.settings.dayOrdinal", { defaultValue: "第" })} {settings.ovulation_day ?? 14} {t("panel.days", { defaultValue: "天" })}
+          {t("panel.settings.activeDayN", { n: String(settings.ovulation_day ?? 14), defaultValue: "活跃日 第 {n} 天" })}
           {" · "}
-          {t("panel.settings.activeWindowShort", { defaultValue: "活跃窗口" })} ±{settings.ovulation_window ?? 3} {t("panel.days", { defaultValue: "天" })}
+          {t("panel.settings.activeWindowN", { n: String(settings.ovulation_window ?? 3), defaultValue: "活跃窗口 ±{n} 天" })}
         </div>
       ) : null}
       <Grid cols={2}>

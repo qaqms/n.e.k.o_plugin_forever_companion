@@ -186,6 +186,31 @@
   调试入口 `debug_review`（素材统计 + 资格判定 + force 成文）、
   `debug_review_fill`（假卷宗注入/还原，entries 可给 53~60 走真实落盘链验溢出搬家）
 
+## 面板 i18n 契约（1.3.0 第九轮，长期有效）
+
+后端→面板的用户可见文案**只准携带稳定 ASCII 码**（`^[a-z][a-z0-9_]*$`），
+译文全部在 bundle 侧。技术地基：`tr()` 延迟引用只在入口元数据/UI manifest/
+UI context 三处被宿主解析，**动作返回值不在解析链里**（`call_surface_action`
+不跑 `resolve_i18n_refs`）；且动作调用时后端拿不到请求方 UI locale，
+后端永远不可能自己翻译——只能发码。具体约束：
+
+- 面板可达入口（`mixins/panel.py`/`capabilities.py`/`shards.py`）的 `"note"`
+  字面量与 `Err(SdkError(...))` 实参只准稳定码（带码异常 `exc.code` 形态放行，
+  码在定义处受同一门约束）；动态细节进日志不进文案；
+- 数据类文案改发字段：`mode`/`reason`/`turns`/`min_turns`/`dormant_reason`，
+  数字进插值不进文案；面板按码分支翻译（`ui/utils.ts` 的 `errorText(err, t)`：
+  码形态的 reject message 按 `panel.errors.<camelCase>` 翻译，非码宿主自身错误原样直出）；
+- **豁免（有意）**：`mood_actions.py` 的 note 是给模型的行为指令、
+  `debug_entries.py` 是开发者面向调试入口，都不走面板 toast 通路；
+  `self.i18n.t()` 运行时解析的是插件 default_locale，**不得用于用户可见返回値**（只能进日志/内部文本）；
+- **新增码必须同时进 8 个 locale**（camelCase 末段同名），新增 `t("key")` 引用
+  必须先登记键——非中文用户吃到中文 defaultValue 的形态就是本轮主 bug，
+  `tests/test_i18n_contract.py` 五道反向对照过的门钉死（含 TSX 引用面↔bundle 对拍）；
+- CJK 逐词拼接（"第"+N+"天"）在拉丁语系必碎，整句参数化 `{n}` 插值是唯一正确形态；
+- kit `ActionButton` 的错误展示是内联裸串（不经过我们的 errorText）：入口可能回
+  Err 的动作不用 ActionButton，用受控 Button + confirmDialog + errorText
+  （reset_all 先例）；label/confirm 与后端 `@ui.action` 同一对 `actions.*` 键。
+
 
 ## 版本日志（已迁出）
 

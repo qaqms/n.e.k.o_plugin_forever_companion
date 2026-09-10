@@ -1,6 +1,6 @@
 // 设置页：通用设置（时区/调试模式）+ 面板外观 + 危险区（重置全部数据）
 // + 已有状态的角色名单（孤儿清理）。全局杂项归位页——原「管理」页。
-import { ActionButton, Card, Field, Select, StatusBadge, Switch, Button } from "@neko/plugin-ui"
+import { Card, Field, Select, StatusBadge, Switch, Button } from "@neko/plugin-ui"
 import type { HostedAction } from "@neko/plugin-ui"
 import type { FormValues, LanlanItem, TFunc } from "./types"
 import { lanlanPhaseLabel, moodBadgeTone } from "./utils"
@@ -10,6 +10,9 @@ export function ManagePane(props: {
   form: FormValues
   updateForm: (patch: Partial<FormValues>) => void
   resetAll?: HostedAction
+  // 受控重置入口（i18n 契约第九轮）：错误经 panel.tsx 的 errorText 翻译，
+  // 不再走 ActionButton 的内联裸码展示
+  onResetAll?: () => void
   lanlanList: LanlanItem[]
   lanlan?: string
   canPrune: boolean
@@ -18,7 +21,7 @@ export function ManagePane(props: {
   onReopenGuide?: () => void
   children?: any
 }) {
-  const { t, form, updateForm, resetAll, lanlanList, lanlan, canPrune, onPruneLanlan, onReopenGuide } = props
+  const { t, form, updateForm, resetAll, onResetAll, lanlanList, lanlan, canPrune, onPruneLanlan, onReopenGuide } = props
 
   const timezoneOptions = [
     { value: "auto", label: t("panel.settings.tzAuto", { defaultValue: "自动（跟随系统）" }) },
@@ -59,7 +62,9 @@ export function ManagePane(props: {
       {props.children}
 
       <Card title={t("panel.settings.dangerZone", { defaultValue: "危险区" })}>
-        {resetAll ? <ActionButton action={resetAll} tone="danger" /> : null}
+        {resetAll && onResetAll ? (
+          <Button tone="danger" onClick={onResetAll}>{t("actions.reset.label", { defaultValue: "重置全部数据" })}</Button>
+        ) : null}
       </Card>
 
       {lanlanList.length > 0 ? (

@@ -67,7 +67,10 @@ def _exe(name: str) -> str:
 
 def _run(cmd: list[str], cwd: Path) -> tuple[bool, str]:
     argv = [_exe(cmd[0]), *cmd[1:]]
-    proc = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, shell=False)
+    # 码面钉 UTF-8：text=True 默认按本地码页（Windows=GBK）解码子进程管道，
+    # 子进程输出 UTF-8 中日韩字节即崩 reader 线程（实测 UnicodeDecodeError 0x93），
+    # 判定靠 returncode 不受连累，但门日志会丢一大截——与脚本自身的 stdout 同口径
+    proc = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace", shell=False)
     out = (proc.stdout or "") + (proc.stderr or "")
     return proc.returncode == 0, out
 

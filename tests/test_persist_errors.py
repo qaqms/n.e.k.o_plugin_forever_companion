@@ -104,8 +104,8 @@ def test_toggle_persist_error_propagates_but_memory_still_applies(tm, boot_facto
     res = run(p.toggle())  # 开 → 关
 
     assert isinstance(res, tm.Err)
-    assert "persist failed" in str(res.error)
-    assert "disk full" in str(res.error)
+    # i18n 契约第九轮：入口只回稳定码，disk full 细节由 _store_write 统一出口进日志
+    assert str(res.error) == "persist_failed"
     shard = p._get_shard("灵")
     assert p._enabled(shard) is False, "内存必须仍当场生效（Err 不回滚状态）"
     assert store.data["cycle@灵"] == persisted, "盘上必须原样（写失败没有半更新）"
@@ -220,7 +220,7 @@ def test_mood_action_persist_failure_propagates_err(tm, boot_factory):
     p = _boot(tm, boot_factory, store, current_lanlan="灵")
     res = run(p.tool_cold_violence(minutes=10, reason="生气了", _ctx={"lanlan_name": "灵"}))
     assert isinstance(res, tm.Err)
-    assert "persist failed" in str(res.error)
+    assert str(res.error) == "persist_failed"
     assert p._get_shard("灵").mood.action == "ebb_tide", "内存当场生效契约不变"
 
 
@@ -320,7 +320,7 @@ def test_diary_delete_and_clear_review_propagate_persist_errors(tm, boot_factory
 
     res = run(p.delete_diary_item(ts="2026-08-10T12:00:00+00:00"))
     assert isinstance(res, tm.Err)
-    assert "disk full" in str(res.error)
+    assert str(res.error) == "persist_failed"
     assert store.data["diary@灵"] == diary, "写失败盘上必须原样"
     assert p._get_shard("灵").diary == [], "内存当场生效（面板即时可见）"
 
@@ -348,7 +348,7 @@ def test_prune_lanlan_propagates_delete_failure(tm, boot_factory):
     res = run(p.prune_lanlan(lanlan="灵"))
 
     assert isinstance(res, tm.Err)
-    assert "disk full" in str(res.error)
+    assert str(res.error) == "persist_failed"
     assert "cycle@灵" in store.data, "盘上残留的数据不能被谎称已删"
 
 

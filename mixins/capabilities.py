@@ -235,7 +235,8 @@ class CapabilityMixin:
         cap_id = str(capability_id or "").strip()
         spec = CAPABILITY_SPECS.get(cap_id)
         if spec is None or not spec.managed:
-            return Err(SdkError(f"unknown capability: {cap_id!r}"))
+            self.logger.warning("unknown capability (intro): {}", repr(cap_id))
+            return Err(SdkError("unknown_capability"))
         # SDK 的 tr(key, *, default=) 里 default 是 keyword-only（生产实测：
         # 直接传 build_intro_payload 会炸 "tr() takes 1 positional argument"）；
         # 这里包一层适配成 core 层的 (key, zh) 双参约定。测试桦已收紧同构。
@@ -273,7 +274,8 @@ class CapabilityMixin:
         cap_id = str(capability_id or "").strip()
         spec = CAPABILITY_SPECS.get(cap_id)
         if spec is None or not spec.managed:
-            return Err(SdkError(f"unknown capability: {cap_id!r}"))
+            self.logger.warning("unknown capability (set): {}", repr(cap_id))
+            return Err(SdkError("unknown_capability"))
         name = str(lanlan or "").strip() or self._current_shard_name()
         await self._ensure_shard(name)
         current = self._cap_effective(cap_id, lanlan=name)
@@ -298,8 +300,9 @@ class CapabilityMixin:
             "hide_disabled_tools": self._cap_hide_tools_enabled(),
         }
         if isinstance(res_save, Err):
-            # 既定契约：内存当场生效、盘上保持原样，向用户如实报错
-            payload["persist_error"] = str(res_save.error)
+            # 既定契约：内存当场生效、盘上保持原样，向用户如实报错——
+            # 回稳定码（面板按 panel.errors.persistFailed 翻译，i18n 契约第九轮），细节已进日志
+            payload["persist_error"] = "persist_failed"
             self.logger.warning("persist caps for {} failed: {}", name, res_save.error)
         if enabled and not state.enabled:
             # 用户点"开"但没能点亮（配置/上游挡着）：如实回传原因，面板回弹

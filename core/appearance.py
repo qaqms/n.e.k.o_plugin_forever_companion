@@ -80,22 +80,36 @@ def clamp_appearance(raw: Any) -> JsonObject:
 # ---- data URL 图片校验 ----
 
 
+class ImageDataUrlError(ValueError):
+    """图片 data URL 校验失败：携带稳定 reason code。
+
+    i18n 契约（1.3.0 第九轮）：面板入口把 `exc.code` 原样放进
+    `Err(SdkError(code))`，前端按 `panel.errors.<camelCase(code)>` 翻译——
+    异常消息本身只进日志，绝不直出用户可见 toast。子类自 ValueError，
+    旧 `except ValueError` 调用方与测试不受影响。
+    """
+
+    def __init__(self, code: str, message: str = ""):
+        super().__init__(message or code)
+        self.code = code
+
+
 def parse_image_data_url(data_url: Any, max_chars: int = _PANEL_BG_MAX_CHARS) -> tuple[str, int]:
     """图片 data URL 校验（原图与缩略图共用）。
 
-    返回 (mime, 字符数)；非法时抛 ValueError，入口层翻译成 Err 给面板。
+    返回 (mime, 字符数)；非法时抛 ImageDataUrlError（带稳定码），入口层翻译成 Err 给面板。
     """
     text = str(data_url or "").strip()
     if not text.startswith("data:"):
-        raise ValueError("image must be a data: URL")
+        raise ImageDataUrlError("image_not_data_url", "image must be a data: URL")
     if len(text) > max_chars:
-        raise ValueError("image too large")
+        raise ImageDataUrlError("image_too_large", "image too large")
     header = text.split(",", 1)[0]
     mime = header[len("data:"):].split(";", 1)[0].strip().lower()
     if mime not in _PANEL_BG_MIMES:
-        raise ValueError(f"unsupported image type: {mime or 'unknown'}")
+        raise ImageDataUrlError("image_type_unsupported", f"unsupported image type: {mime or 'unknown'}")
     if "," not in text:
-        raise ValueError("malformed data: URL")
+        raise ImageDataUrlError("image_malformed", "malformed data: URL")
     return mime, len(text)
 
 

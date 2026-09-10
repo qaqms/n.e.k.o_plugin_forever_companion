@@ -1036,3 +1036,57 @@ pytest / ruff / hosted 链接门 / `neko-plugin check <路径>` / `check-hosted-
 
 - **验证（第八轮）**：`tools/release_gate.py` 全链五门 OK、退出码 0、跑完宿主仓
   `git status` 干净无残留；pytest 406 全绿；ruff 全绿。本轮不改运行时代码。
+
+
+### 1.3.0 第九轮：面板 i18n 契约——后端不再往用户可见渠道塞裸串
+
+**根因**：前端 toast 一律 `String(r.note || t(...))`，后端 `note` 只要存在就永远
+压过 `t()`；非中文用户看到的是后端硬编码中文。`SdkError` 的英文裸串同理经
+`api.call` reject 直进 toast。`tr()` 延迟引用在动作返回值里**不会被宿主解析**
+（`call_surface_action` 不走 `resolve_i18n_refs`），所以后端永远不可能"自己翻译"
+——动作调用时后端根本不知道请求方的 UI locale（`_ctx` 里没有 locale）。
+
+**新契约**：面板可达入口（`mixins/panel.py` / `capabilities.py` / `shards.py`）的
+`"note"` 字面量与 `Err(SdkError(...))` 只准携带稳定 ASCII 码（`^[a-z][a-z0-9_]*$`），
+动态细节进日志；数据类文案改发字段（`mode` / `reason` / `turns` / `min_turns` /
+`dormant_reason`），前端按码分支翻译。豁免（有意保留）：`mood_actions.py` 的 note
+是给模型的行为指令、`debug_entries.py` 是开发者面向调试入口，都不进面板通路。
+
+- **八处中文 note 清账**：invite_journal 四态改纯 `invited/mode` 码（新增
+  `panel.journal.invitedRespond/invitedQuiet` 两支按 `r.mode` 分支，不再共用一条
+  "已递出"）；write_review_now 拒绝档改发 `reason` 码 + `turns/min_turns/dormant_reason`
+  数据字段（数字进插值不进文案；slot 休眠复用 `onboarding.channels.noModel/freeRoute`
+  零新增键）；lift_mood/set_mood 的 note 改码 `no_active_mood/mood_applied`
+  （消费者是宿主 Agent 的模型，结构化字段仍在）。
+- **34 个错误稳定码**：panel/capabilities/shards 全部英文 SdkError（gallery is full /
+  item_id required / persist failed: <细节>…）与中文 prune 动态串改码，
+  `ui/utils.ts` 新增 `errorText(err, t)`：`^[a-z][a-z0-9_]*$` 形态的 reject
+  message 按 `panel.errors.<camelCase>` 翻译，非码文本（宿主自身错误/超时）原样直出；
+  panel.tsx 17 处 catch 全部收编。`set_capability` 的 `persist_error` 字段同改码。
+  timezone 非法从"failed to save settings: KeyError"误报里拆出独立码。
+- **reset_all 脱离 ActionButton**：kit 的错误展示是内联裸串（会把稳定码直喷给用户），
+  改受控 Button + confirmDialog + errorText；label/confirm 与后端 `@ui.action`
+  的 `actions.reset.*` 同一对键，两端同源。
+- **八语 649 → 756**：补齐 **69 个「TSX 引用但从未进 bundle」的旧债键**
+  （panel.calendar.* / panel.ring.* / panel.messages.* / panel.errors.* 整族——
+  第五轮"八语对齐"只对拍了 bundle 间键集，没对拍引用面，defaultValue 中文直喷
+  非中文用户的其实是这批）；新增本轮 38 键（含 6 处按 1.md 的必新增 key）；
+  清 1 死键（`errors.no_valid_fields`，后端不再经 `self.i18n.t` 消费）。
+  日文字稿自查修一处混入的汉字（"で触发"→"で起動"）。
+- **回归门 `tests/test_i18n_contract.py`（5 条，全部反向对照过）**：
+  ① note/SdkError 字面量只准稳定码（塞中文/f-string/str(exc) 即红）；
+  ② 每个发出的码在全部 8 locale 有 camelCase 键（白名单：`reverted_to_default` →
+  既有 `panel.features.reverted`）；③ TSX/TS 字面量 `t("key")` 引用必须在八语齐全
+  ——这条是"defaultValue 中文泄露"的根治；④ 八语键集完全一致；
+  ⑤ 本轮淘汰的中文原句不得复活。
+- **CJK 拼接键参数化**：面板里"第{n}天/{n}天后/周期第 N 天"这类逐词拼接在拉丁语系
+  必然碎（词序与格变化不成立），ring/overview/statusbar/calendar/settings_cycle 的
+  6 处拼接点改成带 `{n}` 插值的整句键（`panel.ring.dayN` / `inNDays` /
+  `cycleDayN` / `untilTideN` / `panel.advancedN` / `panel.settings.tideNDays` 等）。
+- **release_gate 码面隐患修复**：`_run` 的 `subprocess.run(text=True)` 默认按本地码页
+  （Windows=GBK）解码子进程管道，子进程吐 UTF-8 中日韩字节即崩 reader 线程
+  （本轮全链跑时实测 `UnicodeDecodeError 0x93`：判定靠 returncode 不受连累，
+  但门日志整段丢失）；统一钉 `encoding="utf-8", errors="replace"`，与脚本自身 stdout 同口径。
+- **验证（第九轮）**：pytest 411 全绿（406 + 5 条契约门）；ruff 全绿；
+  五道回归门全部反向对照（塞中文/f-string 码/TSX 缺键/单语言缺键/旧句复活，逐条确认真会红）；
+  hosted 链接门 / hosted-tsx / `neko-plugin check` 见 release_gate 全链。

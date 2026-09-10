@@ -188,7 +188,7 @@ def test_pause_writes_watermark_before_flipping_master(tm, boot_factory):
 
     res = run(p.tool_cold_violence(minutes=10, reason="生气了", _ctx={"lanlan_name": "default"}))
 
-    assert isinstance(res, tm.Err) and "persist failed" in str(res.error)
+    assert isinstance(res, tm.Err) and str(res.error) == "persist_failed"
     assert http.posts == [], "水位没落盘就绝不能翻宿主总开关（不制造无据可查的关闭）"
     assert p._proactive_state["prev"] is None, "失败的水位标记必须撤销（不落错误快照）"
     assert "proactive_state" not in store.data
@@ -234,7 +234,7 @@ def test_resume_restores_master_before_clearing_watermark(tm, boot_factory):
     store._fail_set.add("proactive_state")
     res = run(p.lift_mood(_ctx={"lanlan_name": "default"}))
 
-    assert isinstance(res, tm.Err) and "persist failed" in str(res.error)
+    assert isinstance(res, tm.Err) and str(res.error) == "persist_failed"
     assert http.master is True, "开关恢复先于水位清除：失败也不能把用户留在关闭态"
     assert store.data["proactive_state"]["prev"] == {"master": True}, "清除失败盘上保持原样"
 
@@ -259,7 +259,7 @@ def test_gallery_add_propagates_index_failure_and_cleans_blob(tm, boot_factory):
 
     res = run(p.gallery_add(data_url="data:image/png;base64,QUJDRA==", name="a.png"))
 
-    assert isinstance(res, tm.Err) and "failed to save image" in str(res.error)
+    assert isinstance(res, tm.Err) and str(res.error) == "image_save_failed"
     assert not any(k.startswith("gallery_img/") for k in store.data), "索引写失败后 blob 必须回滚删除"
 
 
@@ -272,7 +272,7 @@ def test_set_panel_appearance_propagates_failure(tm, boot_factory):
 
     res = run(p.set_panel_appearance(fill="cover", blur=8))
 
-    assert isinstance(res, tm.Err) and "failed to save appearance" in str(res.error)
+    assert isinstance(res, tm.Err) and str(res.error) == "appearance_save_failed"
     assert "panel_appearance" not in store.data, "写失败盘上必须原样"
 
 

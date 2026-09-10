@@ -103,10 +103,10 @@ export function RingStatus(props: { t: TFunc; status: Status; settings: Settings
     ? `${status.cycle_day ?? "-"} / ${cycle}`
     : ringView === 1
       ? (phaseIdx >= 0
-        ? `${phaseLabelMap[segments[phaseIdx].key] || "-"} · ${t("panel.ring.dayOrdinal", { defaultValue: "第" })}${dayInPhase}${t("panel.days", { defaultValue: "天" })}`
+        ? `${phaseLabelMap[segments[phaseIdx].key] || "-"} · ${t("panel.ring.dayN", { n: String(dayInPhase), defaultValue: "第{n}天" })}`
         : status.phase_label || "-")
       : (nextKey
-        ? `${phaseLabelMap[nextKey] || "-"} · ${daysToNext}${t("panel.days", { defaultValue: "天" })}${t("panel.ring.later", { defaultValue: "后" })}`
+        ? `${phaseLabelMap[nextKey] || "-"} · ${t("panel.ring.inNDays", { n: String(daysToNext), defaultValue: "{n}天后" })}`
         : "-")
 
   function onRingClick() {

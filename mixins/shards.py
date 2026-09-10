@@ -668,12 +668,13 @@ class ShardsMixin:
 
     @staticmethod
     def _persist_error(*results: Result[None]) -> Err | None:
-        """多键写入聚合：任一 Err 即取第一个包装为入口 Err（英文消息，
-        对齐 failed to migrate background 风格）；全 Ok 返回 None。
+        """多键写入聚合：任一 Err 即取第一个，向调用方回**稳定码** persist_failed；
+        真实失败细节进日志（不进用户可见文案，1.3.0 第九轮 i18n 契约）；全 Ok 返回 None。
         前面的写不回滚（保持简单）：真失败极罕见，重试幂等。"""
         for res in results:
             if isinstance(res, Err):
-                return Err(SdkError(f"persist failed: {res.error}"))
+                # 失败细节已由 _store_write/_store_delete 统一出口留痕，此处不重复落日志
+                return Err(SdkError("persist_failed"))
         return None
 
     async def _save_shard_cycle(self, lanlan: str, shard: _LanlanShard) -> Result[None]:

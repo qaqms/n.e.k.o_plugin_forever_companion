@@ -57,7 +57,7 @@ export function OverviewPane(props: {
             </div>
             <div className="tm-status-sub">
               {enabled
-                ? `${t("panel.ring.cycleDay", { defaultValue: "周期第" })} ${status.cycle_day ?? "-"} ${t("panel.days", { defaultValue: "天" })} · ${t("panel.ring.untilNext", { defaultValue: "距下次潮汐还有" })} ${status.days_until_next_period ?? "-"} ${t("panel.days", { defaultValue: "天" })}`
+                ? `${t("panel.ring.cycleDayN", { n: String(status.cycle_day ?? "-"), defaultValue: "周期第 {n} 天" })} · ${t("panel.ring.untilTideN", { n: String(status.days_until_next_period ?? "-"), defaultValue: "距下次潮汐还有 {n} 天" })}`
                 : t("panel.offSub", { defaultValue: "模拟已关闭，她暂时不会感受身体节律" })}
             </div>
             {enabled && mood.system_enabled !== false && mood.active && mood.affect ? (

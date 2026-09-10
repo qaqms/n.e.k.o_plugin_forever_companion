@@ -392,7 +392,8 @@ def test_write_review_now_gate_rejects_at_click(plugin_factory) -> None:
         v = res.value
         assert v["accepted"] is False and v["queued"] is False
         assert v["reason"] == "not_enough_material"
-        assert "再聊聊" in v["note"]
+        # i18n 契约第九轮：数据字段代替文案（面板用 turns/min_turns 插值翻译）
+        assert v["turns"] == 3 and v["min_turns"] >= 10
         assert p._get_shard("default").pending_review_write == 0, "拒绝不得入队"
     finally:
         monkey.undo()
@@ -401,6 +402,7 @@ def test_write_review_now_gate_rejects_at_click(plugin_factory) -> None:
     p2._review_cfg["enabled"] = False
     res2 = run(p2.write_review_now())
     assert res2.value["reason"] == "disabled"
+    assert "note" not in res2.value
 
 
 def test_write_review_now_duplicate_click_rejected(plugin_factory) -> None:

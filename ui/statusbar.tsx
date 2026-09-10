@@ -26,7 +26,7 @@ export function StatusBar(props: StatusBarProps) {
   const phaseColor = phaseColorOf(status)
   // 一句话状态：开启时 = 阶段名 + 周期第 N 天；关闭时只有"已关闭"
   const summary = enabled
-    ? `${status.phase_label || "-"} · ${t("panel.ring.cycleDay", { defaultValue: "周期第" })} ${status.cycle_day ?? "-"} ${t("panel.days", { defaultValue: "天" })}`
+    ? `${status.phase_label || "-"} · ${t("panel.ring.cycleDayN", { n: String(status.cycle_day ?? "-"), defaultValue: "周期第 {n} 天" })}`
     : t("panel.off", { defaultValue: "已关闭" })
 
   return (

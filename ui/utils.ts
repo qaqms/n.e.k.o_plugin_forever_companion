@@ -65,6 +65,27 @@ export function unwrapCallResult<T = Record<string, any>>(payload: any): T {
   return payload as T
 }
 
+// i18n 契约（1.3.0 第九轮）：后端面板入口的用户可见错误一律是稳定码
+// （Err(SdkError("some_code"))，经宿主原样透传到 reject message），前端在此
+// 按 panel.errors.<camelCase(code)> 翻译；非码文本（宿主自身错误、超时提示等）
+// 原样直出，行为与旧版一致。后端只准发 ^[a-z][a-z0-9_]*$（tests/test_i18n_contract.py 钉死），
+// 所以单码英文/中文裸串不会再短路这里的 t()。
+const ERROR_CODE_RE = /^[a-z][a-z0-9_]*$/
+
+function codeToCamel(code: string): string {
+  return code.replace(/_+([a-z0-9])/g, (_m, c: string) => c.toUpperCase())
+}
+
+export function errorText(raw: unknown, t: (key: string, opts?: Record<string, any>) => string): string {
+  const msg = raw instanceof Error ? raw.message : String(raw == null ? "" : raw)
+  if (ERROR_CODE_RE.test(msg)) {
+    // defaultValue 给码本身：新码忘了进 locale 时退化为英文码（可排查），
+    // 而不是把某一语言的裸串直喷给所有用户
+    return t(`panel.errors.${codeToCamel(msg)}`, { defaultValue: msg })
+  }
+  return msg
+}
+
 // 时光日记自动碎片的类型 → i18n key 后缀（panel.diary.kind.*）
 export function fragmentKindKey(kind?: string): string {
   const known = ["like", "dislike", "important", "overstep"]

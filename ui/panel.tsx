@@ -33,7 +33,7 @@ import { DiaryPane } from "./diary"
 import { MomentPane } from "./moment"
 import { AppearanceCard } from "./appearance"
 import type { DiaryItem, JournalPage, Heatmap, MonthReport, ReviewEntry, ReviewProgress } from "./types"
-import { unwrapCallResult } from "./utils"
+import { unwrapCallResult, errorText } from "./utils"
 
 export default function Panel(props: PluginSurfaceProps<State>) {
   const { actions, state, t } = props
@@ -219,7 +219,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       setDraftAp(ap)
       toast.success(t("panel.appearance.applied", { defaultValue: "背景已更新" }))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      toast.error(errorText(err, t))
     } finally {
       setApSaving(false)
     }
@@ -239,7 +239,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       }
       toast.success(t("panel.appearance.added", { defaultValue: "已加入图库" }))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      toast.error(errorText(err, t))
     } finally {
       setApBusy(false)
     }
@@ -269,7 +269,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       setImgCache(cache)
       toast.success(t("panel.diary.deleted", { defaultValue: "已删除" }))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      toast.error(errorText(err, t))
     } finally {
       setApBusy(false)
     }
@@ -312,7 +312,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
         // context 刷新失败不影响"已保存"结论，表单已本地回填
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      toast.error(errorText(err, t))
     }
   }
 
@@ -333,7 +333,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       await props.api.call("toggle")
       await props.api.refresh()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      toast.error(errorText(err, t))
     }
   }
 
@@ -345,7 +345,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       await props.api.call("set_onboarding", { action })
       await props.api.refresh()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      toast.error(errorText(err, t))
     }
   }
 
@@ -356,7 +356,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       setWizardClosed(false)
       await props.api.refresh()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      toast.error(errorText(err, t))
     }
   }
 
@@ -373,7 +373,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       await props.api.refresh()
       toast.success(t("panel.diary.cleared", { defaultValue: "时光日记已清空" }))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      toast.error(errorText(err, t))
     }
   }
 
@@ -390,7 +390,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       await props.api.refresh()
       toast.success(t("panel.diary.deleted", { defaultValue: "已删除" }))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      toast.error(errorText(err, t))
     }
   }
 
@@ -440,18 +440,21 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       const payload = unwrapCallResult(await props.api.call("invite_journal", {}))
       await props.api.refresh()
       const r = (payload || {}) as Record<string, any>
+      // 四态文案全在前端按 invited/mode 码翻译（i18n 契约 1.3.0 第九轮）：
+      // 后端不再回人类可读 note，中文裸串不会短路 t()。传输拒收是真错误，
+      // 不能与"开关未开启"共用一条 info 软提示（1.2.4 语义不变）；
+      // respond（当面递到）/ read（冷却内悄悄补递）分文案（1.2.3 既定双态）
       if (r.invited === false && r.mode === "failed") {
-        // 传输拒收是真错误，不能与"开关未开启"共用一条 info 软提示（1.2.4）：
-        // 后端已回滚水位，这一支的语义就是"再按一次"
-        toast.error(String(r.note || t("panel.journal.inviteFailed", { defaultValue: "邀请没能送到她手上（消息通道正忙或不可用），再按一次试试" })))
+        toast.error(t("panel.journal.inviteFailed", { defaultValue: "邀请没能送到她手上（消息通道正忙或不可用），再按一次试试" }))
       } else if (r.invited === false) {
-        toast.info(String(r.note || t("panel.journal.inviteOff", { defaultValue: "个人日记开关未开启，邀请未发送" })))
+        toast.info(t("panel.journal.inviteOff", { defaultValue: "个人日记开关未开启，邀请未发送" }))
+      } else if (r.mode === "respond") {
+        toast.success(t("panel.journal.invitedRespond", { defaultValue: "邀请已当面递到她手上，她这会儿正想着呢——写不写由她自己决定" }))
       } else {
-        // note 由服务端按投递方式给三态文案（当面递到 / 冷却内静默补递，1.2.3）
-        toast.success(String(r.note || t("panel.journal.invited", { defaultValue: "邀请已递出，写不写由她自己决定" })))
+        toast.success(t("panel.journal.invitedQuiet", { defaultValue: "她刚收到过邀请，这次改成悄悄提醒——给她留点考虑的空间" }))
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      toast.error(errorText(err, t))
     }
   }
 
@@ -487,17 +490,32 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   async function onWriteReviewNow() {
     try {
       // 受理式入口（1.2.3）：后端秒回"已开始写"，真正的成文在后台一拍内起跑；
-      // 成败结论经 dashboard review_brief.last_result 由下方 effect 弹完成 toast
+      // 成败结论经 dashboard review_brief.last_result 由下方 effect 弹完成 toast。
+      // i18n 契约（1.3.0 第九轮）：后端只回 reason 码与数据字段，文案全在本地按码分支
       const payload = unwrapCallResult(await props.api.call("write_review_now", {}))
       await props.api.refresh()
       const r = (payload || {}) as Record<string, any>
       if (r.accepted) {
-        toast.info(String(r.note || t("panel.review.accepted", { defaultValue: "已开始写这一篇，写完会自动出现在这里，不用守着" })))
+        toast.info(t("panel.review.accepted", { defaultValue: "已开始写这一篇，写完会自动出现在这里，不用守着" }))
+      } else if (r.reason === "already_writing") {
+        toast.info(t("panel.review.alreadyWriting", { defaultValue: "上一篇还在写，写完会自动出现在这里，稍等一下" }))
+      } else if (r.reason === "not_enough_material") {
+        // 数字走插值不进文案（后端只回 turns/min_turns 字段）
+        toast.info(t("panel.review.notEnoughMaterial", {
+          defaultValue: "素材还不够（目前 {turns} 轮，至少 {min_turns} 轮才值得写一篇），再聊聊吧",
+          turns: String(r.turns ?? 0),
+          min_turns: String(r.min_turns ?? 10),
+        }))
+      } else if (r.reason === "slot_unresolved") {
+        // 休眠原因复用新手向导通道卡的既有文案（零新增 key，1.md 既定）
+        toast.info(r.dormant_reason === "free_route"
+          ? t("onboarding.channels.freeRoute", { defaultValue: "休眠 · 宿主免费端点限制" })
+          : t("onboarding.channels.noModel", { defaultValue: "休眠 · 槽位没配模型" }))
       } else {
-        toast.info(String(r.note || t("panel.review.writeFailed", { defaultValue: "这一篇还没写成，稍后再试" })))
+        toast.info(t("panel.review.writeFailed", { defaultValue: "这一篇还没写成，稍后再试" }))
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      toast.error(errorText(err, t))
     }
   }
 
@@ -534,6 +552,25 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.review_brief && state.review_brief.last_result && state.review_brief.last_result.ts, state.lanlan])
 
+  // 重置全部数据（危险区）：原走 kit ActionButton，它的错误展示是内联裸串
+  // （会把我们的稳定码直喷给用户），改受控 Button + errorText 翻译——确认文案
+  // 取 actions.reset.*（与后端 @ui.action 的 label/confirm 同一对键，两端同源）
+  async function onResetAll() {
+    const ok = await confirmDialog({
+      title: t("actions.reset.label", { defaultValue: "重置全部数据" }),
+      message: t("actions.reset.confirm", { defaultValue: "将清空当前角色的周期偏移、情绪状态和心情手记，确认？" }),
+      tone: "danger",
+      ...confirmLabels,
+    })
+    if (!ok) return
+    try {
+      await props.api.call("reset_all", {})
+      await props.api.refresh()
+    } catch (err) {
+      toast.error(errorText(err, t))
+    }
+  }
+
   async function onClearReview() {
     const ok = await confirmDialog({
       title: t("actions.clear_review.label", { defaultValue: "清空我的日记" }),
@@ -547,7 +584,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       await props.api.refresh()
       toast.success(t("panel.review.cleared", { defaultValue: "我的日记已清空" }))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      toast.error(errorText(err, t))
     }
   }
 
@@ -603,12 +640,13 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       if (r.note === "reverted_to_default") {
         toast.info(t("panel.features.reverted", { defaultValue: "该功能在功能配置里是关着的（或被依赖的功能挡住），这里无法强行点亮" }))
       } else if (r.persist_error) {
-        // 既定契约：内存当场生效、盘上保持原样，如实报错可重试
-        toast.error(String(r.persist_error))
+        // 既定契约：内存当场生效、盘上保持原样，如实报错可重试；
+        // 后端回稳定码（i18n 契约第九轮），经 errorText 翻译而非英文裸串直出
+        toast.error(errorText(r.persist_error, t))
       }
       await props.api.refresh()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      toast.error(errorText(err, t))
     } finally {
       setCapsBusyId("")
     }
@@ -626,7 +664,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       )
       await props.api.refresh()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      toast.error(errorText(err, t))
     } finally {
       setCapsBusyId("")
     }
@@ -649,7 +687,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       await props.api.refresh()
       toast.success(t("panel.lanlan.pruned", { defaultValue: "残留数据已清除" }))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      toast.error(errorText(err, t))
     }
   }
 
@@ -668,7 +706,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       toast.success(t("panel.messages.anchorSet", { defaultValue: "潮汐首日已更新" }))
       return true
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      toast.error(errorText(err, t))
       return false
     }
   }
@@ -680,7 +718,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       await props.api.refresh()
       toast.success(t("panel.messages.advanced", { defaultValue: "已快进一天" }))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      toast.error(errorText(err, t))
     }
   }
 
@@ -881,6 +919,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
               form={form}
               updateForm={updateForm}
               resetAll={resetAll}
+              onResetAll={onResetAll}
               lanlanList={lanlanKnown}
               lanlan={state.lanlan}
               canPrune={!!pruneLanlan}

@@ -140,7 +140,7 @@ export function CalendarPane(props: {
               <div className="tm-cal-meta">
                 {t("panel.anchorCurrent", { defaultValue: "当前锚点" })}: {anchorDate || "-"}
                 {" · "}
-                {t("panel.advanceCurrent", { defaultValue: "已快进" })} {advanceDays ?? 0} {t("panel.days", { defaultValue: "天" })}
+                {t("panel.advancedN", { n: String(advanceDays ?? 0), defaultValue: "已快进 {n} 天" })}
               </div>
             </div>
           )}
