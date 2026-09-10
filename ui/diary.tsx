@@ -805,10 +805,14 @@ function ReviewShelf(props: {
   )
 }
 
-// 铅印卷宗阅读视图：冷灰打孔纸 + 卷首等宽口径行（轮数/区间/她自主起的情绪次数）
-// + 1.3.0「本卷依据」快照栏（语气分布/心情走向/原话摘录——成文时固化的素材，
-// 旧篇目缺字段整栏隐藏）+ 朱印落款 + 跨卷翻页（与日记本同款：前一卷/后一卷
-// 只翻当前列表，档案室模式题签换口径同一套纸两处出身）
+// 铅印卷宗阅读视图（1.3.0 改版：双栏档案袋）：冷白纸页内分两栏——
+// 左窄栏=卷首事实（成文日/区间/轮数/她自主起的情绪）+「本卷依据」快照栏
+// （语气分布/心情走向/原话摘录，旧篇目缺字段整栏隐藏）+雾靛落款印，读作
+// 档案袋封面；右宽栏=居中标题+纯正文。DOM 顺序正文在前、卷尾信息在后，
+// 窄窗（<460px）塔成单列时自然就是「正文优先」降级；宽窗用 grid 显式
+// 指定栏位把信息栏拉回左列。页眉行取消（字段全部住进左栏，去重）；
+// 页脚去掉与左栏重复的「{n} 轮」。与日记本同款 sticky 页脚与跨卷翻页，
+// 档案室模式题签换口径同一套纸两处出身
 function ReviewBook(props: {
   t: TFunc
   entry: ReviewEntry
@@ -844,57 +848,59 @@ function ReviewBook(props: {
         <span className="tmb-book-title tmb-book-title--file">{archiveLabel || t("panel.review.spineTitle", { defaultValue: "相处卷宗" })}</span>
       </div>
       <div className="tmb-page tmb-page--file">
-        <div className="tmb-head">
-          <span className="tmb-head-kicker">{t("panel.review.kicker", { defaultValue: "第三者记录" })}</span>
-          <span className="tmb-head-no">{String(entry.ts || "").slice(0, 10) || t("panel.journal.noDate", { defaultValue: "未注明日期" })}</span>
-          <span className="tmb-head-spacer" />
-          <span className="tmb-head-meta">{span}</span>
-        </div>
-        <div className="tmb-file-title">{t("panel.review.docTitle", { defaultValue: "关于这段时间的记录" })}</div>
-        <div className="tmb-dossier">
-          <span className="tmb-dossier-item">
-            <em className="tmb-dossier-label">{t("panel.review.fieldTurns", { defaultValue: "互动轮数" })}</em>
-            <b className="tmb-dossier-value">{turns}</b>
-          </span>
-          <span className="tmb-dossier-item">
-            <em className="tmb-dossier-label">{t("panel.review.fieldSpan", { defaultValue: "统计区间" })}</em>
-            <b className="tmb-dossier-value">{span || "--"}</b>
-          </span>
-          <span className="tmb-dossier-item">
-            <em className="tmb-dossier-label">{t("panel.review.fieldSelfActions", { defaultValue: "她自主起的情绪" })}</em>
-            <b className="tmb-dossier-value">{selfActions}</b>
-          </span>
-        </div>
-        {hasEvidence ? (
-          <div className="tmb-evidence">
-            <div className="tmb-evidence-title">{t("panel.review.evidence", { defaultValue: "本卷依据" })}</div>
-            {toneParts.length ? (
-              <div className="tmb-evidence-line">
-                <span className="tmb-evidence-label">{t("panel.review.evidenceTone", { defaultValue: "她的语气分布" })}</span>
-                <span className="tmb-evidence-value">{toneParts.join(" · ")}</span>
-              </div>
-            ) : null}
-            {moodAvg !== null ? (
-              <div className="tmb-evidence-line">
-                <span className="tmb-evidence-label">{t("panel.review.evidenceMood", { defaultValue: "她的心情走向" })}</span>
-                <span className="tmb-evidence-value">
-                  {t(journalTrendKey(moodAvg), { defaultValue: "" })}（{moodAvg >= 0 ? "+" : ""}{moodAvg.toFixed(2)}）
-                </span>
-              </div>
-            ) : null}
-            {quotes.map((q, qi) => (
-              <div className="tmb-quote" key={String(qi)}>
-                <span className="tmb-quote-kind">{t(fragmentKindKey(q.kind), { defaultValue: "他说" })}</span>
-                <span className="tmb-quote-text">「{String(q.quote || "")}」</span>
-              </div>
+        <div className="tmb-file-cols">
+          <div className="tmb-file-main">
+            <div className="tmb-file-title">{t("panel.review.docTitle", { defaultValue: "关于这段时间的记录" })}</div>
+            {paras.map((para, pi) => (
+              <div className="tmb-text tmb-text--file" key={String(pi)}>{para}</div>
             ))}
           </div>
-        ) : null}
-        <div className="tmb-page-body">
-          <div className="tmb-seal">{t("panel.review.seal", { defaultValue: "观察者记" })}</div>
-          {paras.map((para, pi) => (
-            <div className="tmb-text tmb-text--file" key={String(pi)}>{para}</div>
-          ))}
+          <aside className="tmb-file-aside">
+            <div className="tmb-file-date">{String(entry.ts || "").slice(0, 10) || t("panel.journal.noDate", { defaultValue: "未注明日期" })}</div>
+            <div className="tmb-file-kicker">{t("panel.review.kicker", { defaultValue: "第三者记录" })} · {t("panel.review.tipComposed", { defaultValue: "成文" })}</div>
+            <div className="tmb-file-rows">
+              <div className="tmb-file-row">
+                <span>{t("panel.review.fieldSpan", { defaultValue: "统计区间" })}</span>
+                <b>{span || "--"}</b>
+              </div>
+              <div className="tmb-file-row">
+                <span>{t("panel.review.fieldTurns", { defaultValue: "互动轮数" })}</span>
+                <b>{turns}</b>
+              </div>
+              <div className="tmb-file-row">
+                <span>{t("panel.review.fieldSelfActions", { defaultValue: "她自主起的情绪" })}</span>
+                <b>{selfActions}</b>
+              </div>
+            </div>
+            {hasEvidence ? (
+              <div className="tmb-evidence">
+                <div className="tmb-evidence-title">{t("panel.review.evidence", { defaultValue: "本卷依据" })}</div>
+                {toneParts.length ? (
+                  <div className="tmb-evidence-line">
+                    <span className="tmb-evidence-label">{t("panel.review.evidenceTone", { defaultValue: "她的语气分布" })}</span>
+                    <span className="tmb-evidence-value">{toneParts.join(" · ")}</span>
+                  </div>
+                ) : null}
+                {moodAvg !== null ? (
+                  <div className="tmb-evidence-line">
+                    <span className="tmb-evidence-label">{t("panel.review.evidenceMood", { defaultValue: "她的心情走向" })}</span>
+                    <span className="tmb-evidence-value">
+                      {t(journalTrendKey(moodAvg), { defaultValue: "" })}（{moodAvg >= 0 ? "+" : ""}{moodAvg.toFixed(2)}）
+                    </span>
+                  </div>
+                ) : null}
+                {quotes.map((q, qi) => (
+                  <div className="tmb-quote" key={String(qi)}>
+                    <span className="tmb-quote-kind">{t(fragmentKindKey(q.kind), { defaultValue: "他说" })}</span>
+                    <span className="tmb-quote-text">「{String(q.quote || "")}」</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            <div className="tmb-file-sign">
+              <span className="tmb-seal">{t("panel.review.seal", { defaultValue: "观察者记" })}</span>
+            </div>
+          </aside>
         </div>
         <div className="tmb-foot">
           <button type="button" className="tmb-btn" onClick={onBack}>
@@ -905,9 +911,6 @@ function ReviewBook(props: {
               {t("panel.review.prevFile", { defaultValue: "前一卷" })}
             </button>
             <span className="tmb-ind">{position} / {totalFiles}</span>
-            <span className="tmb-leaf-ind">
-              {t("panel.review.turnsMeta", { defaultValue: "{n} 轮" }).replace("{n}", turns)}
-            </span>
             <button type="button" className="tmb-btn" onClick={onNext} disabled={!hasNext}>
               {t("panel.review.nextFile", { defaultValue: "后一卷" })}
             </button>
