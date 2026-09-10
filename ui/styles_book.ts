@@ -1,12 +1,25 @@
-// 拟真书本样式（1.3.0 日记页重做）：个人日记 = 她手写的线装本，我的日记 = 第三方留下的
-// 铅印卷宗。两本共用「书脊列 + 纸页 + sticky 页脚」的骨架，性格靠字体/纸色/装订细节分岔。
+// 扁平绘本风书本样式（1.3.1 日记页可爱化 → 1.3.1c 换配方为「白底彩点」）：
+// 个人日记 = 她的暖白纸手账，我的日记 = 记录者的冷白纸手账——大面积一律近白
+// （对齐宿主 UI Kit：底 #f7f9fc、卡片纯白玻璃、彩色只做小面积点缀），
+// 颜色只住在小件上：书脊皮（心情色阶）、丝带、题签、落款印、进度条。
+// 两本共用「书脊列 + 纸页 + sticky 页脚」的骨架，性格靠冷暖白底 + 点缀色分岔。
+//
+// 配方沿革（三轮真机反馈的账都记在这，改之前先读完）：
+//   1.3.0 拟真旧书（棕褐布面/米黄宣纸/冷灰卷宗）→ 用户：与面板玻璃层脱节；
+//   1.3.1 扁平绘本粉/蓝紫 → 用户：粉味过重；且架上书脊吃全站 moodDotColor 的
+//     蓝/琥珀，翻开却是粉纸，外内两个色系（1.3.1b 收淡 + 书脊色阶搬进粉紫系）；
+//   1.3.1c 定量诊断：宿主的近白大面（色距 max-min≤11）+ 7~10% alpha 色晕 vs
+//     书本 S50%+ 的大面积彩面，色相又撞（H340 暖粉 vs 宿主 H216 冷蓝白）——
+//     "味道浓"是配方问题不是浓度问题。本轮换成白底彩点：纸与封皮全部褪到
+//     近白/灰调（大面色距≤20），点纹纸纹、条纹胶带、彩色大投影全部撤除，
+//     可爱感靠造型（圆角/贴纸/丝带/歪斜纸叠）而非色相撑。
 //
 // 为什么不塞进 styles.ts：styles.ts（89KB）是"面板公共玻璃层"，这一坨是"桌面物件层"——
-// 纸/墨/装订/木架的调色板互不相通，混在一起后面谁也不敢删。单独一个模块 + 第二个
+// 纸/墨/装订/架子的调色板互不相通，混在一起后面谁也不敢删。单独一个模块 + 第二个
 // <style> 标签（diary.tsx 内联挂），归属清楚，也保住 hosted 依赖预算的可预测性。
 //
 // 硬约束（都来自宿主 hosted-tsx 运行时，别试着想绕）：
-//   1. 无 SVG：装订孔/丝带/朱印一律用 background-image + clip-path 画（同 ring.tsx 先例）
+//   1. 无 SVG：装订缝线/丝带/落款印一律用 background-image + clip-path 画（同 ring.tsx 先例）
 //   2. 纸面**不能** overflow:hidden——它会变成 sticky 页脚的滚动容器，把"常驻下缘"
 //      当场废掉；所以丝带/页脚外扩一律靠 clip-path 自剪，不靠父级裁
 //   3. 半透明 sticky 页脚在"纸叠"上会露馅（文字从半透区穿过去），所以页脚底色用
@@ -17,36 +30,43 @@ export const BOOK_STYLES = `
 
 /* ============================================================
    0. 书本调色板（局部变量，只活在本模块的选择器里）
+   —— 白底彩点：大面近白（暖白/冷白分书），饱和色只留给小件
    ============================================================ */
 .tmb-book, .tmb-shelf {
   --tmb-kai: "KaiTi", "STKaiti", "Kaiti SC", "BiauKai", "DFKai-SB", "Noto Serif SC", "Songti SC", "SimSun", serif;
-  --tmb-song: "Songti SC", "SimSun", "NSimSun", "Noto Serif SC", "Georgia", serif;
-  --tmb-print: "Georgia", "Times New Roman", "Songti SC", "SimSun", serif;
+  --tmb-round: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Yu Gothic", "Noto Sans SC", "Segoe UI", sans-serif;
   --tmb-mono: ui-monospace, "Cascadia Mono", "Menlo", Consolas, "Courier New", monospace;
-  --tmb-paper-hi: #fdfaf1;
-  --tmb-paper-mid: #f8f2e3;
-  --tmb-paper-lo: #f1e9d5;
-  --tmb-paper-edge: rgba(198, 178, 142, 0.62);
-  --tmb-ink: #3a3122;
-  --tmb-ink-soft: rgba(120, 102, 68, 0.92);
-  --tmb-rule: rgba(150, 128, 92, 0.34);
-  --tmb-cloth: #6b4f36;
-  --tmb-cloth-lo: #4a3524;
-  --tmb-ribbon: #a8413a;
-  --tmb-file-paper-hi: #f7f8fa;
-  --tmb-file-paper-lo: #e9edf2;
-  --tmb-file-edge: rgba(120, 132, 150, 0.46);
-  --tmb-file-ink: #2d333b;
-  --tmb-file-rule: rgba(72, 86, 104, 0.42);
-  --tmb-seal: rgba(170, 54, 42, 0.78);
+  /* 手账本纸：暖白三档（色距≤11，与宿主底色的"无色"同一预算，只多一丝米暖） */
+  --tmb-paper-hi: #fffefc;
+  --tmb-paper-mid: #fdfaf6;
+  --tmb-paper-lo: #faf5ef;
+  --tmb-paper-edge: rgba(212, 199, 189, 0.48);
+  --tmb-ink: #4d4448;
+  --tmb-ink-soft: rgba(125, 108, 115, 0.9);
+  --tmb-rule: rgba(196, 176, 184, 0.28);
+  /* 封皮：灰粉/灰紫粉（大面彩点里唯一的"面"，饱和度也让给书脊心情色去表达） */
+  --tmb-cloth: #e9d5da;
+  --tmb-ribbon: #e3b7c6;
+  --tmb-tape-a: rgba(245, 236, 239, 0.92);
+  --tmb-tape-b: rgba(255, 255, 255, 0.95);
+  /* 观测手账纸：冷白两档（向宿主 #f7f9fc 看齐） */
+  --tmb-file-paper-hi: #fdfeff;
+  --tmb-file-paper-lo: #f3f5f9;
+  --tmb-file-edge: rgba(196, 205, 222, 0.45);
+  --tmb-file-ink: #4a5266;
+  --tmb-file-rule: rgba(150, 162, 186, 0.28);
+  /* 手账封皮：灰蓝；落款印：雾靛（小件，允许这点浓度） */
+  --tmb-file-cloth: #d8dfea;
+  --tmb-seal: rgba(125, 140, 192, 0.75);
 }
 
 /* ============================================================
    1. 书架：目录视图（书脊一排，点一根抽出那页）
    ============================================================ */
-/* 书脊是"站着的书"，不是卡片：横向排、底边坐在一根木隔板上。
-   木隔板挂在 .tmb-shelf::after（真元素不行——它得跟着行高走），
-   换行时行与行之间留足气口，读作"两层书架"而不是一排按钮 */
+/* 书脊是"站着的小绘本"，不是卡片：横向排、底边坐在隔板上。
+   隔板挂在 .tmb-shelf::after（真元素不行——它得跟着行高走），
+   换行时行与行之间留足气口，读作"两层架"而不是一排按钮。
+   1.3.1c：隔板褪成暖白软垫——架上唯一有颜色的东西应该是书脊皮（心情） */
 .tmb-shelf {
   display: flex; flex-wrap: wrap; align-items: flex-end; gap: 5px 6px;
   padding: 18px 8px 14px; margin: 0 -6px;
@@ -54,85 +74,84 @@ export const BOOK_STYLES = `
 .tmb-shelf { position: relative; }
 .tmb-shelf::after {
   content: ""; position: absolute; left: 0; right: 0; bottom: 5px; height: 7px;
-  border-radius: 2px;
-  background: linear-gradient(180deg, rgba(150, 116, 74, 0.55) 0%, rgba(108, 80, 48, 0.42) 55%, rgba(70, 52, 32, 0.30) 100%);
-  box-shadow: 0 4px 9px rgba(70, 50, 28, 0.20), inset 0 1px 0 rgba(255, 246, 226, 0.35);
+  border-radius: 4px;
+  background: linear-gradient(180deg, rgba(241, 234, 229, 0.95) 0%, rgba(230, 220, 214, 0.8) 55%, rgba(219, 208, 203, 0.65) 100%);
+  box-shadow: 0 4px 9px rgba(190, 175, 172, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
 .tmb-spine {
   position: relative; flex: 0 0 auto;
   width: 34px; height: 186px; padding: 8px 0 9px;
   display: flex; flex-direction: column; align-items: center; gap: 4px;
-  border: 1px solid rgba(58, 42, 24, 0.34); border-radius: 3px 3px 2px 2px;
-  /* 布面书脊：中间一道高光（圆柱感）+ 两端压暗，纸基色由 --tmb-spine-base 给
-     （= 当期心情均值 moodDotColor，近零自动落灰，与全站心情语义同一口径） */
-  background-image:
-    linear-gradient(90deg, rgba(28, 18, 8, 0.34) 0%, rgba(255, 252, 240, 0.30) 32%, rgba(255, 255, 255, 0.10) 52%, rgba(28, 18, 8, 0.30) 100%),
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.055) 0 1px, rgba(0, 0, 0, 0.045) 1px 3px);
-  background-color: var(--tmb-spine-base, rgba(148, 163, 184, 0.6));
-  box-shadow: 2px 4px 9px rgba(46, 32, 16, 0.26), inset -3px 0 6px rgba(24, 16, 6, 0.28), inset 3px 0 5px rgba(255, 250, 236, 0.20);
+  border: 1px solid rgba(255, 255, 255, 0.6); border-radius: 8px 8px 6px 6px;
+  /* 书脊皮 = 全页最大的"彩点"：底 = shelfInk 低饱和心情色阶（开心落灰玫/
+     低落落雾紫/近零落暖灰），暖=好/冷=坏的语义与全站心情同方向；
+     纯色 + 左上一处柔和高光，没有布纹、没有圆柱明暗 */
+  background-color: var(--tmb-spine-base, rgb(213, 204, 209));
+  background-image: linear-gradient(118deg, rgba(255, 255, 255, 0.45) 0%, rgba(255, 255, 255, 0.16) 38%, rgba(255, 255, 255, 0) 62%);
+  box-shadow: 0 4px 10px rgba(180, 165, 172, 0.18), inset 0 0 0 1px rgba(255, 255, 255, 0.25);
   cursor: pointer;
   transition: transform 0.18s cubic-bezier(0.22, 0.61, 0.36, 1), box-shadow 0.18s ease;
 }
 /* 抽出来一点：整根上移 + 影子拉长（悬停即"这本可以拿"） */
 .tmb-spine:hover {
   transform: translateY(-12px);
-  box-shadow: 2px 14px 20px rgba(46, 32, 16, 0.30), inset -3px 0 6px rgba(24, 16, 6, 0.28), inset 3px 0 5px rgba(255, 250, 236, 0.24);
+  box-shadow: 0 14px 22px rgba(180, 165, 172, 0.24), inset 0 0 0 1px rgba(255, 255, 255, 0.32);
 }
-.tmb-spine:focus-visible { outline: 2px solid rgba(200, 150, 90, 0.9); outline-offset: 2px; }
-/* 书顶：纸上沿露出的一线（斜切圆角让整排书顶不是一条直线） */
+.tmb-spine:focus-visible { outline: 2px solid rgba(190, 140, 160, 0.75); outline-offset: 2px; }
+/* 书顶：纸上沿露出的一线（圆头小白条，读作"页口"不读作"毛边"） */
 .tmb-spine-top {
-  width: 24px; height: 4px; border-radius: 1px 2px 0 0;
-  background: linear-gradient(180deg, rgba(252, 248, 236, 0.95), rgba(226, 214, 188, 0.8));
-  box-shadow: 0 1px 0 rgba(58, 42, 24, 0.22);
+  width: 24px; height: 4px; border-radius: 2px;
+  background: linear-gradient(180deg, #ffffff, rgba(250, 246, 242, 0.9));
+  box-shadow: 0 1px 0 rgba(170, 155, 150, 0.2);
 }
-/* 页码方块（横排，压在书脊顶端） */
+/* 页码方块（横排，压在书脊顶端——一枚小白圆贴） */
 .tmb-spine-no {
   width: 22px; height: 17px; margin-top: 3px;
   display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 2px; background: rgba(252, 247, 234, 0.92);
-  box-shadow: inset 0 0 0 1px rgba(58, 42, 24, 0.22);
-  font-size: 10px; font-weight: 700; letter-spacing: 0; color: #4a3722;
+  border-radius: 6px; background: rgba(255, 254, 252, 0.96);
+  box-shadow: inset 0 0 0 1px rgba(185, 165, 172, 0.3);
+  font-size: 10px; font-weight: 700; letter-spacing: 0; color: #8a6f78;
 }
-/* 竖排日期区间：书脊上的字本来就该竖着写 */
+/* 竖排日期：浅脊配深字（1.3.1c 脊色褪淡后白字对比度不够，翻面成墨色 + 白描边） */
 .tmb-spine-date {
   writing-mode: vertical-rl; text-orientation: mixed;
   margin-top: 7px; font-size: 11px; line-height: 1.1; letter-spacing: 0.04em;
-  color: rgba(252, 246, 230, 0.95);
-  text-shadow: 0 1px 1px rgba(20, 12, 4, 0.5);
+  font-family: var(--tmb-round);
+  color: rgba(72, 55, 63, 0.92);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
   max-height: 104px; overflow: hidden;
 }
 .tmb-spine-spacer { flex: 1 1 auto; min-height: 0; }
-/* 书根：段数（她的话多不多）——压在木隔板上那一端 */
+/* 书根：段数（她的话多不多）——压在隔板那一端 */
 .tmb-spine-foot {
   writing-mode: vertical-rl; text-orientation: mixed;
-  font-size: 9.5px; letter-spacing: 0.02em; color: rgba(250, 244, 228, 0.78);
-  text-shadow: 0 1px 1px rgba(20, 12, 4, 0.45);
+  font-family: var(--tmb-round);
+  font-size: 9.5px; letter-spacing: 0.02em; color: rgba(72, 55, 63, 0.72);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
 }
-/* 旧版迁移页：一枚贴在脊上的小标签 */
+/* 旧版迁移页：一枚贴在脊上的小圆角标签 */
 .tmb-spine-flag {
   position: absolute; top: 44%; left: 2px; right: 2px;
-  padding: 1px 0; border-radius: 1px; text-align: center;
-  background: rgba(176, 132, 66, 0.92); color: #fffaf0;
+  padding: 1px 0; border-radius: 4px; text-align: center;
+  background: rgba(240, 226, 205, 0.95); color: #7d6748;
   font-size: 8.5px; line-height: 1.5; letter-spacing: 0.06em;
-  box-shadow: 0 1px 2px rgba(28, 18, 8, 0.4);
+  box-shadow: 0 1px 2px rgba(160, 140, 110, 0.22);
 }
 
-/* ---- 我的日记：档案盒脊（同一根骨架，换配色与字体）---- */
+/* ---- 我的日记：观测手账的盒脊（同一根骨架，换配色）---- */
 .tmb-spine--file {
   width: 31px; height: 168px;
-  border-color: rgba(38, 46, 58, 0.42); border-radius: 2px;
-  background-image:
-    linear-gradient(90deg, rgba(14, 20, 28, 0.30) 0%, rgba(255, 255, 255, 0.24) 34%, rgba(255, 255, 255, 0.06) 54%, rgba(14, 20, 28, 0.26) 100%),
-    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.05) 0 1px, rgba(0, 0, 0, 0.04) 1px 4px);
-  background-color: #7e8794;
-  box-shadow: 2px 4px 9px rgba(18, 26, 36, 0.28), inset -3px 0 6px rgba(10, 16, 24, 0.26), inset 3px 0 5px rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.55); border-radius: 7px 7px 5px 5px;
+  background-color: var(--tmb-file-cloth);
+  background-image: linear-gradient(118deg, rgba(255, 255, 255, 0.42) 0%, rgba(255, 255, 255, 0.14) 38%, rgba(255, 255, 255, 0) 62%);
+  box-shadow: 0 4px 10px rgba(160, 170, 190, 0.18), inset 0 0 0 1px rgba(255, 255, 255, 0.2);
 }
-.tmb-spine--file:hover { box-shadow: 2px 14px 20px rgba(18, 26, 36, 0.32), inset -3px 0 6px rgba(10, 16, 24, 0.26), inset 3px 0 5px rgba(255, 255, 255, 0.18); }
-.tmb-spine--file .tmb-spine-top { background: linear-gradient(180deg, rgba(240, 244, 248, 0.95), rgba(206, 214, 224, 0.8)); box-shadow: 0 1px 0 rgba(38, 46, 58, 0.3); }
-.tmb-spine--file .tmb-spine-no { background: rgba(246, 248, 251, 0.95); color: #33404f; box-shadow: inset 0 0 0 1px rgba(38, 46, 58, 0.24); width: 27px; font-size: 9.5px; }
-.tmb-spine--file .tmb-spine-date { font-family: var(--tmb-mono); font-size: 10px; letter-spacing: -0.02em; color: rgba(250, 252, 255, 0.94); }
-.tmb-spine--file .tmb-spine-foot { font-family: var(--tmb-mono); font-size: 9px; color: rgba(248, 250, 253, 0.72); }
+.tmb-spine--file:hover { box-shadow: 0 14px 22px rgba(160, 170, 190, 0.24), inset 0 0 0 1px rgba(255, 255, 255, 0.28); }
+.tmb-spine--file .tmb-spine-top { background: linear-gradient(180deg, #ffffff, rgba(246, 248, 251, 0.9)); box-shadow: 0 1px 0 rgba(150, 160, 180, 0.18); }
+.tmb-spine--file .tmb-spine-no { background: rgba(254, 255, 255, 0.97); color: #5f6c8e; box-shadow: inset 0 0 0 1px rgba(160, 172, 200, 0.3); width: 27px; font-size: 9.5px; }
+.tmb-spine--file .tmb-spine-date { font-family: var(--tmb-mono); font-size: 10px; letter-spacing: -0.02em; color: rgba(58, 68, 96, 0.92); text-shadow: 0 1px 0 rgba(255, 255, 255, 0.4); }
+.tmb-spine--file .tmb-spine-foot { font-family: var(--tmb-mono); font-size: 9px; color: rgba(58, 68, 96, 0.7); text-shadow: none; }
 
 /* 书架空态/加载中的一句小字由现有 .tm-derived 承担，不另立样式 */
 
@@ -148,89 +167,78 @@ export const BOOK_STYLES = `
    最长文字行的 max-content 浮动（1 段短页 ≈533px vs 2 段长页顶满 640px），
    居中又让左缘跟着书脊漂。显式 width:100% 钉回「满列宽、封顶 640」，
    两本书与藏书阁共用本类，一处修全。 */
-/* 1.3.0 真机反馈“全屏下书很扁”：纸页实测 728×366 ≈ 2.0:1。宽收到 640
+/* 1.3.0 真机反馈"全屏下书很扁"：纸页实测 728×366 ≈ 2.0:1。宽收到 640
    （正文列 ≈ 540px → 15px 下约 36 字/行，中文书舒适行宽），高见 .tmb-page
    竖版下限。列宽变量挂在 .tmb-card（Card 元素）上：工具条与书都是它的后代
    → 同宽居中，「请她写一篇」不再飞到屏幕最右缘与书脱节 */
 .tmb-card { --tmb-col: 640px; }
 .tmb-card .tm-journal-toolbar { max-width: var(--tmb-col); margin-inline: auto; }
-/* 书脊列：布面 + 线装三孔 + 题签（竖排书名） */
+/* 书脊列：扁平绘本封（纯色 + 一处受光 + 大圆角）+ 一条缝线 + 圆角贴纸题签 */
 .tmb-book-strip {
-  position: relative; border-radius: 4px 0 0 4px;
+  position: relative; border-radius: 12px 0 0 12px;
   background-color: var(--tmb-cloth);
-  /* 布面：左右一道圆柱高光 + 上下压暗（压暗吃 --tmb-cloth-lo，暗色块只改这一个变量） */
-  background-image:
-    linear-gradient(90deg, rgba(0, 0, 0, 0.42) 0%, rgba(255, 255, 255, 0.16) 38%, rgba(0, 0, 0, 0.22) 100%),
-    linear-gradient(180deg, var(--tmb-cloth-lo) 0%, rgba(0, 0, 0, 0) 22%, rgba(0, 0, 0, 0) 78%, var(--tmb-cloth-lo) 100%),
-    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.07) 0 1px, rgba(0, 0, 0, 0.06) 1px 3px),
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.05) 0 1px, rgba(0, 0, 0, 0.05) 1px 2px);
-  box-shadow: inset 0 0 0 1px rgba(255, 246, 226, 0.10), -1px 0 0 rgba(58, 42, 24, 0.18);
+  background-image: linear-gradient(96deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.12) 42%, rgba(255, 255, 255, 0) 66%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4), -1px 0 0 rgba(190, 168, 175, 0.16);
 }
-/* 线装孔：一条背景带上排三个圆点（33% 一格，repeat-y 出四个孔位，取中段三个的视觉） */
+/* 装订：一条白缝线（dashed border，绘本的机器锁线） */
 .tmb-book-stitch {
-  position: absolute; left: 10px; top: 22px; bottom: 22px; width: 4px;
-  background-image: radial-gradient(circle at 50% 50%, rgba(255, 251, 240, 0.92) 0 1.6px, rgba(40, 26, 12, 0.5) 1.6px 2.4px, transparent 2.4px);
-  background-size: 4px 25%; background-repeat: repeat-y;
+  position: absolute; left: 13px; top: 22px; bottom: 22px; width: 0;
+  border-left: 2px dashed rgba(255, 255, 255, 0.75);
 }
-/* 题签：贴在书脊上的白纸条（古籍书签格式：框内竖排书名） */
+/* 题签：贴在封面上的一张圆角白贴纸，字仍竖排楷体——那是她书的"名" */
 .tmb-book-title {
-  position: absolute; top: 26px; left: 5px; right: 6px; max-height: 112px; overflow: hidden;
-  padding: 7px 1px; border-radius: 1px;
+  position: absolute; top: 26px; left: 4px; right: 5px; max-height: 112px; overflow: hidden;
+  padding: 8px 1px; border-radius: 8px;
   writing-mode: vertical-rl; text-orientation: mixed;
-  background: rgba(250, 244, 228, 0.94);
-  box-shadow: inset 0 0 0 1px rgba(58, 42, 24, 0.22), 0 1px 3px rgba(28, 18, 8, 0.30);
+  background: rgba(255, 253, 250, 0.97);
+  box-shadow: inset 0 0 0 1px rgba(208, 182, 190, 0.45), 0 2px 5px rgba(185, 160, 168, 0.18);
   font-family: var(--tmb-kai); font-size: 10.5px; line-height: 1.2; letter-spacing: 0.06em;
-  color: #43331d; text-align: center;
+  color: #8c6b76; text-align: center;
+  transform: rotate(1.2deg);
 }
 .tmb-book-strip--file {
-  background-color: #56606e;
-  background-image:
-    linear-gradient(90deg, rgba(6, 12, 20, 0.46) 0%, rgba(255, 255, 255, 0.14) 40%, rgba(0, 0, 0, 0.26) 100%),
-    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.06) 0 1px, rgba(0, 0, 0, 0.05) 1px 4px);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.10), -1px 0 0 rgba(14, 20, 28, 0.22);
+  background-color: var(--tmb-file-cloth);
+  background-image: linear-gradient(96deg, rgba(255, 255, 255, 0.38) 0%, rgba(255, 255, 255, 0.12) 42%, rgba(255, 255, 255, 0) 66%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.38), -1px 0 0 rgba(160, 172, 195, 0.16);
 }
-/* 卷宗的装订：三个打孔（一条 12px 带上等距三孔）+ 一张贴在脊上的档案标签 */
+/* 观测手账的装订：同样收成一个缝线（三孔打孔器退役） */
 .tmb-book-holes {
-  position: absolute; left: 7px; top: 0; bottom: 0; width: 11px;
-  background-image: radial-gradient(circle at 50% 50%, rgba(26, 34, 44, 0.62) 0 3.4px, rgba(255, 255, 255, 0.62) 3.4px 4.2px, transparent 4.2px);
-  background-size: 11px 30%; background-repeat: repeat-y; background-position: 0 12%;
+  position: absolute; left: 7px; top: 22px; bottom: 22px; width: 0;
+  border-left: 2px dashed rgba(255, 255, 255, 0.78);
 }
 .tmb-book-title--file {
-  top: 30px; left: 3px; right: 3px; max-height: 96px;
-  background: rgba(244, 247, 251, 0.95); color: #2f3a47;
-  box-shadow: inset 0 0 0 1px rgba(38, 46, 58, 0.24), 0 1px 3px rgba(14, 20, 28, 0.28);
-  font-family: var(--tmb-song); font-size: 10px; letter-spacing: 0.1em;
+  top: 30px; left: 2px; right: 3px; max-height: 96px;
+  background: rgba(254, 255, 255, 0.98); color: #5f6c8e;
+  box-shadow: inset 0 0 0 1px rgba(170, 182, 208, 0.45), 0 2px 5px rgba(160, 172, 195, 0.18);
+  font-family: var(--tmb-round); font-size: 10px; letter-spacing: 0.1em;
+  transform: rotate(-1.2deg);
 }
 
 /* ---- 纸页 ---- */
 .tmb-page {
   /* flex 列 + 竖版下限：她只写两段时纸仍是一整页（空白落在页底、页脚钉在最下），
-     而不是被内容拽成一条横幅——“扁”的主因（纸高曾完全由内容决定）。
+     而不是被内容拽成一条横幅——"扁"的主因（纸高曾完全由内容决定）。
      右内边距 62 = 丝带车道（丝带占纸页右缘 46~61px）：车道开在页上而不是页眉上，
      否则正文行尾仍会从丝带下面穿过去 */
   position: relative; display: flex; flex-direction: column;
   min-height: clamp(430px, 68vh, 700px);
   padding: 17px 62px 0 22px;
   border: 1px solid var(--tmb-paper-edge); border-left: none;
-  border-radius: 0 6px 6px 0;
+  border-radius: 0 12px 12px 0;
   background-color: var(--tmb-paper-mid);
-  /* 四层：纤维 → 四边压暗（纸张厚度）→ 左上受光 → 基色渐变。
-     透明度刻意拉到 .92~.96：既保住"摊在桌面上"的实体感，又不会把
-     用户壁纸彻底糊死（面板外观那套 dim/blur 仍然吃得到） */
+  /* 1.3.1c：点纹纸纹撤除——大面只留"顶部一线受光 + 基色微暖渐变"，
+     干净得像面板那张白玻璃卡，只是形状还是一本书 */
   background-image:
-    repeating-linear-gradient(112deg, rgba(150, 124, 82, 0.052) 0 1px, transparent 1px 4px),
-    repeating-linear-gradient(157deg, rgba(150, 124, 82, 0.04) 0 1px, transparent 1px 5px),
-    radial-gradient(120% 100% at 50% 50%, rgba(255, 255, 255, 0) 58%, rgba(122, 96, 56, 0.14) 100%),
-    radial-gradient(70% 55% at 10% 4%, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0) 62%),
-    linear-gradient(168deg, var(--tmb-paper-hi) 0%, var(--tmb-paper-mid) 52%, var(--tmb-paper-lo) 100%);
+    radial-gradient(70% 45% at 12% 4%, rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0) 60%),
+    linear-gradient(168deg, var(--tmb-paper-hi) 0%, var(--tmb-paper-mid) 55%, var(--tmb-paper-lo) 100%);
   box-shadow:
-    inset 14px 0 16px -14px rgba(74, 54, 28, 0.42),
-    inset -1px 0 0 rgba(255, 252, 242, 0.7),
-    inset 0 1px 0 rgba(255, 255, 255, 0.85),
-    0 9px 22px rgba(74, 54, 28, 0.15),
-    0 2px 0 rgba(198, 178, 142, 0.5);
+    inset 12px 0 14px -12px rgba(190, 170, 178, 0.16),
+    inset -1px 0 0 rgba(255, 255, 255, 0.8),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 10px 24px rgba(185, 168, 174, 0.12),
+    0 2px 0 rgba(212, 199, 189, 0.3);
 }
-/* 版权页式页眉：一条界栏压底，字距拉开（和正文彻底分层） */
+/* 页眉：一条浅界栏压底，字距拉开（和正文彻底分层） */
 .tmb-head {
   display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
   padding: 0 12px 7px 0; margin-bottom: 11px;
@@ -240,30 +248,29 @@ export const BOOK_STYLES = `
   font-family: var(--tmb-kai); font-size: 10.5px; letter-spacing: 0.26em;
   color: var(--tmb-ink-soft); text-transform: none;
 }
-.tmb-head-no { font-family: var(--tmb-print); font-size: 13.5px; font-weight: 700; color: var(--tmb-ink); letter-spacing: 0.02em; }
-.tmb-head-meta { font-size: 11.5px; color: var(--tmb-ink-soft); font-variant-numeric: tabular-nums; }
+.tmb-head-no { font-family: var(--tmb-round); font-size: 13.5px; font-weight: 700; color: var(--tmb-ink); letter-spacing: 0.02em; }
+.tmb-head-meta { font-size: 11.5px; color: var(--tmb-ink-soft); font-variant-numeric: tabular-nums; font-family: var(--tmb-round); }
 .tmb-head-spacer { margin-left: auto; }
 .tmb-head-trend { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--tmb-ink-soft); }
-.tmb-head-trend .tm-mood-dot { width: 8px; height: 8px; box-shadow: 0 0 0 1px rgba(58, 42, 24, 0.18); }
+.tmb-head-trend .tm-mood-dot { width: 8px; height: 8px; box-shadow: 0 0 0 1px rgba(190, 170, 178, 0.24); }
 
-/* 段落＝一张压在书里的纸：自己的边、自己的影、极轻微歪斜（手放的效果）。
+/* 段落＝一张贴进手账的纸：自己的边、自己的影、极轻微歪斜（手贴的效果）。
    ⚠这里**不加** overflow:hidden：它是 .tmb-page 的直接子块，
    .tmb-page 才是 sticky 页脚的滚动上下文，别在这儿添堵 */
 .tmb-entry {
   position: relative; margin-top: 14px; padding: 13px 12px 13px 14px;
-  border: 1px solid rgba(198, 178, 142, 0.5);
+  border: 1px solid rgba(212, 199, 189, 0.5); border-radius: 10px;
   background-image:
-    repeating-linear-gradient(104deg, rgba(150, 124, 82, 0.035) 0 1px, transparent 1px 4px),
-    linear-gradient(172deg, rgba(255, 253, 246, 0.66) 0%, rgba(252, 247, 234, 0.4) 100%);
-  box-shadow: 0 2px 5px rgba(74, 54, 28, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    linear-gradient(172deg, rgba(255, 255, 254, 0.85) 0%, rgba(253, 250, 246, 0.55) 100%);
+  box-shadow: 0 2px 6px rgba(185, 170, 175, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.85);
 }
 .tmb-entry:nth-child(even) { transform: rotate(-0.18deg); }
 .tmb-entry:nth-child(odd) { transform: rotate(0.16deg); }
-/* 四角贴角（和纸胶带）：左上 + 右下 */
+/* 四角贴纸（素色半透明小胶带，1.3.1c 撤掉条纹——形状保留、颜色退场） */
 .tmb-entry::before, .tmb-entry::after {
-  content: ""; position: absolute; width: 11px; height: 26px;
-  background: rgba(255, 252, 240, 0.5);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6), 0 1px 2px rgba(74, 54, 28, 0.14);
+  content: ""; position: absolute; width: 11px; height: 26px; border-radius: 2px;
+  background: linear-gradient(180deg, var(--tmb-tape-a), var(--tmb-tape-b));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6), 0 1px 2px rgba(175, 160, 165, 0.14);
 }
 .tmb-entry::before { left: -6px; top: 5px; transform: rotate(-34deg); }
 .tmb-entry::after { right: -6px; bottom: 5px; transform: rotate(-34deg); }
@@ -282,19 +289,19 @@ export const BOOK_STYLES = `
   color: var(--tmb-ink-soft);
 }
 .tmb-sec-title::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--tmb-rule); }
-/* 正文：宣纸墨色 + 2.1 行距 + 中文惯例首行缩进；justify 拉齐右边像排过的 */
+/* 正文：圆润字面 + 中性暖墨 + 2.08 行距 + 中文惯例首行缩进；justify 拉齐右边 */
 .tmb-text {
-  margin: 0; font-size: 15px; line-height: 2.08;
+  margin: 0; font-family: var(--tmb-round); font-size: 15px; line-height: 2.08;
   color: var(--tmb-ink); text-align: justify; text-indent: 2em;
   overflow-wrap: break-word; word-break: break-word;
 }
 .tmb-text + .tmb-text { margin-top: 7px; }
-/* 首字下沉（全页只给第一段）：楷体大字，右上一个「」起首 */
+/* 首字下沉（全页只给第一段）：楷体大字，带一丝玫瑰——全页唯一允许有颜色的字 */
 .tmb-text--lead { text-indent: 0; }
 .tmb-text--lead::first-letter {
   float: left; padding: 3px 7px 0 0;
   font-family: var(--tmb-kai); font-size: 2.15em; line-height: 1.02;
-  color: rgba(94, 66, 34, 0.92);
+  color: rgba(158, 112, 128, 0.92);
 }
 
 /* 丝带书签：压在页脚之上、被页脚遮住下半（真丝带的层叠关系）。
@@ -303,17 +310,15 @@ export const BOOK_STYLES = `
   position: absolute; top: 0; right: 46px; width: 15px; height: 56%;
   min-height: 96px; max-height: 420px;
   background-color: var(--tmb-ribbon);
-  background-image:
-    linear-gradient(90deg, rgba(0, 0, 0, 0.26) 0%, rgba(255, 255, 255, 0.24) 38%, rgba(0, 0, 0, 0.18) 100%),
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.10) 0 1px, rgba(0, 0, 0, 0.06) 1px 3px);
+  background-image: linear-gradient(90deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0) 55%);
   clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 88%, 0 100%);
   z-index: 2; pointer-events: none;
 }
-/* 封面内衬的合页阴影：靠近书脊那一侧压一道 */
+/* 封面内衬的合页阴影：靠近书脊那一侧压一道（中性雾） */
 .tmb-page-body { position: relative; flex: 1 1 auto; min-height: 0; }
 .tmb-page-body::before {
   content: ""; position: absolute; left: -18px; top: 0; bottom: 0; width: 18px;
-  background: linear-gradient(90deg, rgba(58, 42, 24, 0.0), rgba(58, 42, 24, 0.12));
+  background: linear-gradient(90deg, rgba(190, 170, 178, 0.0), rgba(190, 170, 178, 0.12));
   pointer-events: none;
 }
 
@@ -325,150 +330,151 @@ export const BOOK_STYLES = `
      再给负 bottom 会在页脚下面留一条纸底白缝 */
   margin: 14px -62px 0 -22px; padding: 9px 18px 11px;
   display: flex; align-items: center; gap: 10px;
-  background-image: linear-gradient(180deg, rgba(246, 239, 224, 0.96) 0%, rgba(240, 231, 212, 0.99) 100%);
-  border-top: 1px solid rgba(198, 178, 142, 0.72);
+  background-image: linear-gradient(180deg, rgba(255, 253, 251, 0.97) 0%, rgba(250, 245, 240, 0.99) 100%);
+  border-top: 1px solid rgba(212, 196, 202, 0.45);
   /* 页脚负外边距顶到纸边，右下角跟随纸页圆角（否则直角会在圆纸上露一尖） */
-  border-radius: 0 0 6px 0;
-  box-shadow: 0 -5px 12px rgba(74, 54, 28, 0.13), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  border-radius: 0 0 12px 0;
+  box-shadow: 0 -5px 12px rgba(185, 170, 175, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.9);
   -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
 }
 .tmb-foot-mid { margin-left: auto; display: flex; align-items: center; gap: 12px; }
 .tmb-btn {
-  border: 1px solid rgba(120, 96, 58, 0.44); border-radius: 999px;
-  padding: 5px 13px; background: rgba(253, 250, 242, 0.86);
-  color: #4a3a22; font: inherit; font-size: 12.5px; letter-spacing: 0.04em;
+  border: 1px solid rgba(205, 185, 192, 0.5); border-radius: 999px;
+  padding: 5px 13px; background: rgba(255, 254, 253, 0.92);
+  color: #7d666e; font-family: var(--tmb-round); font-size: 12.5px; letter-spacing: 0.04em;
   cursor: pointer;
   transition: background 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
 }
-.tmb-btn:hover:not(:disabled) { background: rgba(255, 253, 248, 0.98); box-shadow: 0 2px 7px rgba(74, 54, 28, 0.18); transform: translateY(-1px); }
-.tmb-btn:active:not(:disabled) { transform: translateY(0); }
+.tmb-btn:hover:not(:disabled) { background: #ffffff; box-shadow: 0 3px 9px rgba(190, 170, 178, 0.2); transform: translateY(-1px); }
+.tmb-btn:active:not(:disabled) { transform: translateY(0) scale(0.97); }
 .tmb-btn:disabled { opacity: 0.4; cursor: default; }
-.tmb-btn:focus-visible { outline: 2px solid rgba(200, 150, 90, 0.85); outline-offset: 2px; }
+.tmb-btn:focus-visible { outline: 2px solid rgba(190, 140, 160, 0.7); outline-offset: 2px; }
 .tmb-ind {
   min-width: 54px; text-align: center; font-size: 12.5px; letter-spacing: 0.06em;
-  color: rgba(74, 58, 32, 0.9); font-variant-numeric: tabular-nums;
-  font-family: var(--tmb-print);
+  color: rgba(125, 102, 110, 0.88); font-variant-numeric: tabular-nums;
+  font-family: var(--tmb-round);
 }
-.tmb-leaf-ind { font-size: 11px; color: rgba(120, 102, 68, 0.86); font-variant-numeric: tabular-nums; }
+.tmb-leaf-ind { font-size: 11px; color: rgba(140, 120, 127, 0.85); font-variant-numeric: tabular-nums; font-family: var(--tmb-round); }
 
 /* ============================================================
-   3. 铅印卷宗（我的日记专属）：冷纸 + 仿宋正文 + 等宽口径 + 朱印
+   3. 冷白观测手账（我的日记专属）：冷白纸 + 圆润正文 + 雾靛落款
+   —— 与另一本的温差只有一档（暖白 vs 冷白），颜色集中在
+   封皮、落款印、进度条这几个小件上；数据感靠版式：等宽口径行、
+   表格线、居中标题
    ============================================================ */
 .tmb-page--file {
   border-color: var(--tmb-file-edge);
   background-color: var(--tmb-file-paper-lo);
-  /* 打字纸：极淡横格（21px 一格，与 1.9 行距对不上就不对，反正淡）+ 冷色基渐变 */
+  /* 1.3.1c：格线撤除——冷白净面，与宿主白玻璃卡同族，只比她的那本冷一档 */
   background-image:
-    repeating-linear-gradient(0deg, rgba(72, 86, 104, 0.055) 0 1px, transparent 1px 21px),
-    radial-gradient(120% 100% at 50% 50%, rgba(255, 255, 255, 0) 62%, rgba(46, 58, 72, 0.12) 100%),
-    radial-gradient(66% 50% at 8% 2%, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0) 60%),
-    linear-gradient(168deg, var(--tmb-file-paper-hi) 0%, #eef1f5 54%, var(--tmb-file-paper-lo) 100%);
+    radial-gradient(66% 50% at 8% 2%, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0) 60%),
+    linear-gradient(168deg, var(--tmb-file-paper-hi) 0%, #f8fafc 54%, var(--tmb-file-paper-lo) 100%);
   box-shadow:
-    inset 16px 0 18px -16px rgba(14, 20, 28, 0.4),
-    inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    0 9px 20px rgba(18, 26, 36, 0.14),
-    0 2px 0 rgba(120, 132, 150, 0.42);
+    inset 14px 0 16px -14px rgba(160, 172, 195, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 10px 22px rgba(160, 172, 195, 0.12),
+    0 2px 0 rgba(196, 205, 222, 0.3);
 }
 .tmb-page--file .tmb-head { border-bottom-color: var(--tmb-file-rule); }
-.tmb-page--file .tmb-head-kicker { font-family: var(--tmb-song); letter-spacing: 0.3em; color: rgba(52, 64, 78, 0.9); }
-.tmb-page--file .tmb-head-no { font-family: var(--tmb-mono); font-weight: 600; color: #26313d; }
-.tmb-page--file .tmb-head-meta { color: rgba(52, 64, 78, 0.9); }
-.tmb-page--file .tmb-head-trend { color: rgba(52, 64, 78, 0.9); }
-/* 卷首统计口径：等宽小字 + 上下细线（档案表格的味道），纯数据无修饰 */
+.tmb-page--file .tmb-head-kicker { font-family: var(--tmb-round); letter-spacing: 0.3em; color: rgba(90, 102, 130, 0.92); }
+.tmb-page--file .tmb-head-no { font-family: var(--tmb-mono); font-weight: 600; color: #4f5a78; }
+.tmb-page--file .tmb-head-meta { color: rgba(90, 102, 130, 0.92); }
+.tmb-page--file .tmb-head-trend { color: rgba(90, 102, 130, 0.92); }
+/* 卷首统计口径：等宽小字 + 上下细线（笔记本里的数据行），纯数据无修饰 */
 .tmb-dossier {
   display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: baseline;
   padding: 7px 9px; margin-bottom: 12px;
-  border-top: 1.5px solid rgba(46, 58, 72, 0.55); border-bottom: 1px solid var(--tmb-file-rule);
-  background: rgba(255, 255, 255, 0.34);
+  border-top: 1.5px solid rgba(150, 162, 190, 0.42); border-bottom: 1px solid var(--tmb-file-rule);
+  background: rgba(255, 255, 255, 0.5);
 }
 .tmb-dossier-item {
   display: inline-flex; align-items: baseline; gap: 5px;
-  font-family: var(--tmb-mono); font-size: 10.5px; letter-spacing: 0.01em; color: #33404e;
+  font-family: var(--tmb-mono); font-size: 10.5px; letter-spacing: 0.01em; color: #5a6685;
 }
 .tmb-dossier-label { opacity: 0.66; }
-.tmb-dossier-value { font-weight: 700; color: #1f2a35; }
-/* 标题居中一行（"这一段时间的记录"）：宋体宽字距，铅字标题 */
+.tmb-dossier-value { font-weight: 700; color: #46536f; }
+/* 标题居中一行（"这一段时间的记录"）：圆体宽字距 */
 .tmb-file-title {
   margin: 2px 0 12px; text-align: center;
-  font-family: var(--tmb-song); font-size: 13px; font-weight: 700; letter-spacing: 0.34em;
-  color: #26313d;
+  font-family: var(--tmb-round); font-size: 13px; font-weight: 700; letter-spacing: 0.34em;
+  color: #4f5a78;
 }
-/* 正文：仿宋 + 铅字压痕（1px 白影 = 油墨吃进纸纤维） */
+/* 正文：圆润字面 + 中性冷墨 */
 .tmb-text--file {
-  font-family: var(--tmb-song); font-size: 14px; line-height: 1.95; color: var(--tmb-file-ink);
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.72);
+  font-family: var(--tmb-round); font-size: 14px; line-height: 1.95; color: var(--tmb-file-ink);
 }
 .tmb-page--file .tmb-entry {
-  border-color: rgba(120, 132, 150, 0.34);
+  border-color: rgba(196, 205, 222, 0.5);
   background-image:
-    repeating-linear-gradient(96deg, rgba(72, 86, 104, 0.03) 0 1px, transparent 1px 4px),
-    linear-gradient(172deg, rgba(255, 255, 255, 0.6) 0%, rgba(246, 248, 251, 0.42) 100%);
-  box-shadow: 0 2px 5px rgba(18, 26, 36, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.86);
+    linear-gradient(172deg, rgba(255, 255, 255, 0.75) 0%, rgba(250, 252, 254, 0.5) 100%);
+  box-shadow: 0 2px 6px rgba(160, 172, 195, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
-.tmb-page--file .tmb-entry::before, .tmb-page--file .tmb-entry::after { background: rgba(244, 247, 251, 0.62); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7), 0 1px 2px rgba(18, 26, 36, 0.14); }
+.tmb-page--file .tmb-entry::before, .tmb-page--file .tmb-entry::after {
+  background: linear-gradient(180deg, rgba(244, 246, 250, 0.92), rgba(255, 255, 255, 0.95));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6), 0 1px 2px rgba(160, 172, 195, 0.14);
+}
 .tmb-page--file .tmb-entry:nth-child(even), .tmb-page--file .tmb-entry:nth-child(odd) { transform: none; }
-/* 卷宗不贴角、不歪斜：那是她手边的东西，档案是打好的 */
-/* 落款朱印：方框双线 + 楷体竖排 + 轻旋转（盖章必不正），流在正文之后靠右。
-   单列装不下时竖排自动往左换第二列——正好是印章的多列排字，故不裁剪；
-   颜色走 --tmb-seal（暗色块只改这一个变量） */
+/* 观测手账不贴角、不歪斜：那是她手边的东西，这本是整理好的记录 */
+/* 落款印：方框双线 + 楷体竖排 + 轻旋转（盖章必不正的仪式感保留），
+   雾靛——还是"一枚盖上去的章"（小件，允许浓度） */
 .tmb-seal {
   float: right; clear: both; margin: 16px 2px 0 18px;
   width: 46px; height: 62px; padding: 6px 0;
   display: flex; align-items: center; justify-content: center;
-  border: 2px solid var(--tmb-seal); border-radius: 3px;
+  border: 2px solid var(--tmb-seal); border-radius: 8px;
   color: var(--tmb-seal);
-  background-image: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0) 62%);
+  background-image: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0) 62%);
   box-shadow: inset 0 0 0 1px var(--tmb-seal);
   writing-mode: vertical-rl; text-orientation: upright;
   font-family: var(--tmb-kai); font-size: 11.5px; letter-spacing: 0.04em; line-height: 1.05;
   transform: rotate(-5.5deg);
 }
 .tmb-page--file .tmb-foot {
-  background-image: linear-gradient(180deg, rgba(238, 241, 245, 0.96) 0%, rgba(230, 234, 240, 0.99) 100%);
-  border-top-color: rgba(120, 132, 150, 0.6);
-  box-shadow: 0 -5px 12px rgba(18, 26, 36, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  background-image: linear-gradient(180deg, rgba(253, 254, 255, 0.97) 0%, rgba(244, 246, 250, 0.99) 100%);
+  border-top-color: rgba(196, 205, 222, 0.5);
+  box-shadow: 0 -5px 12px rgba(160, 172, 195, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.95);
 }
-.tmb-page--file .tmb-btn { border-color: rgba(52, 64, 78, 0.4); background: rgba(250, 251, 253, 0.9); color: #2f3a46; }
-.tmb-page--file .tmb-btn:hover:not(:disabled) { background: #fff; box-shadow: 0 2px 7px rgba(18, 26, 36, 0.18); }
-.tmb-page--file .tmb-ind, .tmb-page--file .tmb-leaf-ind { font-family: var(--tmb-mono); color: rgba(46, 58, 72, 0.92); }
-/* 素材进度（卷宗式：等宽计数 + 一根实心条，不用面板那根渐变色条） */
+.tmb-page--file .tmb-btn { border-color: rgba(178, 188, 210, 0.5); background: rgba(254, 255, 255, 0.92); color: #5f6c8e; }
+.tmb-page--file .tmb-btn:hover:not(:disabled) { background: #ffffff; box-shadow: 0 3px 9px rgba(160, 172, 195, 0.22); }
+.tmb-page--file .tmb-ind, .tmb-page--file .tmb-leaf-ind { font-family: var(--tmb-mono); color: rgba(90, 102, 130, 0.92); }
+/* 素材进度：细灰轨 + 雾蓝填充（小件彩点），向面板那根进度条的观感看齐 */
 .tmb-meter { display: grid; gap: 5px; margin: 0 0 12px; }
-.tmb-meter-row { display: flex; align-items: baseline; gap: 8px; font-family: var(--tmb-mono); font-size: 10.5px; color: rgba(52, 64, 78, 0.92); letter-spacing: 0.01em; }
-.tmb-meter-track { height: 5px; border-radius: 1px; background: rgba(72, 86, 104, 0.18); box-shadow: inset 0 1px 1px rgba(18, 26, 36, 0.18); overflow: hidden; }
-.tmb-meter-fill { height: 100%; background: linear-gradient(90deg, rgba(94, 108, 126, 0.85), rgba(58, 72, 90, 0.9)); }
+.tmb-meter-row { display: flex; align-items: baseline; gap: 8px; font-family: var(--tmb-mono); font-size: 10.5px; color: rgba(90, 102, 130, 0.92); letter-spacing: 0.01em; }
+.tmb-meter-track { height: 5px; border-radius: 999px; background: rgba(196, 205, 222, 0.3); box-shadow: inset 0 1px 1px rgba(150, 162, 186, 0.1); overflow: hidden; }
+.tmb-meter-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #b6c3e4, #9dadd9); }
 /* 双门槛副行（1.3.0）：天数维度比轮数低一级字号与透明度，主次不互摸 */
 .tmb-meter-row--sub { font-size: 9.5px; opacity: 0.78; }
-/* 到期徽标：朱色等宽小章——"到时候了"是事实陈述不是庆祝，不给动效 */
+/* 到期徽标：灰玫小胶囊——"到时候了"是事实陈述不是庆祝，不给动效 */
 .tmb-meter-due {
-  font-size: 9.5px; letter-spacing: 0.04em; padding: 0 5px; border-radius: 2px;
-  color: #8c3b2e; border: 1px solid rgba(140, 59, 46, 0.55); background: rgba(246, 232, 222, 0.5);
+  font-size: 9.5px; letter-spacing: 0.04em; padding: 0 6px; border-radius: 999px;
+  color: #a2707f; border: 1px solid rgba(190, 148, 165, 0.45); background: rgba(250, 243, 246, 0.85);
 }
-/* 本卷依据（1.3.0）：成文时固化的素材快照——卷宗附页的口吻，
+/* 本卷依据（1.3.0）：成文时固化的素材快照——附页的口吻，
    虚线压顶与正文分层，等宽小字列事实（语气分布/心情走向/原话摘录） */
 .tmb-evidence {
   position: relative; z-index: 1;
   margin: 2px 0 10px; padding: 7px 10px 8px;
-  border-top: 1px dashed rgba(72, 86, 104, 0.5); border-bottom: 1px dashed rgba(72, 86, 104, 0.28);
-  background: rgba(255, 255, 255, 0.22);
+  border-top: 1px dashed rgba(150, 162, 186, 0.45); border-bottom: 1px dashed rgba(150, 162, 186, 0.25);
+  background: rgba(255, 255, 255, 0.4);
   display: grid; gap: 4px;
 }
 .tmb-evidence-title {
-  font-family: var(--tmb-song); font-size: 11px; letter-spacing: 0.18em; color: rgba(52, 64, 78, 0.85);
+  font-family: var(--tmb-round); font-size: 11px; letter-spacing: 0.18em; color: rgba(90, 102, 130, 0.9);
 }
-.tmb-evidence-line { display: flex; align-items: baseline; gap: 8px; font-family: var(--tmb-mono); font-size: 10.5px; color: rgba(45, 51, 59, 0.95); }
+.tmb-evidence-line { display: flex; align-items: baseline; gap: 8px; font-family: var(--tmb-mono); font-size: 10.5px; color: rgba(74, 86, 110, 0.95); }
 .tmb-evidence-label { flex: 0 0 auto; opacity: 0.72; letter-spacing: 0.04em; }
 .tmb-evidence-value { min-width: 0; overflow-wrap: anywhere; }
-/* 原话摘录：卷宗里的口供行——kind 小标签 + 等宽引文，不抢正文视觉 */
-.tmb-quote { display: flex; align-items: baseline; gap: 6px; font-size: 10.5px; font-family: var(--tmb-mono); color: rgba(45, 51, 59, 0.92); overflow-wrap: anywhere; }
+/* 原话摘录：语录贴条：kind 小圆角标签 + 等宽引文，不抢正文视觉 */
+.tmb-quote { display: flex; align-items: baseline; gap: 6px; font-size: 10.5px; font-family: var(--tmb-mono); color: rgba(74, 86, 110, 0.92); overflow-wrap: anywhere; }
 .tmb-quote-kind {
-  flex: 0 0 auto; font-family: var(--tmb-song); font-size: 9.5px; letter-spacing: 0.06em;
-  padding: 0 4px; border: 1px solid rgba(72, 86, 104, 0.42); border-radius: 2px; color: rgba(52, 64, 78, 0.85);
+  flex: 0 0 auto; font-family: var(--tmb-round); font-size: 9.5px; letter-spacing: 0.06em;
+  padding: 0 5px; border: 1px solid rgba(178, 188, 210, 0.5); border-radius: 4px; color: rgba(90, 102, 130, 0.9);
 }
 
 /* 藏书阁（1.3.0）：书架末尾横叠的一小摞——写满下架的旧页都在这儿，只读翻阅。
-   不标本数、不提 52 上限（显示层纪律：不在活架上加计数）；布面取书脊同族
-   色系但压暗两档——收起来的旧时光不该比活页抢眼；三块板微错位堆叠，
-   坐在同一根木隔板上（.tmb-shelf 的 align-items: flex-end 负责兑底） */
+   不标本数、不提 52 上限（1.3.0 显示层纪律：不在活架上加计数）；
+   1.3.1c 板色褪成灰粉/灰蓝，摞本身安静、朱印小点留色；
+   坐在同一根隔板上（.tmb-shelf 的 align-items: flex-end 负责兜底） */
 .tmb-stack {
   position: relative; flex: 0 0 auto;
   width: 58px; height: 46px; margin-left: 16px;
@@ -476,133 +482,157 @@ export const BOOK_STYLES = `
 }
 .tmb-stack-slab {
   position: absolute; left: 2px; right: 2px; bottom: 0;
-  height: 13px; border-radius: 2px 3px 3px 2px;
-  background: linear-gradient(180deg, rgba(107, 79, 54, 0.92) 0%, rgba(74, 53, 36, 0.95) 62%, rgba(56, 39, 25, 0.96) 100%);
-  border: 1px solid rgba(58, 42, 24, 0.44);
-  box-shadow: 0 2px 5px rgba(70, 50, 28, 0.26), inset 0 1px 0 rgba(255, 246, 226, 0.12);
+  height: 13px; border-radius: 6px;
+  background: linear-gradient(118deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0) 55%), #e6d2d7;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 2px 5px rgba(185, 168, 175, 0.16);
 }
-.tmb-stack-slab--back { left: 6px; right: -2px; transform: rotate(-0.7deg); }
-.tmb-stack-slab--mid { bottom: 11px; left: 3px; right: 5px; transform: rotate(0.5deg); }
+.tmb-stack-slab--back { background: linear-gradient(118deg, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0) 55%), #dfc9cf; left: 6px; right: -2px; transform: rotate(-0.7deg); }
+.tmb-stack-slab--mid { background: linear-gradient(118deg, rgba(255, 255, 255, 0.38) 0%, rgba(255, 255, 255, 0) 55%), #e3ced4; bottom: 11px; left: 3px; right: 5px; transform: rotate(0.5deg); }
 .tmb-stack-slab--top {
   bottom: 22px; left: 4px; right: 3px;
   transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
-.tmb-stack:hover .tmb-stack-slab--top { transform: translateY(-3px) rotate(-0.8deg); box-shadow: 0 5px 10px rgba(70, 50, 28, 0.34), inset 0 1px 0 rgba(255, 246, 226, 0.16); }
-/* 切口一侧的纸口线：三板各画一道，读出“这里是一探书，不是一块砖” */
+.tmb-stack:hover .tmb-stack-slab--top { transform: translateY(-3px) rotate(-0.8deg); box-shadow: 0 5px 10px rgba(185, 168, 175, 0.22); }
+/* 切口一侧的纸口线：三板各画一道，读出"这里是一摞书，不是一块砖" */
 .tmb-stack-slab::before {
   content: ""; position: absolute; left: 3px; right: 3px; top: 50%;
-  height: 3px; border-radius: 1px;
-  background: linear-gradient(180deg, rgba(248, 242, 227, 0.85), rgba(228, 216, 190, 0.7));
-  box-shadow: inset 0 0 0 1px rgba(120, 102, 68, 0.18);
+  height: 3px; border-radius: 2px;
+  background: linear-gradient(180deg, #ffffff, rgba(250, 246, 242, 0.85));
+  box-shadow: inset 0 0 0 1px rgba(190, 170, 178, 0.14);
 }
-/* 封面题签：一枚朱色小印，里面一个“藏”字（盖章位子在书摞右上角） */
+/* 封面题签：一枚灰玫小圆印，里面一个"藏"字（盖章位子在书摞右上角） */
 .tmb-stack-seal {
   position: absolute; right: 5px; top: -3px; z-index: 2;
-  width: 16px; height: 16px; border-radius: 3px;
+  width: 16px; height: 16px; border-radius: 5px;
   display: flex; align-items: center; justify-content: center;
-  background: var(--tmb-seal);
-  color: #f6efe0; font-size: 10px; line-height: 1;
+  background: #cfa3ae;
+  color: #fff; font-size: 10px; line-height: 1;
   font-family: var(--tmb-kai);
-  box-shadow: 0 1px 3px rgba(40, 20, 10, 0.4), inset 0 0 0 1px rgba(255, 246, 226, 0.22);
+  box-shadow: 0 1px 3px rgba(180, 145, 158, 0.3);
   transform: rotate(-4deg);
 }
 /* 丝带从书摞里探出来，搭在隔板沿上 */
 .tmb-stack-ribbon {
   position: absolute; left: 10px; top: 10px; z-index: 1;
   width: 7px; height: 20px;
-  background: linear-gradient(180deg, var(--tmb-ribbon), rgba(120, 40, 34, 0.9));
+  background: linear-gradient(180deg, var(--tmb-ribbon), #d9aebb);
   clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%);
-  box-shadow: 0 1px 2px rgba(40, 20, 10, 0.35);
+  box-shadow: 0 1px 2px rgba(180, 145, 158, 0.24);
 }
-/* 档案室的档案盒摞（1.3.0）：同一摞板子的冷灰孪生——硬纸壳取盒脊同族色，
-   丝带换成一张探出的口取纸标签（卷宗盒里夹的是标签不是丝带） */
+/* 档案室的收纳盒摞（1.3.0）：同一摞板子的灰蓝孪生——丝带换成一张探出的标签纸 */
 .tmb-stack--file .tmb-stack-slab {
-  background: linear-gradient(180deg, rgba(101, 113, 130, 0.92) 0%, rgba(70, 82, 99, 0.95) 62%, rgba(52, 63, 78, 0.96) 100%);
-  border-color: rgba(30, 40, 54, 0.5);
-  box-shadow: 0 2px 5px rgba(18, 26, 36, 0.3), inset 0 1px 0 rgba(240, 245, 251, 0.14);
+  background: linear-gradient(118deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0) 55%), #d9e0ec;
+  border-color: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 2px 5px rgba(160, 172, 195, 0.16);
 }
+.tmb-stack--file .tmb-stack-slab--back { background: linear-gradient(118deg, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0) 55%), #cfd8e6; }
+.tmb-stack--file .tmb-stack-slab--mid { background: linear-gradient(118deg, rgba(255, 255, 255, 0.38) 0%, rgba(255, 255, 255, 0) 55%), #d4dcea; }
 .tmb-stack--file .tmb-stack-slab::before {
-  background: linear-gradient(180deg, rgba(244, 247, 251, 0.88), rgba(214, 222, 232, 0.72));
-  box-shadow: inset 0 0 0 1px rgba(72, 86, 104, 0.2);
+  background: linear-gradient(180deg, #ffffff, rgba(246, 248, 251, 0.85));
+  box-shadow: inset 0 0 0 1px rgba(160, 172, 195, 0.14);
 }
-.tmb-stack--file:hover .tmb-stack-slab--top { box-shadow: 0 5px 10px rgba(18, 26, 36, 0.4), inset 0 1px 0 rgba(240, 245, 251, 0.2); }
+.tmb-stack--file:hover .tmb-stack-slab--top { box-shadow: 0 5px 10px rgba(160, 172, 195, 0.24); }
+.tmb-stack--file .tmb-stack-seal { background: #9fabcc; }
 .tmb-stack--file .tmb-stack-ribbon {
   left: 9px; top: 8px; width: 16px; height: 13px;
-  background: linear-gradient(180deg, rgba(250, 251, 253, 0.96), rgba(226, 232, 240, 0.92));
+  background: linear-gradient(180deg, #ffffff, rgba(244, 246, 250, 0.95));
   clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 84%, 0 100%);
-  border: 1px solid rgba(72, 86, 104, 0.35);
-  box-shadow: 0 1px 2px rgba(18, 26, 36, 0.28);
+  border: 1px solid rgba(178, 188, 210, 0.4);
+  box-shadow: 0 1px 2px rgba(160, 172, 195, 0.18);
 }
 
 /* ============================================================
-   4. 暗色孪生：一间屋子里的一盏灯——手写本偏暖褐，卷宗偏冷灰
+   4. 暗色孪生：一间夜里的书房——同样白底彩点，只是"白"翻成
+   深中性纸（暖炭/冷板岩），点缀色提亮一档保证小件在暗面可读
    ============================================================ */
 @media (prefers-color-scheme: dark) {
   .tmb-book, .tmb-shelf {
-    --tmb-paper-hi: #2e2719;
-    --tmb-paper-mid: #271f14;
-    --tmb-paper-lo: #201910;
-    --tmb-paper-edge: rgba(168, 146, 108, 0.34);
-    --tmb-ink: #e6dcc4;
-    --tmb-ink-soft: rgba(198, 178, 142, 0.9);
-    --tmb-rule: rgba(168, 146, 108, 0.28);
-    --tmb-cloth: #3b2c1e;
-    --tmb-cloth-lo: #241a11;
-    --tmb-ribbon: #7d2f29;
-    --tmb-file-paper-hi: #212836;
-    --tmb-file-paper-lo: #161c26;
-    --tmb-file-edge: rgba(148, 164, 184, 0.26);
-    --tmb-file-ink: #ccd6e2;
-    --tmb-file-rule: rgba(148, 164, 184, 0.24);
-    --tmb-seal: rgba(214, 96, 74, 0.86);
+    --tmb-paper-hi: #2b2724;
+    --tmb-paper-mid: #262220;
+    --tmb-paper-lo: #211d1c;
+    --tmb-paper-edge: rgba(168, 152, 146, 0.32);
+    --tmb-ink: #e8e0da;
+    --tmb-ink-soft: rgba(198, 180, 182, 0.9);
+    --tmb-rule: rgba(178, 156, 160, 0.26);
+    --tmb-cloth: #6b5c63;
+    --tmb-ribbon: #9c7484;
+    --tmb-tape-a: rgba(72, 62, 64, 0.85);
+    --tmb-tape-b: rgba(58, 50, 52, 0.9);
+    --tmb-file-paper-hi: #262a33;
+    --tmb-file-paper-lo: #1c1f27;
+    --tmb-file-edge: rgba(148, 158, 178, 0.26);
+    --tmb-file-ink: #d5dae4;
+    --tmb-file-rule: rgba(148, 158, 178, 0.22);
+    --tmb-file-cloth: #555d6e;
+    --tmb-seal: rgba(160, 172, 212, 0.8);
   }
   .tmb-shelf::after {
-    background: linear-gradient(180deg, rgba(112, 84, 50, 0.5) 0%, rgba(70, 52, 32, 0.42) 55%, rgba(30, 22, 12, 0.34) 100%);
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(198, 178, 142, 0.18);
+    background: linear-gradient(180deg, rgba(78, 68, 66, 0.7) 0%, rgba(58, 50, 49, 0.6) 55%, rgba(40, 34, 33, 0.55) 100%);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(220, 200, 196, 0.12);
   }
-  .tmb-spine { border-color: rgba(14, 10, 4, 0.5); box-shadow: 2px 4px 10px rgba(0, 0, 0, 0.45), inset -3px 0 6px rgba(0, 0, 0, 0.4), inset 3px 0 5px rgba(255, 246, 226, 0.10); }
-  .tmb-spine:hover { box-shadow: 2px 14px 20px rgba(0, 0, 0, 0.5), inset -3px 0 6px rgba(0, 0, 0, 0.4), inset 3px 0 5px rgba(255, 246, 226, 0.14); }
-  .tmb-spine-top { background: linear-gradient(180deg, rgba(96, 84, 64, 0.95), rgba(60, 52, 38, 0.85)); box-shadow: 0 1px 0 rgba(0, 0, 0, 0.4); }
-  .tmb-spine-no { background: rgba(64, 54, 38, 0.9); color: #ecdcb8; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.36); }
-  .tmb-spine--file { background-color: #46505e; border-color: rgba(4, 8, 14, 0.55); }
-  .tmb-spine--file .tmb-spine-top { background: linear-gradient(180deg, rgba(84, 96, 112, 0.95), rgba(50, 60, 74, 0.85)); }
-  .tmb-spine--file .tmb-spine-no { background: rgba(40, 50, 62, 0.92); color: #d9e4f0; }
-  .tmb-book-title { background: rgba(62, 52, 34, 0.92); color: #ead9b6; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.34), 0 1px 3px rgba(0, 0, 0, 0.4); }
-  .tmb-book-title--file { background: rgba(38, 48, 60, 0.94); color: #cfdbe8; }
-  .tmb-page { box-shadow: inset 14px 0 16px -14px rgba(0, 0, 0, 0.6), inset -1px 0 0 rgba(255, 246, 226, 0.06), inset 0 1px 0 rgba(255, 246, 226, 0.08), 0 9px 24px rgba(0, 0, 0, 0.45), 0 2px 0 rgba(0, 0, 0, 0.3); }
-  .tmb-page--file { box-shadow: inset 16px 0 18px -16px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 9px 22px rgba(0, 0, 0, 0.44), 0 2px 0 rgba(0, 0, 0, 0.3); }
-  .tmb-entry { border-color: rgba(168, 146, 108, 0.24); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 246, 226, 0.05); }
-  .tmb-entry::before, .tmb-entry::after { background: rgba(198, 178, 142, 0.16); box-shadow: inset 0 0 0 1px rgba(255, 246, 226, 0.1), 0 1px 2px rgba(0, 0, 0, 0.3); }
-  .tmb-page--file .tmb-entry { border-color: rgba(148, 164, 184, 0.18); }
-  .tmb-page--file .tmb-dossier { border-top-color: rgba(148, 164, 184, 0.4); border-bottom-color: rgba(148, 164, 184, 0.22); background: rgba(0, 0, 0, 0.2); }
-  .tmb-dossier-item, .tmb-page--file .tmb-head-kicker, .tmb-page--file .tmb-head-meta, .tmb-page--file .tmb-head-trend { color: #c3cfdd; }
-  .tmb-dossier-value, .tmb-file-title, .tmb-page--file .tmb-head-no { color: #e6edf5; }
-  .tmb-text--file { color: #ccd6e2; text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45); }
-  .tmb-seal { background-image: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0) 62%); }
-  .tmb-foot { background-image: linear-gradient(180deg, rgba(44, 36, 24, 0.96) 0%, rgba(34, 28, 18, 0.99) 100%); border-top-color: rgba(168, 146, 108, 0.32); box-shadow: 0 -5px 14px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 246, 226, 0.06); }
-  .tmb-btn { border-color: rgba(198, 178, 142, 0.32); background: rgba(58, 48, 32, 0.86); color: #e6dcc4; }
-  .tmb-btn:hover:not(:disabled) { background: rgba(76, 62, 42, 0.95); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.42); }
-  .tmb-ind, .tmb-leaf-ind { color: rgba(214, 198, 166, 0.92); }
-  .tmb-page--file .tmb-foot { background-image: linear-gradient(180deg, rgba(30, 37, 49, 0.96) 0%, rgba(22, 28, 38, 0.99) 100%); border-top-color: rgba(148, 164, 184, 0.24); }
-  .tmb-page--file .tmb-btn { border-color: rgba(148, 164, 184, 0.26); background: rgba(36, 45, 58, 0.9); color: #d3dde8; }
-  .tmb-page--file .tmb-btn:hover:not(:disabled) { background: rgba(48, 60, 76, 0.96); }
-  .tmb-page--file .tmb-ind, .tmb-page--file .tmb-leaf-ind { color: rgba(205, 216, 228, 0.92); }
-  .tmb-meter-track { background: rgba(148, 164, 184, 0.2); box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.4); }
-  .tmb-meter-fill { background: linear-gradient(90deg, rgba(150, 168, 190, 0.9), rgba(110, 128, 152, 0.95)); }
-  .tmb-meter-row { color: rgba(195, 207, 221, 0.95); }
-  .tmb-meter-due { color: #e0a291; border-color: rgba(224, 162, 145, 0.55); background: rgba(60, 34, 28, 0.5); }
-  .tmb-evidence { border-top-color: rgba(148, 164, 184, 0.34); border-bottom-color: rgba(148, 164, 184, 0.18); background: rgba(0, 0, 0, 0.18); }
-  .tmb-evidence-title { color: rgba(195, 207, 221, 0.9); }
-  .tmb-evidence-line, .tmb-quote { color: rgba(205, 216, 228, 0.94); }
-  .tmb-quote-kind { border-color: rgba(148, 164, 184, 0.34); color: rgba(195, 207, 221, 0.9); }
-  .tmb-stack--file .tmb-stack-slab { background: linear-gradient(180deg, rgba(64, 74, 90, 0.95) 0%, rgba(46, 56, 70, 0.96) 62%, rgba(34, 43, 56, 0.98) 100%); border-color: rgba(8, 12, 18, 0.6); }
-  .tmb-stack--file .tmb-stack-slab::before { background: linear-gradient(180deg, rgba(198, 210, 224, 0.5), rgba(160, 174, 192, 0.4)); }
-  .tmb-stack--file .tmb-stack-ribbon { background: linear-gradient(180deg, rgba(222, 230, 240, 0.92), rgba(188, 199, 214, 0.88)); border-color: rgba(8, 12, 18, 0.5); }
-  .tmb-text--lead::first-letter { color: rgba(214, 184, 128, 0.95); }
+  .tmb-spine { border-color: rgba(255, 255, 255, 0.16); box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+  .tmb-spine:hover { box-shadow: 0 14px 22px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
+  .tmb-spine-top { background: linear-gradient(180deg, rgba(112, 100, 96, 0.95), rgba(72, 64, 60, 0.85)); box-shadow: 0 1px 0 rgba(0, 0, 0, 0.4); }
+  .tmb-spine-no { background: rgba(62, 55, 54, 0.95); color: #dcc2ca; box-shadow: inset 0 0 0 1px rgba(196, 160, 172, 0.28); }
+  .tmb-spine-date, .tmb-spine-foot { color: rgba(244, 236, 232, 0.92); text-shadow: 0 1px 1px rgba(28, 22, 22, 0.6); }
+  .tmb-spine-flag { background: rgba(118, 98, 68, 0.95); color: #efe0c8; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); }
+  .tmb-spine--file { background-color: var(--tmb-file-cloth); border-color: rgba(255, 255, 255, 0.14); box-shadow: 0 4px 10px rgba(0, 0, 0, 0.42), inset 0 0 0 1px rgba(255, 255, 255, 0.07); }
+  .tmb-spine--file .tmb-spine-top { background: linear-gradient(180deg, rgba(92, 98, 112, 0.95), rgba(54, 58, 68, 0.85)); }
+  .tmb-spine--file .tmb-spine-no { background: rgba(40, 44, 54, 0.95); color: #ccd2e2; box-shadow: inset 0 0 0 1px rgba(158, 168, 196, 0.28); }
+  .tmb-spine--file .tmb-spine-date, .tmb-spine--file .tmb-spine-foot { color: rgba(236, 240, 248, 0.9); text-shadow: 0 1px 1px rgba(16, 18, 26, 0.6); }
+  .tmb-book-strip { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12), -1px 0 0 rgba(0, 0, 0, 0.25); }
+  .tmb-book-strip--file { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1), -1px 0 0 rgba(0, 0, 0, 0.28); }
+  .tmb-book-title { background: rgba(52, 45, 44, 0.95); color: #e2ccd4; box-shadow: inset 0 0 0 1px rgba(188, 156, 168, 0.3), 0 2px 5px rgba(0, 0, 0, 0.4); }
+  .tmb-book-title--file { background: rgba(38, 42, 52, 0.96); color: #ccd2e2; box-shadow: inset 0 0 0 1px rgba(150, 160, 186, 0.3), 0 2px 5px rgba(0, 0, 0, 0.4); }
+  .tmb-page {
+    box-shadow:
+      inset 12px 0 14px -12px rgba(0, 0, 0, 0.55),
+      inset -1px 0 0 rgba(255, 246, 226, 0.05),
+      inset 0 1px 0 rgba(255, 246, 226, 0.07),
+      0 10px 24px rgba(0, 0, 0, 0.45),
+      0 2px 0 rgba(0, 0, 0, 0.3);
+  }
+  .tmb-page--file { box-shadow: inset 14px 0 16px -14px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 10px 22px rgba(0, 0, 0, 0.44), 0 2px 0 rgba(0, 0, 0, 0.3); }
+  .tmb-entry { border-color: rgba(178, 156, 160, 0.24); background-image: linear-gradient(172deg, rgba(58, 52, 50, 0.5) 0%, rgba(46, 41, 40, 0.35) 100%); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 246, 226, 0.05); }
+  .tmb-entry::before, .tmb-entry::after { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 1px 2px rgba(0, 0, 0, 0.3); }
+  .tmb-page--file .tmb-entry { border-color: rgba(148, 158, 178, 0.18); background-image: linear-gradient(172deg, rgba(46, 50, 60, 0.5) 0%, rgba(38, 41, 50, 0.35) 100%); }
+  .tmb-page--file .tmb-entry::before, .tmb-page--file .tmb-entry::after { background: linear-gradient(180deg, rgba(58, 62, 74, 0.9), rgba(44, 48, 58, 0.95)); }
+  .tmb-page--file .tmb-dossier { border-top-color: rgba(148, 158, 178, 0.4); border-bottom-color: rgba(148, 158, 178, 0.22); background: rgba(0, 0, 0, 0.2); }
+  .tmb-dossier-item, .tmb-page--file .tmb-head-kicker, .tmb-page--file .tmb-head-meta, .tmb-page--file .tmb-head-trend { color: #bcc4d6; }
+  .tmb-dossier-value, .tmb-file-title, .tmb-page--file .tmb-head-no { color: #d9dfec; }
+  .tmb-text--file { color: #d5dae4; }
+  .tmb-seal { background-image: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0) 62%); }
+  .tmb-foot { background-image: linear-gradient(180deg, rgba(42, 38, 36, 0.97) 0%, rgba(34, 30, 29, 0.99) 100%); border-top-color: rgba(178, 156, 160, 0.28); box-shadow: 0 -5px 14px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 246, 226, 0.05); }
+  .tmb-btn { border-color: rgba(198, 172, 176, 0.3); background: rgba(56, 50, 49, 0.9); color: #e8e0da; }
+  .tmb-btn:hover:not(:disabled) { background: rgba(72, 64, 62, 0.95); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.42); }
+  .tmb-ind, .tmb-leaf-ind { color: rgba(216, 200, 200, 0.9); }
+  .tmb-page--file .tmb-foot { background-image: linear-gradient(180deg, rgba(33, 37, 46, 0.97) 0%, rgba(25, 28, 35, 0.99) 100%); border-top-color: rgba(148, 158, 178, 0.22); }
+  .tmb-page--file .tmb-btn { border-color: rgba(148, 158, 178, 0.26); background: rgba(40, 44, 54, 0.92); color: #d5dae4; }
+  .tmb-page--file .tmb-btn:hover:not(:disabled) { background: rgba(52, 57, 70, 0.96); }
+  .tmb-page--file .tmb-ind, .tmb-page--file .tmb-leaf-ind { color: rgba(206, 212, 226, 0.9); }
+  .tmb-meter-track { background: rgba(148, 158, 178, 0.18); box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.4); }
+  .tmb-meter-fill { background: linear-gradient(90deg, #7c88a8, #66708c); }
+  .tmb-meter-row { color: rgba(194, 200, 216, 0.95); }
+  .tmb-meter-due { color: #dcb2be; border-color: rgba(196, 150, 168, 0.45); background: rgba(58, 44, 48, 0.6); }
+  .tmb-evidence { border-top-color: rgba(148, 158, 178, 0.3); border-bottom-color: rgba(148, 158, 178, 0.16); background: rgba(0, 0, 0, 0.18); }
+  .tmb-evidence-title { color: rgba(194, 200, 216, 0.9); }
+  .tmb-evidence-line, .tmb-quote { color: rgba(202, 208, 224, 0.94); }
+  .tmb-quote-kind { border-color: rgba(148, 158, 178, 0.3); color: rgba(194, 200, 216, 0.9); }
+  .tmb-text--lead::first-letter { color: rgba(220, 172, 190, 0.9); }
   .tmb-page-body::before { background: linear-gradient(90deg, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.34)); }
-  .tmb-stack-slab { background: linear-gradient(180deg, rgba(76, 56, 38, 0.95) 0%, rgba(52, 37, 24, 0.96) 62%, rgba(36, 25, 15, 0.98) 100%); border-color: rgba(14, 10, 4, 0.55); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 246, 226, 0.08); }
-  .tmb-stack-slab::before { background: linear-gradient(180deg, rgba(214, 198, 166, 0.5), rgba(180, 164, 134, 0.4)); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.3); }
-  .tmb-stack-seal { color: #f2e8d5; }
+  .tmb-stack-slab { background: linear-gradient(118deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0) 55%), #5c5055; border-color: rgba(255, 255, 255, 0.14); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45); }
+  .tmb-stack-slab--back { background: linear-gradient(118deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0) 55%), #52474c; }
+  .tmb-stack-slab--mid { background: linear-gradient(118deg, rgba(255, 255, 255, 0.11) 0%, rgba(255, 255, 255, 0) 55%), #574b50; }
+  .tmb-stack-slab::before { background: linear-gradient(180deg, rgba(214, 198, 196, 0.45), rgba(170, 152, 152, 0.38)); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.3); }
+  .tmb-stack-seal { background: #83656e; color: #f2e8e8; }
+  .tmb-stack-ribbon { background: linear-gradient(180deg, var(--tmb-ribbon), #6e525c); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35); }
+  .tmb-stack--file .tmb-stack-slab { background: linear-gradient(118deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0) 55%), #4a4f5c; border-color: rgba(255, 255, 255, 0.12); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.46); }
+  .tmb-stack--file .tmb-stack-slab--back { background: linear-gradient(118deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0) 55%), #414652; }
+  .tmb-stack--file .tmb-stack-slab--mid { background: linear-gradient(118deg, rgba(255, 255, 255, 0.11) 0%, rgba(255, 255, 255, 0) 55%), #454a58; }
+  .tmb-stack--file .tmb-stack-slab::before { background: linear-gradient(180deg, rgba(196, 202, 214, 0.45), rgba(150, 156, 170, 0.38)); }
+  .tmb-stack--file .tmb-stack-seal { background: #5d6478; }
+  .tmb-stack--file .tmb-stack-ribbon { background: linear-gradient(180deg, rgba(216, 222, 234, 0.9), rgba(168, 174, 190, 0.85)); border-color: rgba(20, 24, 34, 0.6); }
 }
 
 /* ============================================================

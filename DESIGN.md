@@ -265,7 +265,9 @@ CHANGELOG，契约性变化改本文件正文——两边各司其职，不再�
 - UI surfaces: `[[plugin.ui.panel]]` hosted-tsx `ui/panel.tsx`（state:read, config:read, action:call）。
   面板为多文件模块结构：`panel.tsx` 入口组装 + `types.ts` / `utils.ts` / `styles.ts` 共享层
   （styles.ts = 面板玻璃层），1.3.0 起另有 `styles_book.ts`（日记两本的"桌面物件层"：
-  纸/墨/装订/木架调色板，与玻璃层互不相通，第二个 `<style>` 并列注入）；
+  1.3.1c 起为**扁平绘本·白底彩点**——大面积一律近白（个人日记一丝米暖、
+  我的日记同宿主冷白），颜色只留小件：书脊心情色阶/丝带/题签/落款印/进度条；
+  纸/墨/装订/架子的调色板与玻璃层互不相通，第二个 `<style>` 并列注入）；
   页签清单与内容在 panel.tsx（`tabs` 数组 + 就地渲染的 cycle/mood/settings 三页）：
   顶级入口组件 `overview.tsx` 总览 / `calendar.tsx` 日历 / `diary.tsx` 三本日记 /
   `moment.tsx` 时光 / `features.tsx`+`capintro.tsx` 功能与页内介绍 /
@@ -277,7 +279,7 @@ CHANGELOG，契约性变化改本文件正文——两边各司其职，不再�
   （`splitSections`），存储与注入文本不得改——该词表与 `core/journal.py` 的 prompt 共用；
   ② 阅读视图的 sticky 页脚依赖 `.tm-content` 是唯一滚动容器，**纸页祖先链一律不得加
   `overflow`/`contain`**（加了就退化成普通块），丝带/贴角等外扩一律 clip-path/负外边距自处理；
-  ③ 书本物件（装订孔/丝带/朱印/书脊皮）全用 CSS 画，不引入 SVG；
+  ③ 书本物件（缝线/丝带/落款印/书脊皮）全用 CSS 画，不引入 SVG；
   受 hosted-tsx 约束：仅声明式单绑定导出、无循环依赖、`export const` 类型注解不能含顶层逗号
   （泛型用类型别名绕开），**不支持 SVG**（运行时 mount 用 createElement 而非 createElementNS，
   图形一律用 CSS/div 实现，如 ring.tsx 的月相盘），提交前跑 `npm run check-hosted-tsx -- plugin/plugins/forever_companion`

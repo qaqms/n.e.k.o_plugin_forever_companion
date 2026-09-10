@@ -14,7 +14,7 @@ import { BOOK_STYLES } from "./styles_book"
 import type {
   DiaryItem, JournalPage, JournalPageHeader, JournalArchiveBrief, ReviewArchiveBrief, ReviewBrief, ReviewEntry, ReviewProgress, TFunc,
 } from "./types"
-import { fragmentKindKey, journalTrendKey, moodDotColor, toneLabelKey } from "./utils"
+import { fragmentKindKey, journalTrendKey, toneLabelKey } from "./utils"
 
 export function DiaryPane(props: {
   t: TFunc
@@ -546,7 +546,8 @@ function DiaryRow(props: { key?: string; t: TFunc; item: DiaryItem; onDelete: (t
 }
 
 // 个人日记书架：一排"站着的书"——每页一根书脊（顶端页码方块 + 竖排起始日期 +
-// 书根段数），书脊皮色 = 那段时间的心情均值（与全站心情圆点同口径 moodDotColor）；
+// 书根段数），书脊皮色 = 那段时间的心情均值（shelfInk：本书粉紫系内的暖冷色阶，
+// 与全站心情圆点同方向不同色相——架上翻开的是一本书，外内不能两个色系）；
 // 悬停整本抽出，点一根＝抽出来翻开。旧版迁移页在脊上贴一枚角签
 function JournalShelf(props: {
   t: TFunc
@@ -949,9 +950,17 @@ function splitParas(text?: string): string[] {
   return out
 }
 
-// 书脊皮色：与该页心情走向圆点同一函数（近零自动落灰 = 这本没有明显心情）
+// 书脊皮色（1.3.1c 白底彩点配方）：书系内低饱和色阶——开心落灰玫（与全站
+// 心情圆点正端同明度的柔和版）、低落落雾紫、近零落暖灰，|mood| 线性推进，
+// 暖=好/冷=坏的语义方向不变；色相饱和度都收进"白底面板里的小彩点"预算，
+// 不再拿大彩块撞宿主的近白玻璃层
 function shelfInk(mood?: number | null): string {
-  return mood === null || mood === undefined ? "rgba(148,163,184,.55)" : moodDotColor(mood)
+  if (mood === null || mood === undefined) return "rgb(213, 204, 209)"
+  const v = Math.max(-1, Math.min(1, mood))
+  const to = v < 0 ? [157, 150, 189] : [218, 154, 180]
+  const ratio = Math.abs(v)
+  const mix = (zero: number, target: number) => Math.round(zero + (target - zero) * ratio)
+  return `rgb(${mix(213, to[0])}, ${mix(204, to[1])}, ${mix(209, to[2])})`
 }
 
 // 书脊上的竖排日期：只用起始日（一根脊装不下区间），完整区间在 title 里
