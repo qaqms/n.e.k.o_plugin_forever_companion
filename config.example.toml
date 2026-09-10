@@ -8,9 +8,10 @@
 # 多角色作用域（0.5.0 起）：周期参数（enabled/anchor_date/auto_derive/
 # cycle_length/period_length/ovulation_day/ovulation_window/advance_days）
 # 是每个角色（lanlan）独立的——本文件中的值只是"新角色的默认值"，面板里
-# 修改周期参数只作用于当前查看的角色；其余设置（inject_*、phase_openers、
-# activity_context、timezone、forbidden_words、[tide.phases.*]、[mood]、
-# [fragments]、[journal]）为全局共享，所有角色共用一份。
+# 修改周期参数只作用于当前查看的角色；其余设置（inject_*、trigger_keywords、
+# phase_openers、activity_context、timezone、forbidden_words、debug_mode、
+# [tide.phases.*]、[mood]、[fragments]、[journal]、[review]、[stats]、
+# [capabilities]、[emotion_sense]）为全局共享，所有角色共用一份。
 
 [tide]
 enabled = false              # 总开关：默认关闭，安装后请在面板手动开启（知情同意）
@@ -22,10 +23,13 @@ ovulation_day = 14           # 活跃日（周期第几天），仅 auto_derive 
 ovulation_window = 3         # 活跃窗口半径（活跃日前后各 N 天），范围 [1, 5]
 inject_mode = "interval_n"   # every_user_message | interval_n | on_trigger | off
 inject_interval_n = 3        # interval_n 模式下每 N 条用户消息注入一次
+trigger_keywords = ["今天感觉怎么样", "状态", "累不累", "心情"]  # on_trigger 模式下的触发关键词
+advance_days = 0             # 面板「快进」按钮累加的偏移天数；由面板写入，不建议手改
 phase_openers = true         # 进入新阶段时让她主动开口一次
 activity_context = true      # 活动感知：把"用户在不在/在专注什么"纳入轻语
 timezone = "auto"            # auto = 系统本地时区；也可填 IANA 名称如 Asia/Shanghai
-forbidden_words = ["月经", "经期", "生理期", "排卵期", "激素"]
+debug_mode = false           # 开启后注册一组 debug_* 调试入口（把机制快进到秒级可验证）；默认关闭、零痕迹
+forbidden_words = ["月经", "经期", "生理期", "排卵期", "激素"]  # 示例只列 5 项，出厂默认表更长（可自由增删）
 
 # 每个阶段可配置：主体感受（prompt）、早/午/晚微调（time_*）、情绪倾向（mood_note）
 [tide.phases.menstrual]
@@ -76,3 +80,27 @@ days_threshold = 7                 # 成文门槛：距统计起点满 N 天且�
 # （false=温和模式：工具在位、调用时才拒；true=对所有角色都不生效的能力
 # 真正对模型隐藏工具，恢复生效自动重挂）。全局一份。
 hide_disabled_tools = false
+
+[stats]
+# 相处统计（1.1.0）：按天聚合的长期累计——徐章墙/热力图/月报的唯一数据源。
+# 纯本地统计：零模型开销、无总开关（不收集就没有意义），成文永不清零；
+# 只为用户可视化服务，除纪念日注入外绝不进入她的上下文。
+anniversary_inject = true        # 今天恰好是相伴第 30/60/…/365/… 天时递一条 read 轻语（说不说由她决定）；false 关闭
+
+[emotion_sense]
+# 语气感知（0.6.x）：在她回复完成后异步分析这轮互动的情绪（零延迟，不挡生成链路）。
+# 两种模式：无情绪动作时的"筛选"（情绪浓度高才提醒她记录心情，闲聊跳过）；
+# 情绪动作生效中的"校正"（语气趋势转暖/转冷时提醒她把面板状态切回）。只提醒，不自动切状态。
+enabled = true
+check_rate = 1.0                 # 筛选模式抽查频率：1.0=每轮 / 0.5=一半 / 0.25=偶尔 / 0=关闭筛选
+                                 #（校正模式不受此限：情绪生效期间每轮都分析，避免恰好漏掉关键回复）
+min_interval_sec = 60            # 相邻两次分析的最小间隔（秒）：连珠炮对话防刷屏
+window_turns = 2                 # 校正模式的语气趋势窗口（轮）：攒满 N 轮按多数派判定一次
+                                 #（2 = 连续两轮同向即提醒，响应更快；3 = 更稳但偏慢）
+confidence_threshold = 0.6       # 筛选模式的置信度阈值：低于此不递提醒
+phase_sensitivity_enabled = true  # 阶段灵敏度：潮汐期/回升期/活跃期筛选更灵敏（阈值下移）；平静期不变
+phase_sensitivity = 0.15         # 灵敏度强度（阈值下移量）：0.1 温和 / 0.15 适中 / 0.25 敏感；0 = 等同关闭
+user_affect_weight = 0.25        # 用户侧情绪传导权重：用户消息单独分析一次，按此系数缩放步长喂入连续心情
+                                 #（她的回复权重 1.0；互动氛围同向传导）；0 = 关闭
+slot = ""                        # 语气分析模型槽位：留空 = 跟随宿主情感模型槽（走 /api/emotion/analysis）；
+                                 # 选其他文本槽位时读宿主本地 core_config.json 直连其端点（数据出域，介意可关）

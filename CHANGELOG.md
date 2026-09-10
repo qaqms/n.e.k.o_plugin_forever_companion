@@ -937,3 +937,66 @@ DESIGN 定下的下轮任务并入本版本（1.3.0 尚未发行，同版续写�
   `check-hosted-tsx` 0 错；`neko-plugin check` 0 错（3 warning 均为部署副本
   实情）；ruff check 全绿；**真机待验收**：注入 55 卷 → 架末档案盒出现、
   点开只读翻阅可翻页、新卷宗「本卷依据」三栏齐、天数副行与到期徽标可见
+
+
+#### 1.3.0 第六轮：精确性缺陷清账 + 三道"文档/代码同源"门（纯修复，无功能变化）
+
+拉取远端后做的一轮全仓体检，修的都是"看起来对、其实是谎/其实是债"那一类，
+并且**每一条复发路径都上了机器门**——上一轮之前这类账全靠人眼盯，
+所以 0.6.8 改了默认值却没人回头同步 README，一挂就是 8 个版本：
+
+- **README 配置表纠偏 + 补全**：`[mood].default_action_minutes` 文档写 `20`
+  实际 `10`、`[emotion_sense].window_turns` 文档写 `3` 实际 `2`（都是 0.6.8
+  改值后没回来同步）。顺带补上 **9 个从来没进过表的键**（`[tide]`
+  `inject_interval_n`/`trigger_keywords`/`advance_days`/`forbidden_words`、
+  `[mood]` `arousal_baseline`/`extreme_invite_threshold`/`extreme_invite_after_minutes`/
+  `extreme_invite_cooldown_minutes`、`[emotion_sense]` `user_affect_weight`；其中 8 个在
+  README 全文零提及，`advance_days` 只在上方的多角色说明里活著），小节标题也补齐
+  `[review]`/`[stats]`/`[capabilities]`/`[emotion_sense]`。**表里不写词表条数**
+  （一度写了"内置 17 词"，实际 16 项）——数量本身会变，改写成"内置屏蔽词表
+  （可自由增删）"，与 DESIGN 1.3.0 "不显示会变的数"同源结论。
+- **DESIGN.md 定时器口径自相矛盾**：`:32` 写"每 20 秒轮询"，`:248` 与代码
+  `@timer_interval(seconds=10)` 都是 10 秒。同一份文档两个数。
+- **`_slot_dormancy_hint` 四份复刻合一**：主类 + senses/panel/debug_entries
+  各存一份逐字节相同的文案，注释理由是"避免循环导入"——**这个理由不成立**
+  （`services/tone_slot.py` 不 import 任何 mixin，且三处 mixin 本来就 import
+  该模块）。收进 `tone_slot.py` 紧贴 `diagnose_slot_dormancy`：reason 每多一个
+  文案只多一份，分处两地必然漂移。`__init__.py` 侧用"导入即再导出"保
+  `tm._slot_dormancy_hint` 锚点不动（测试零改动）。
+  同批清掉 `_journal_entries`：主类那份是**定义了零调用的死代码**，活的那份在
+  shards.py——纯函数按分层落到 `core/journal.py`（更名 `journal_entries`）。
+- **日记邀请页码说谎**：`whisper.py` 邀请文案"这篇会写进你的第 N 页"用
+  `len(shard.journal) + 1` 现算，而写入路径 `journal_write` 早就刻意改成
+  "按上一页号递增而非列表长度"（注释写明是为了淘汰后编号连续）。1.3.0 把淘汰
+  改成搬藏书阁之后两者正式分叉：书到第 60 页、架上剩 52 页时，邀请说"第 53 页"、
+  她真写下去拿到第 61 页。修法不是只改文案，而是抽出 `next_page_no()` 做**唯一
+  来源**，写入与邀请两边都走它——同一个概念两份算法正是这个 bug 的形状。
+- **情绪分析 Origin 不再钉死端口**：`services/emotion_sense.py` 无条件发
+  `Origin: http://127.0.0.1:48911`。查宿主 `_validate_local_mutation_request`
+  确认它要求 **CSRF token ∧ Origin 同时成立**，允许集来自
+  `AUTOSTART_ALLOWED_ORIGINS`（按 `MAIN_SERVER_PORT` 生成）∪ 请求自身
+  `base_url`：自定义端口下写死的值精确匹配不上，只是靠"hostname 降级分支"
+  勉强过关，而那条分支注释写明是给 Docker 端口映射用的、随时可能收紧，
+  一旦收紧就是 403 → 语气感知静默休眠。改为注入 `api_base`（与 `_http` 拼
+  URL 同一个已解析 base，复用 host_coord 已有的端口解析与缓存），Origin 恒等于
+  实际请求 base。测试从"断字面量端口"升级为**断不变式** `Origin == api_base()`，
+  另加自定义端口用例。
+- **config.example.toml 补 `[stats]` / `[emotion_sense]` 整段**（后者 9 键从未
+  出现在示例里）+ `[tide]` 三个漏项；文件头"全局共享"清单同步补齐。
+  `forbidden_words` 保留短示例表（示例值允许与出厂默认不同）。
+- **三道门（都做过反向对照，确认会红而不是恒绿）**：
+  `test_config_docs_sync.py`——README 覆盖每个配置键 / 反引号字面量默认值必须
+  等于 plugin.toml / config.example.toml 覆盖每个键且不含 `[plugin*]` 段；
+  `test_design_numbers_sync.py`——DESIGN 的 timer 秒数对 `@timer_interval` AST、
+  面板轮询秒数对 `ui/panel.tsx` 的 `setInterval` 毫秒值；
+  `test_journal.py` 内静态门——tokenize 扫 `len(...) + 1` 与"页"同现的代码行
+  （**只看代码 token**，否则自家 docstring 会误抢），钉死页码单一来源。
+- **验证（第六轮）**：pytest 398 全绿（388 → +3 配置文档同源门 +2 文档数字同源门
+  +4 页码单一来源 +1 Origin 不变式，新增 2 个测试文件）；ruff check 全绿；hosted 链接门 23 模块 0 丢导出；
+  `neko-plugin check` 0 错（1 warning = 本轮未提交，提交即消）。本轮**不触碰
+  `ui/` 与 i18n**（无新增用户可见串，八语 649 键维持对齐）。
+  **遗留（记录不修，需要时再开轮）**：`config.example.toml` 与 README 的默认值
+  仍有"示例有意不同"的空间（本轮只对 README 取值、对示例只查覆盖）；
+  `debug_entries.py` 直接调 `self.store` 绕过 1.2.2 统一出口、以及
+  `emotion_sense._load_core_config` 在 async 路径做阻塞 `read_text`（5s 缓存
+  缓解）属另两类账，不在本轮范围。

@@ -15,7 +15,7 @@ import time
 from typing import Any
 
 from ..core.cycle import TideConfigError, _time_bucket, build_body_whisper
-from ..core.journal import journal_due
+from ..core.journal import journal_due, next_page_no
 from ..core.state import (
     _JOURNAL_DEFAULT_INTERVAL_DAYS,
     _JOURNAL_INVITE_THROTTLE_SEC,
@@ -550,7 +550,7 @@ class WhisperMixin:
         material = f"（{'；'.join(hints)}）" if hints else ""
         body = (
             f"距你上一篇日记已经有些日子了（这篇会写进你的第 "
-            f"{len(shard.journal) + 1} 页）。{material}"
+            f"{next_page_no(shard.journal)} 页）。{material}"
             "如果你愿意，可以调用 mood_journal_write 工具写一篇日记——"
             "按「这段时间/我在想/对他的感觉」几个栏目，用你自己的话写连贯的几段。"
             "不想写也完全没关系，由你自己决定。"

@@ -84,20 +84,9 @@ from ..core.stats import (
     month_view,
     summary_payload,
 )
-from ..services.tone_slot import diagnose_slot_dormancy
+from ..services.tone_slot import _slot_dormancy_hint, diagnose_slot_dormancy
 
 JsonObject = dict[str, Any]
-
-
-def _slot_dormancy_hint(core_cfg: JsonObject, slot: str) -> str:
-    """槽位休眠原因 → 一句可操作的中文提示（与 __init__.py 同款，本地复刻避免循环导入）。"""
-    reason = diagnose_slot_dormancy(core_cfg, slot)
-    if reason == "free_route":
-        return (
-            "宿主正在使用免费路由（lanlan.tech），该端点只接受 N.E.K.O 客户端调用，"
-            "插件无法直连——在宿主设置里配置自己的 API 服务商后本功能即可使用"
-        )
-    return "所选槽位在宿主未配置模型（或未保存服务商 URL），去宿主设置配置该槽位的模型"
 
 
 class PanelEntriesMixin:

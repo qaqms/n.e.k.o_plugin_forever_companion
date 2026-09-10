@@ -66,6 +66,11 @@ class EmotionSenseService:
         self,
         *,
         http: Callable[..., Awaitable[Any]],
+        # 宿主回环 origin：与 http 拼 URL 用的是同一个 base。宿主 CSRF 守卫
+        # （_validate_local_mutation_request）要求 token ∧ Origin 同时成立，
+        # 写死 48911 在自定义 MAIN_SERVER_PORT 下只能靠它的 hostname 降级分支
+        # 过关（那是为 Docker 端口映射写的），一旦收紧就 403 静默休眠
+        api_base: Callable[[], str],
         push: Callable[..., Any],
         cfg_getter: Callable[[], JsonObject],
         mood_enabled: Callable[..., bool],
@@ -94,6 +99,7 @@ class EmotionSenseService:
         cap_enabled: Callable[..., bool] | None = None,
     ) -> None:
         self._http = http
+        self._api_base = api_base
         self._push = push
         self._cfg_getter = cfg_getter
         self._mood_enabled = mood_enabled
@@ -202,7 +208,9 @@ class EmotionSenseService:
             return None
         # 不带 lanlan_name：避免宿主把分析结果推给前端更新头像表情（副作用）
         body: JsonObject = {"text": text}
-        headers = {"X-CSRF-Token": token, "Origin": "http://127.0.0.1:48911"}
+        # Origin 跟着实际请求 base 走（不写死端口）：自定义 MAIN_SERVER_PORT 下仍与
+        # 宿主 allowed_origins 里的 request.base_url 逐项相等，不依赖 hostname 降级分支
+        headers = {"X-CSRF-Token": token, "Origin": self._api_base()}
         payload = await self._http("POST", "/api/emotion/analysis", body, headers=headers)
         if not isinstance(payload, dict):
             # 403 等失败：token 可能失效，清缓存下趟重取

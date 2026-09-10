@@ -29,7 +29,7 @@
   - callable entries：周期设置/查询/快进/重置、情绪状态查询与解除、日记查看与清空、
     碎片删除、个人日记翻阅、开关
   - LLM tools：12 个情绪与记录工具，模型在对话中自主调用
-  - timer：每 20 秒轮询用户消息总线 + 检查情绪动作到期自动解除
+  - timer：每 10 秒轮询用户消息总线 + 检查情绪动作到期自动解除
   - message injection：`push_message(visibility=[], ai_behavior="read")` 把身体感受送入上下文，
     不触发独立回复、用户不可见
   - UI：Hosted TSX panel（周期总览、阶段标签、锚点/快进/重置/开关快捷操作、情绪状态、日记）

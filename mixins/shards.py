@@ -22,7 +22,7 @@ from ..core.cycle import (
     parse_anchor_date,
     randomized_default_anchor,
 )
-from ..core.journal import migrate_weekly_to_pages
+from ..core.journal import journal_entries, migrate_weekly_to_pages
 from ..core.onboarding import norm_guide_record
 from ..core.state import (
     _CURRENT_LANLAN_CACHE_TTL,
@@ -68,18 +68,6 @@ JsonObject = dict[str, Any]
 _STORE_READY_ATTEMPTS = 3
 _STORE_READY_RETRY_S = 0.2
 _STORE_READY_PROBE_TIMEOUT_S = 2.0
-
-
-def _journal_entries(journal: list[JsonObject]) -> list[JsonObject]:
-    """个人日记页列表 → 段落条目平铺（迁移/回填时取时间戳用；与 __init__.py 同款复刻）。"""
-    out: list[JsonObject] = []
-    for page in journal:
-        if not isinstance(page, dict):
-            continue
-        for item in page.get("entries") or []:
-            if isinstance(item, dict):
-                out.append(item)
-    return out
 
 
 class ShardsMixin:
@@ -174,7 +162,7 @@ class ShardsMixin:
         if isinstance(stats_store_res, Ok) and isinstance(stats_store_res.value, dict):
             shard.stats = dict(stats_store_res.value)
         if not shard.stats.get("backfilled"):
-            for source in (shard.diary, _journal_entries(shard.journal), [
+            for source in (shard.diary, journal_entries(shard.journal), [
                 {"ts": item.get("ts"), "source": "review"}
                 for item in shard.review
             ]):
@@ -190,7 +178,7 @@ class ShardsMixin:
                 earliest = min(
                     (
                         _parse_iso_ts(item.get("ts"))
-                        for source in (shard.diary, _journal_entries(shard.journal), shard.review)
+                        for source in (shard.diary, journal_entries(shard.journal), shard.review)
                         for item in source
                         if _parse_iso_ts(item.get("ts") if isinstance(item, dict) else None) is not None
                     ),

@@ -6,7 +6,9 @@
 """
 
 import asyncio
+import io
 import sys
+import tokenize
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -18,6 +20,7 @@ from forever_companion.core.journal import (  # noqa: E402
     journal_due,
     journal_write,
     migrate_weekly_to_pages,
+    next_page_no,
     page_header,
 )
 
@@ -85,6 +88,85 @@ def test_page_cap_evicts_oldest_into_evicted_list() -> None:
     assert all_evicted[0]["entries"][0]["text"] == "页0"
     # 淘汰后新页号仍连续递增（累计页码永不重编，面板显示层据此说真话）
     assert [p["page_no"] for p in pages] == list(range(9, 61))
+
+
+# ---------- 页码单一来源：邀请文案与写入页码不得各算一套 ----------
+
+
+def test_next_page_no_empty_book_starts_at_one() -> None:
+    assert next_page_no([]) == 1
+
+
+def test_next_page_no_survives_eviction_where_len_plus_one_lies() -> None:
+    """淘汰发生后 `len(pages)+1` 与真实页码分叉——邀请文案必须跟真实页码。"""
+    pages: list[dict] = []
+    for i in range(60):
+        pages, _, _, _ = journal_write(pages, f"页{i}", True, now=NOW + timedelta(days=i))
+    assert len(pages) == 52  # 活架只剩 52 页
+    assert pages[-1]["page_no"] == 60
+    assert next_page_no(pages) == 61
+    # 旧算法会递出“第 53 页”：与她真写下去拿到的页码对不上
+    assert len(pages) + 1 != next_page_no(pages)
+
+
+def test_next_page_no_matches_what_journal_write_assigns() -> None:
+    """不变式：next_page_no 预告的页码 == journal_write 实际落笔的页码。"""
+    pages: list[dict] = []
+    for i in range(5):
+        pages, _, _, _ = journal_write(pages, f"预热{i}", True, now=NOW + timedelta(days=i))
+    predicted = next_page_no(pages)
+    _, assigned, _, _ = journal_write(pages, "下一笔", True, now=NOW + timedelta(days=99))
+    assert assigned == predicted
+
+
+def test_invite_text_does_not_recompute_page_number_from_list_length() -> None:
+    """静态门：禁止在注入文案里就地用 `len(...)+1` 推页码。
+
+    1.3.0 把淘汰改成“搬进藏书阁”后，活架长度不再等于累计页数，
+    日记邀请文案长期报着比真实页码小的数——显示层说谎。
+    页码唯一合法来源是 core.journal.next_page_no。
+
+    用 tokenize 只看代码 token，跳过字符串/注释/docstring：否则本仓自己的
+    说明文字（如 next_page_no 的 docstring）会把门误抢。
+    """
+    root = Path(__file__).resolve().parents[1]
+    here = Path(__file__).resolve()
+    skipped_names = {"COMMENT", "STRING", "FSTRING_START", "FSTRING_MIDDLE", "FSTRING_END", "NL", "NEWLINE", "INDENT", "DEDENT"}
+    skipped = {getattr(tokenize, n) for n in skipped_names if hasattr(tokenize, n)}
+
+    offenders: list[str] = []
+    for py in sorted(root.rglob("*.py")):
+        if "vendor" in py.parts or py.resolve() == here:
+            continue
+        source = py.read_text(encoding="utf-8")
+        lines = source.splitlines()
+        # 每行收集：出现过 len( 以及出现过 `+ 1`
+        has_len: set[int] = set()
+        has_plus_one: set[int] = set()
+        try:
+            tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+        except tokenize.TokenError:
+            continue
+        for index, tok in enumerate(tokens):
+            if tok.type in skipped:
+                continue
+            if tok.type == tokenize.NAME and tok.string == "len":
+                has_len.add(tok.start[0])
+            if (
+                tok.type == tokenize.OP
+                and tok.string == "+"
+                and index + 1 < len(tokens)
+                and tokens[index + 1].type == tokenize.NUMBER
+                and tokens[index + 1].string == "1"
+            ):
+                has_plus_one.add(tok.start[0])
+        for lineno in sorted(has_len & has_plus_one):
+            if "页" in (lines[lineno - 1] if lineno <= len(lines) else ""):
+                offenders.append(f"{py.relative_to(root)}:{lineno}: {lines[lineno - 1].strip()[:90]}")
+    assert not offenders, (
+        "页码必须走 core.journal.next_page_no（活架长度≠累计页数），不得就地 len()+1：\n  "
+        + "\n  ".join(offenders)
+    )
 
 
 def test_entry_text_truncated_to_cap() -> None:

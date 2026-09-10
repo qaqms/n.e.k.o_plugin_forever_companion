@@ -126,6 +126,27 @@ def diagnose_slot_dormancy(core_cfg: JsonObject, slot: str) -> str:
     return ""
 
 
+def _slot_dormancy_hint(core_cfg: JsonObject, slot: str) -> str:
+    """槽位休眠原因 → 一句可操作的提示（日志与面板提示共用）。
+
+    本函数是 `diagnose_slot_dormancy` 的文案层，两者同处一文件：reason 每多一个、
+    文案也只多一份，分处两地必然漂移。过去主类与三个 mixin 各自本地复刻过同一
+    函数，注释写的"避免循环导入"并不成立——本模块不 import 任何 mixin。
+
+    免费路由是宿主防滥用边界：lanlan.tech 端点服务端校验客户端身份，插件直连
+    必被 400 拒绝（实测），故明确告知"配自己的 API 才可用"而不是含糊的"未配模型"。
+
+    名字保留下划线前缀：__init__.py 导入即再导出，它是现有测试的 tm.* 锚点。
+    """
+    reason = diagnose_slot_dormancy(core_cfg, slot)
+    if reason == "free_route":
+        return (
+            "宿主正在使用免费路由（lanlan.tech），该端点只接受 N.E.K.O 客户端调用，"
+            "插件无法直连——在宿主设置里配置自己的 API 服务商后本功能即可使用"
+        )
+    return "所选槽位在宿主未配置模型（或未保存服务商 URL），去宿主设置配置该槽位的模型"
+
+
 def _resolve_tone_slot(
     core_cfg: JsonObject, slot: str, _seen: frozenset[str] = frozenset()
 ) -> JsonObject | None:

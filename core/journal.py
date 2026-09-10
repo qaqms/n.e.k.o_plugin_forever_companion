@@ -69,6 +69,16 @@ def assemble_journal_entry(
     return "\n".join(parts)
 
 
+def next_page_no(pages: list[JsonObject]) -> int:
+    """下一篇日记将落在的页码（纯函数）：按最后一页的 `page_no` 递增，**不按列表长度**。
+
+    1.3.0 把写满淘汰的最旧页搬进藏书阁后，live 列表长度与真实页码会分叉：
+    书到第 60 页时手上只剩 52 页，`len(pages) + 1` 会算出“第 53 页”这种谎言。
+    任何“第 N 页”文案与翻页判定都必须走本函数，不得就地再写一个 `len()+1`。
+    """
+    return (int(pages[-1].get("page_no") or 0) + 1) if pages else 1
+
+
 def journal_write(
     pages: list[JsonObject],
     text: str,
@@ -109,7 +119,7 @@ def journal_write(
             if prev_entries:
                 tail = _tail_line(prev_entries[-1])
         # 页码按上一页号递增而非列表长度：淘汰最旧页后编号仍然连续
-        next_no = (int(new_pages[-1].get("page_no") or 0) + 1) if new_pages else 1
+        next_no = next_page_no(new_pages)
         new_pages.append({"page_no": next_no, "started_at": now_iso, "entries": []})
     else:
         entries = new_pages[-1].get("entries")
@@ -257,3 +267,19 @@ def page_header(page: JsonObject) -> JsonObject:
         "mood_avg": round(sum(affects) / len(affects), 2) if affects else None,
         "legacy": bool(page.get("legacy")),
     }
+
+
+def journal_entries(pages: list[JsonObject]) -> list[JsonObject]:
+    """日记页列表 → 段落条目平铺（回填相处统计时取时间戳用）。
+
+    非页/非条目结构的脏数据直接跳过（不抛）：调用方是统计回填，一页坏数据
+    不该拖挂整次扫描。过去此函数在主类与 shards.py 各有一份复刻，两份空转维护。
+    """
+    out: list[JsonObject] = []
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+        for item in page.get("entries") or []:
+            if isinstance(item, dict):
+                out.append(item)
+    return out

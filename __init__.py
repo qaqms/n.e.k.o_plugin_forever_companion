@@ -504,37 +504,14 @@ from .services.tone_slot import (
     _resolve_tone_slot as _resolve_tone_slot,
 )
 from .services.tone_slot import (
-    diagnose_slot_dormancy,
+    _slot_dormancy_hint as _slot_dormancy_hint,
+)
+from .services.tone_slot import (
+    diagnose_slot_dormancy as diagnose_slot_dormancy,
 )
 
 JsonObject = dict[str, Any]
 
-
-def _slot_dormancy_hint(core_cfg: JsonObject, slot: str) -> str:
-    """槽位休眠原因 → 一句可操作的中文提示（日志与面板提示共用）。
-
-    免费路由是宿主防滥用边界：lanlan.tech 端点服务端校验客户端身份，插件直连
-    必被 400 拒绝（实测），故明确告知"配自己的 API 才可用"而不是含糊的"未配模型"。
-    """
-    reason = diagnose_slot_dormancy(core_cfg, slot)
-    if reason == "free_route":
-        return (
-            "宿主正在使用免费路由（lanlan.tech），该端点只接受 N.E.K.O 客户端调用，"
-            "插件无法直连——在宿主设置里配置自己的 API 服务商后本功能即可使用"
-        )
-    return "所选槽位在宿主未配置模型（或未保存服务商 URL），去宿主设置配置该槽位的模型"
-
-
-def _journal_entries(journal: list[JsonObject]) -> list[JsonObject]:
-    """个人日记页列表 → 段落条目平铺（回填相处统计时取时间戳用）。"""
-    out: list[JsonObject] = []
-    for page in journal:
-        if not isinstance(page, dict):
-            continue
-        for item in page.get("entries") or []:
-            if isinstance(item, dict):
-                out.append(item)
-    return out
 
 # 宿主在 LLM 注入边界展开为当前会话的角色名；插件侧不得自行替换
 MASTER_NAME_TOKEN = "{MASTER_NAME}"
@@ -645,6 +622,8 @@ class ForeverCompanionPlugin(
         # 才注入 p.logger，此刻取 self.logger 会 AttributeError）只能延迟解析
         self._emotion_sense = EmotionSenseService(
             http=lambda *a, **k: self._proactive_http(*a, **k),
+            # 与 http 同源：Origin 必须等于实际拼 URL 的 base，不能各写一份端口
+            api_base=lambda: self._proactive_api_base(),
             push=lambda **kw: self.push_message(**kw),
             cfg_getter=lambda: self._emotion_sense_cfg,
             mood_enabled=lambda shard=None: self._mood_enabled(shard),

@@ -405,7 +405,7 @@ Plugin Manager → 永远的陪伴：
   三条路与宿主记忆系统互补不冲突
 - **零依赖**：纯标准库实现
 
-## 配置（plugin.toml `[tide]` / `[mood]` / `[fragments]` / `[journal]`）
+## 配置（plugin.toml `[tide]` / `[mood]` / `[fragments]` / `[journal]` / `[review]` / `[stats]` / `[capabilities]` / `[emotion_sense]`）
 
 > 多角色说明（0.5.0 起）：下表中前 6 项周期参数（`enabled` 到 `ovulation_window`，
 > 以及面板累加的 `advance_days`）是**按角色独立**的，这里的值只作为新角色的默认值；
@@ -420,15 +420,23 @@ Plugin Manager → 永远的陪伴：
 | `period_length` | 潮汐期长度（天），仅关闭自动演算时生效 | `5` |
 | `ovulation_day` / `ovulation_window` | 活跃日与活跃窗口半径，仅关闭自动演算时生效 | `14` / `3` |
 | `inject_mode` | 注入策略：`every_user_message` / `interval_n` / `on_trigger` / `off` | `interval_n` |
+| `inject_interval_n` | `interval_n` 策略下每 N 条用户消息注入一次 | `3` |
+| `trigger_keywords` | `on_trigger` 策略下的触发关键词 | 内置词表（可自由改写） |
+| `advance_days` | 面板「快进」按钮累加的偏移天数（不建议手改，会被面板写入覆盖） | `0` |
 | `phase_openers` | 进入新阶段时她主动说一句（每阶段仅一次） | `true` |
 | `activity_context` | 生活感知：把"用户在不在/在专注什么"纳入轻语 | `true` |
 | `debug_mode` | 调试模式：开启后注册一组 debug_* 调试入口（见下节） | `false` |
 | `timezone` | `"auto"` 跟随系统，或 IANA 名称 | `auto` |
+| `forbidden_words` | 防止她说漏嘴的医学屏蔽词（**必须位于 `[tide]` 段内、任何 `[tide.phases.*]` 之前**，否则被 TOML 归入末个子表） | 内置屏蔽词表（可自由增删） |
 | `phases.*` | 各阶段感受文本，可自由改写 | — |
 | `phases.*.mood_note` | 阶段×情绪耦合：该阶段的情绪倾向（潮汐期更敏感、活跃期更明亮） | 内置 |
 | `[mood].enabled` | 情绪系统开关（关闭后工具调用会被拒绝） | `true` |
-| `[mood].default_action_minutes` | 限时情绪默认时长（心有涟漪/暖流涌动/满潮欢喜内置默认 15/30/30 分钟，不读此项） | `20` |
-| `[mood].open_action_timeout_minutes` | 求安抚的兜底自动解除阈值；`0` 关闭兜底 | `120` |
+| `[mood].default_action_minutes` | 限时情绪默认时长（心有涟漪/暖流涌动/满潮欢喜内置默认 15/30/30 分钟，不读此项） | `10` |
+| `[mood].open_action_timeout_minutes` | 求安抚的兜底自动解除阈值；`0` 关闭兜底，上限 `1440` | `120` |
+| `[mood].arousal_baseline` | 活跃度静息基线：无情绪刺激时活跃度自然回归的水平；`0` = 旧行为（回归到完全平静） | `0.35` |
+| `[mood].extreme_invite_threshold` | 持续极端心情邀请阈值（±，对应面板"低落/雀跃"档）；`0` 关闭邀请 | `0.4` |
+| `[mood].extreme_invite_after_minutes` | 心情连续越过阈值满 N 分钟后递一次动作邀请 | `20` |
+| `[mood].extreme_invite_cooldown_minutes` | 递出邀请后的冷却分钟数 | `30` |
 | `[fragments].enabled` | 时光日记自动碎片开关：把你的重要话语（喜好/厌恶/有分量的话/过激言行）记进她的日记本 | `true` |
 | `[fragments].slot` | 碎片提取模型槽位（读宿主 core_config.json 直连该槽；未配模型自动休眠） | `summary` |
 | `[fragments].min_interval_sec` | 相邻两次碎片分析的最小间隔（秒） | `60` |
@@ -443,10 +451,11 @@ Plugin Manager → 永远的陪伴：
 | `[emotion_sense].enabled` | 语气感知总开关（回复完成后异步分析互动情绪） | `true` |
 | `[emotion_sense].check_rate` | 筛选抽查频率：`1.0` 每轮 / `0.5` 一半 / `0.25` 偶尔 / `0` 关闭 | `1.0` |
 | `[emotion_sense].min_interval_sec` | 相邻两次分析的最小间隔 | `60` |
-| `[emotion_sense].window_turns` | 校正模式的语气趋势窗口（轮） | `3` |
+| `[emotion_sense].window_turns` | 校正模式的语气趋势窗口（轮）：`2` 连续两轮同向即提醒（响应快），`3` 更稳但偏慢 | `2` |
 | `[emotion_sense].confidence_threshold` | 筛选置信度阈值 | `0.6` |
 | `[emotion_sense].phase_sensitivity_enabled` | 阶段灵敏度机制开关（潮汐/回升/活跃期筛选更灵敏） | `true` |
-| `[emotion_sense].phase_sensitivity` | 灵敏度强度（阈值下移量）：`0.1`/`0.15`/`0.25` | `0.15` |
+| `[emotion_sense].phase_sensitivity` | 灵敏度强度（阈值下移量）：`0.1`/`0.15`/`0.25`；`0` 等同关闭 | `0.15` |
+| `[emotion_sense].user_affect_weight` | 用户侧情绪传导权重：用户消息单独分析后按此系数缩放步长喂入连续心情（她的回复权重 `1.0`）；`0` 关闭 | `0.25` |
 | `[emotion_sense].slot` | 语气分析模型槽位：`""` 跟随宿主情感模型，或 `conversation`/`summary`/`correction`/`vision`/`agent` 直连该槽端点 | `""` |
 | `[stats].anniversary_inject` | 纪念日当天让她知道相伴天数（纯统计本身无开关） | `true` |
 | `[capabilities].hide_disabled_tools` | 高级选项（1.2.7，全局）：对所有角色都不生效的能力，其 @llm_tool 是否从模型可见面摘除；false = 温和模式（工具在位、调用才拒）。面板各能力的开关另存 Store（caps@<角色>/caps@*），不占配置键 | `false` |

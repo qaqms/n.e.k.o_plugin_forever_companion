@@ -384,8 +384,26 @@ def test_csrf_token_cached_and_cleared_on_failure(plugin_factory_full, tm, monke
     p = _sense_plugin(plugin_factory_full, http)
     _run_screen(plugin_factory_full, p, http, tm, monkeypatch, "angry", 0.9)
     assert http.analysis_calls[0]["headers"]["X-CSRF-Token"] == "test-csrf-token"
-    assert http.analysis_calls[0]["headers"]["Origin"] == "http://127.0.0.1:48911"
+    # 不断字面量端口，断不变式：Origin 必须等于实际拼 URL 的 base
+    assert http.analysis_calls[0]["headers"]["Origin"] == p._proactive_api_base()
     assert p._csrf_token == "test-csrf-token"  # 已缓存
+
+
+def test_emotion_origin_follows_custom_host_port(plugin_factory_full, tm, monkeypatch) -> None:
+    """宿主跑在自定义 MAIN_SERVER_PORT 上时，Origin 跟着变（不写死 48911）。
+
+    宿主 CSRF 守卫要 token ∧ Origin 同时成立；写死端口时只能吃它的 hostname
+    降级分支（为 Docker 端口映射而写），一旦收紧就 403 静默休眠。
+    """
+    http = _SenseHttp(emotion=("angry", 0.9))
+    http.set_turns([("你好", "你好呀")])
+    p = _sense_plugin(plugin_factory_full, http)
+    p._proactive_api_base_cache = "http://127.0.0.1:55555"
+    _run_screen(plugin_factory_full, p, http, tm, monkeypatch, "angry", 0.9)
+    assert http.analysis_calls, "没发出语气分析请求"
+    sent = http.analysis_calls[0]["headers"]["Origin"]
+    assert sent == "http://127.0.0.1:55555"
+    assert sent != "http://127.0.0.1:48911"
 
 
 def test_default_path_carries_no_model_override(plugin_factory_full, tm, monkeypatch) -> None:
