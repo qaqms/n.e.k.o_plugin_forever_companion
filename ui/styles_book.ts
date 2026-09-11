@@ -109,30 +109,15 @@ export const BOOK_STYLES = `
   background: linear-gradient(180deg, #ffffff, rgba(250, 246, 242, 0.9));
   box-shadow: 0 1px 0 rgba(170, 155, 150, 0.2);
 }
-/* 页码方块（横排，压在书脊顶端——一枚小白圆贴） */
-.tmb-spine-no {
-  width: 24px; height: 18px; margin-top: 3px;
-  display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 6px; background: rgba(255, 254, 252, 0.96);
-  box-shadow: inset 0 0 0 1px rgba(185, 165, 172, 0.3);
-  font-size: 11px; font-weight: 700; letter-spacing: 0; color: #8a6f78;
-}
-/* 竖排日期：浅脊配深字（1.3.1c 脊色褪淡后白字对比度不够，翻面成墨色 + 白描边） */
+/* 竖排日期：浅脊配深字（1.3.1c 脊色褪淡后白字对比度不够，翻面成墨色 + 白描边）；
+   1.3.1e 架上精简：页码方块/书根段数/spacer 随 JSX 退场（信息进悬停 tooltip） */
 .tmb-spine-date {
   writing-mode: vertical-rl; text-orientation: mixed;
-  margin-top: 7px; font-size: 11px; line-height: 1.1; letter-spacing: 0.04em;
+  margin-top: 9px; font-size: 11px; line-height: 1.1; letter-spacing: 0.04em;
   font-family: var(--tmb-round);
   color: rgba(72, 55, 63, 0.92);
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
   max-height: 104px; overflow: hidden;
-}
-.tmb-spine-spacer { flex: 1 1 auto; min-height: 0; }
-/* 书根：段数（她的话多不多）——压在隔板那一端 */
-.tmb-spine-foot {
-  writing-mode: vertical-rl; text-orientation: mixed;
-  font-family: var(--tmb-round);
-  font-size: 10.5px; letter-spacing: 0.02em; color: rgba(72, 55, 63, 0.72);
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 /* 旧版迁移页：一枚贴在脊上的小圆角标签 */
 .tmb-spine-flag {
@@ -153,9 +138,7 @@ export const BOOK_STYLES = `
 }
 .tmb-spine--file:hover { box-shadow: 0 14px 22px rgba(160, 170, 190, 0.24), inset 0 0 0 1px rgba(255, 255, 255, 0.28); }
 .tmb-spine--file .tmb-spine-top { background: linear-gradient(180deg, #ffffff, rgba(246, 248, 251, 0.9)); box-shadow: 0 1px 0 rgba(150, 160, 180, 0.18); }
-.tmb-spine--file .tmb-spine-no { background: rgba(254, 255, 255, 0.97); color: #5f6c8e; box-shadow: inset 0 0 0 1px rgba(160, 172, 200, 0.3); width: 28px; font-size: 10.5px; }
 .tmb-spine--file .tmb-spine-date { font-family: var(--tmb-mono); font-size: 11px; letter-spacing: -0.02em; color: rgba(58, 68, 96, 0.92); text-shadow: 0 1px 0 rgba(255, 255, 255, 0.4); }
-.tmb-spine--file .tmb-spine-foot { font-family: var(--tmb-mono); font-size: 10px; color: rgba(58, 68, 96, 0.7); text-shadow: none; }
 
 /* 书架空态/加载中的一句小字由现有 .tm-derived 承担，不另立样式 */
 
@@ -604,13 +587,11 @@ export const BOOK_STYLES = `
   .tmb-spine { border-color: rgba(255, 255, 255, 0.16); box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
   .tmb-spine:hover { box-shadow: 0 14px 22px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
   .tmb-spine-top { background: linear-gradient(180deg, rgba(112, 100, 96, 0.95), rgba(72, 64, 60, 0.85)); box-shadow: 0 1px 0 rgba(0, 0, 0, 0.4); }
-  .tmb-spine-no { background: rgba(62, 55, 54, 0.95); color: #dcc2ca; box-shadow: inset 0 0 0 1px rgba(196, 160, 172, 0.28); }
-  .tmb-spine-date, .tmb-spine-foot { color: rgba(244, 236, 232, 0.92); text-shadow: 0 1px 1px rgba(28, 22, 22, 0.6); }
+  .tmb-spine-date { color: rgba(244, 236, 232, 0.92); text-shadow: 0 1px 1px rgba(28, 22, 22, 0.6); }
   .tmb-spine-flag { background: rgba(118, 98, 68, 0.95); color: #efe0c8; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); }
   .tmb-spine--file { background-color: var(--tmb-file-cloth); border-color: rgba(255, 255, 255, 0.14); box-shadow: 0 4px 10px rgba(0, 0, 0, 0.42), inset 0 0 0 1px rgba(255, 255, 255, 0.07); }
   .tmb-spine--file .tmb-spine-top { background: linear-gradient(180deg, rgba(92, 98, 112, 0.95), rgba(54, 58, 68, 0.85)); }
-  .tmb-spine--file .tmb-spine-no { background: rgba(40, 44, 54, 0.95); color: #ccd2e2; box-shadow: inset 0 0 0 1px rgba(158, 168, 196, 0.28); }
-  .tmb-spine--file .tmb-spine-date, .tmb-spine--file .tmb-spine-foot { color: rgba(236, 240, 248, 0.9); text-shadow: 0 1px 1px rgba(16, 18, 26, 0.6); }
+  .tmb-spine--file .tmb-spine-date { color: rgba(236, 240, 248, 0.9); text-shadow: 0 1px 1px rgba(16, 18, 26, 0.6); }
   .tmb-book-strip { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12), -1px 0 0 rgba(0, 0, 0, 0.25); }
   .tmb-book-strip--file { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1), -1px 0 0 rgba(0, 0, 0, 0.28); }
   .tmb-book-title { background: rgba(52, 45, 44, 0.95); color: #e2ccd4; box-shadow: inset 0 0 0 1px rgba(188, 156, 168, 0.3), 0 2px 5px rgba(0, 0, 0, 0.4); }

@@ -545,10 +545,11 @@ function DiaryRow(props: { key?: string; t: TFunc; item: DiaryItem; onDelete: (t
   )
 }
 
-// 个人日记书架：一排"站着的书"——每页一根书脊（顶端页码方块 + 竖排起始日期 +
-// 书根段数），书脊皮色 = 那段时间的心情均值（shelfInk：1.3.1d 起为封皮同族粉的
-// 明度阶——色相零漂移、心情只驱动浓淡，整架永远整齐；目录行心情圆点同函数），
-// 悬停整本抽出，点一根＝抽出来翻开。旧版迁移页在脊上贴一枚角签
+// 个人日记书架：一排"站着的书"——每页一根书脊（竖排起始日期；1.3.1e 精简：
+// 页码方块与书根段数退场，信息全在悬停 tooltip 与翻开后的页眉——用户反馈架上
+// "2、1、2、1"数字成排多余），书脊皮色 = 那段时间的心情均值（shelfInk：1.3.1d
+// 起为封皮同族粉的明度阶——色相零漂移、心情只驱动浓淡，整架永远整齐；
+// 目录行心情圆点同函数）；悬停整本抽出，点一根＝抽出来翻开。旧版迁移页贴角签
 function JournalShelf(props: {
   t: TFunc
   index: Array<JournalPageHeader & { entries?: Array<{ text?: string }> }>
@@ -575,10 +576,7 @@ function JournalShelf(props: {
             onClick={() => onOpen(no)}
           >
             <span className="tmb-spine-top" />
-            <span className="tmb-spine-no">{no}</span>
             <span className="tmb-spine-date">{spineDate(page.started_at)}</span>
-            <span className="tmb-spine-spacer" />
-            <span className="tmb-spine-foot">{String(page.entry_count ?? 0)}</span>
             {page.legacy ? <span className="tmb-spine-flag">{t("panel.journal.legacyShort", { defaultValue: "旧" })}</span> : null}
           </button>
         )
@@ -779,9 +777,8 @@ function ReviewShelf(props: {
       <div className="tmb-shelf">
         {entries.map((entry, i) => {
           const ts = String(entry.ts || "")
-          // 盒上不写会变的号：entries 倒序且最旧一篇会被裁，任何“第 N 篇”都会随淘汰
-          // 整体平移（上周卷 3 这周变卷 2）。改卷宗本身永不发的身份：
-          // 徒章=互动轮数（书根那个字是它的单位）、竖排=成文日、区间进悬停
+          // 1.3.1e：卷数方块与书根「轮」字退场（架上数字成排被用户判多余），
+          // 轮数/区间/成文日全部收进悬停 tooltip；脊面只留竖排成文日
           const turns = String(entry.turns ?? 0)
           return (
             <button
@@ -792,10 +789,7 @@ function ReviewShelf(props: {
               onClick={() => onOpen(ts)}
             >
               <span className="tmb-spine-top" />
-              <span className="tmb-spine-no">{turns}</span>
               <span className="tmb-spine-date">{spineDate(ts)}</span>
-              <span className="tmb-spine-spacer" />
-              <span className="tmb-spine-foot">{t("panel.review.turnsUnit", { defaultValue: "轮" })}</span>
             </button>
           )
         })}
