@@ -546,8 +546,8 @@ function DiaryRow(props: { key?: string; t: TFunc; item: DiaryItem; onDelete: (t
 }
 
 // 个人日记书架：一排"站着的书"——每页一根书脊（顶端页码方块 + 竖排起始日期 +
-// 书根段数），书脊皮色 = 那段时间的心情均值（shelfInk：本书粉紫系内的暖冷色阶，
-// 与全站心情圆点同方向不同色相——架上翻开的是一本书，外内不能两个色系）；
+// 书根段数），书脊皮色 = 那段时间的心情均值（shelfInk：1.3.1d 起为封皮同族粉的
+// 明度阶——色相零漂移、心情只驱动浓淡，整架永远整齐；目录行心情圆点同函数），
 // 悬停整本抽出，点一根＝抽出来翻开。旧版迁移页在脊上贴一枚角签
 function JournalShelf(props: {
   t: TFunc
@@ -953,17 +953,20 @@ function splitParas(text?: string): string[] {
   return out
 }
 
-// 书脊皮色（1.3.1c 白底彩点配方）：书系内低饱和色阶——开心落灰玫（与全站
-// 心情圆点正端同明度的柔和版）、低落落雾紫、近零落暖灰，|mood| 线性推进，
-// 暖=好/冷=坏的语义方向不变；色相饱和度都收进"白底面板里的小彩点"预算，
-// 不再拿大彩块撞宿主的近白玻璃层
+// 书脊皮色（1.3.1d 单色族明度阶）：全书脊锁死在封皮同族粉（H≈340），心情只驱动
+// 浓淡——开心落鲜亮粉、低落落深灰玫瑰、无数据/近零落雾粉。上一版（1.3.1c）以暖灰
+// 为中点向灰玫（H345）与雾紫（H268）两端插值，摆幅近 77°：相邻本冷暖交错时架上
+// 读作"乱"不读作"梯度"，用户反馈"书脊颜色不统一"。色相零漂移后情绪信息仍在，
+// 只是从"变色"降为"变深浅"；|mood|/0.85 归一（预览对拍时的饱和点，保留），
+// 暖=好/冷=坏（浓=好/灰=坏）的语义方向不变
 function shelfInk(mood?: number | null): string {
-  if (mood === null || mood === undefined) return "rgb(213, 204, 209)"
+  if (mood === null || mood === undefined) return "rgb(232, 214, 220)"
   const v = Math.max(-1, Math.min(1, mood))
-  const to = v < 0 ? [157, 150, 189] : [218, 154, 180]
-  const ratio = Math.abs(v)
-  const mix = (zero: number, target: number) => Math.round(zero + (target - zero) * ratio)
-  return `rgb(${mix(213, to[0])}, ${mix(204, to[1])}, ${mix(209, to[2])})`
+  const to = v < 0 ? [197, 164, 178] : [240, 182, 203]
+  const zero = [232, 214, 220]
+  const ratio = Math.min(1, Math.abs(v) / 0.85)
+  const mix = (i: number) => Math.round(zero[i] + (to[i] - zero[i]) * ratio)
+  return `rgb(${mix(0)}, ${mix(1)}, ${mix(2)})`
 }
 
 // 书脊上的竖排日期：只用起始日（一根脊装不下区间），完整区间在 title 里
