@@ -267,3 +267,21 @@ def test_debug_journal_fill_seed_and_restore(tm, plugin_factory):
     # restore / clear 互斥（同传当场拒绝，不动任何数据）
     res5 = run(p3._debug_journal_fill(restore=True, clear=True, lanlan="灵"))
     assert isinstance(res5, tm.Err)
+
+
+def test_debug_journal_clear_entry_delegates(tm, plugin_factory):
+    """十八轮：独立入口 debug_journal_clear 必须真走 fill 的 clear 档（转发非复刻）。"""
+    p = plugin_factory()
+    shard = p._get_shard("灵")
+    shard.journal = _pages(3)
+    res = run(p._debug_journal_clear(lanlan="灵"))
+    assert isinstance(res, tm.Ok), res
+    assert res.value["cleared"] == 3
+    assert shard.journal == [] and p.store.data["journal@灵"] == []
+    # 备份在位：独立入口同样受"先备后清"契约保护
+    backup = p.store.data["pre_debug@journal@灵"]
+    assert [pg["page_no"] for pg in backup["journal"]] == [1, 2, 3]
+    # 找回走 fill restore（两入口共用一条备份通道）
+    res2 = run(p._debug_journal_fill(restore=True, lanlan="灵"))
+    assert [pg["page_no"] for pg in shard.journal] == [1, 2, 3]
+    assert isinstance(res2, tm.Ok) and res2.value["restored"] is True

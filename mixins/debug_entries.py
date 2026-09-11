@@ -188,6 +188,12 @@ class DebugEntriesMixin:
             },
         ),
         (
+            "debug_journal_clear",
+            "调试：清空个人日记",
+            "单独清空当前角色的个人日记（活架手记与藏书阁合订本一并清）。清空前先走备份通道，误清可用 debug_journal_fill(restore=true) 原样找回。面板无此入口时的调试专用出口。",
+            {"type": "object", "properties": dict(_DEBUG_LANLAN_PROP)},
+        ),
+        (
             "debug_capture_fragment",
             "调试：立即对最近一轮做碎片提取",
             "绕过水位/间隔门控，立即对最近一轮用户消息做碎片提取，返回提取原文、解析结果与是否落盘。",
@@ -515,6 +521,16 @@ class DebugEntriesMixin:
             "shelf_pages": len(shard.journal),
             "archive": archive_brief(shard.journal_archive),
         }
+
+    async def _debug_journal_clear(self, lanlan: str = "", **_: Any):
+        """独立调试入口（十八轮）：清空个人日记。
+
+        逻辑零新卷：直接转发 debug_journal_fill 的 clear 档（备份/中止纪律/
+        互斥闸全复用），只是把"藏在参数里的第三档"提成入口列表里看得见、
+        一键能用的独立条目——用户实机反馈：清档藏在 fill 的参数里不好找。
+        注册表多一行，注销链/sync 逻辑零触碰（都按 _DEBUG_ENTRIES 驱动）。
+        """
+        return await self._debug_journal_fill(clear=True, lanlan=lanlan)
 
     async def _debug_capture_fragment(self, lanlan: str = "", **_: Any):
         """立即对最近一轮用户消息做碎片提取（绕过水位/间隔门控），返回全链路细节。"""

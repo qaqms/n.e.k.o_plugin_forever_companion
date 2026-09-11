@@ -1371,5 +1371,17 @@ clear_diary、我的日记有 clear_review（皆面板常驻危险区），个�
   断言）；test_persist_errors 反向对照 clear 档 unreadable 中止（418→419）
 - README 调试表藏书阁行补 clear 档口径；插件注册表/Store 布局/注入链路零触碰
 - **验证（第十七轮）**：release_gate 五门全绿（pytest 419）；导入包 round17
+
+### 1.3.0 第十八轮：清空个人日记提成独立调试入口 debug_journal_clear（实机反馈）
+
+用户实机找「清除个人日记」没找到——十七轮把清空藏在 debug_journal_fill 的
+clear 参数档里，入口列表看不见、不会读 description 的人等于没有。提成独立条目：
+
+- **_DEBUG_ENTRIES 加一行 debug_journal_clear**（「调试：清空个人日记」，带可选
+  lanlan）；handler 一行转发 `_debug_journal_fill(clear=True)`——逻辑零复刻，
+  备份/中止纪律/互斥闸全复用；注册表驱动注销链/sync 零触碰
+- fill 的 clear 档保留（同一契约两个门面），README 调试表藏书阁行改指独立入口
+- 测试 +1：转发真走 clear 档断言（清后两键空、备份在位、经 fill restore 找回）
+- **验证（第十八轮）**：release_gate 五门全绿（pytest 420）；导入包 round18
 - **验证（第十六轮）**：release_gate 五门全绿（pytest 418/ruff/链接门 24 模块/
   check/hosted-tsx）；导入包 round16；16b 复跑五门全绿，包 round16b
