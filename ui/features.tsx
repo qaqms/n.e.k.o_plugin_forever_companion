@@ -9,8 +9,9 @@
 // 子页直接吃面板内容区自然宽度，刚好贴合外框、随窗口伸缩。
 // 高级选项 hide_disabled_tools 全局一份：开启后，对所有角色都不生效的能力，
 // 其 LLM 工具从模型可见面摘除（面板保存后经 props 上的 api.refresh 拉回最新状态）。
-import { Card, Field, StatusBadge, Switch, Alert } from "@neko/plugin-ui"
+import { Card, Field, StatusBadge, Alert } from "@neko/plugin-ui"
 import { useState } from "@neko/plugin-ui"
+import { TmSwitch } from "./tmswitch"
 import type { CapabilitiesPayload, CapItem, TFunc } from "./types"
 import { CapIntroView, LLM_BADGES } from "./capintro"
 import type { CapIntroPayload } from "./capintro"
@@ -22,8 +23,8 @@ export function FeaturesPane(props: {
   caps: CapabilitiesPayload | null
   loading?: boolean
   busyId?: string
-  onToggleCap: (id: string, enabled: boolean) => void
-  onToggleHideTools: (value: boolean) => void
+  onToggleCap: (id: string, enabled: boolean) => any
+  onToggleHideTools: (value: boolean) => any
   onLoadIntro: (id: string) => Promise<CapIntroPayload>
 }) {
   const { t, caps, loading, busyId, onToggleCap, onToggleHideTools, onLoadIntro } = props
@@ -141,7 +142,7 @@ export function FeaturesPane(props: {
                     >
                       <span className="tm-feat-side">
                         <StatusBadge tone={badge.tone} label={t(badge.key, { defaultValue: badge.def })} />
-                        <Switch
+                        <TmSwitch
                           checked={!!item.enabled}
                           disabled={busy || loading}
                           onChange={(value: boolean) => onToggleCap(item.id, value)}
@@ -167,7 +168,7 @@ export function FeaturesPane(props: {
             defaultValue: "默认温和模式：关闭的功能其工具仍在位、调用时被拒绝。开启后，对所有角色都不生效的功能，其工具会真正对模型隐藏（省上下文）；恢复生效自动重挂。",
           })}
         >
-          <Switch
+          <TmSwitch
             checked={!!(caps && caps.hide_disabled_tools)}
             disabled={loading}
             label={t("panel.features.hideTools", { defaultValue: "关闭的功能从模型可见面摘除工具" })}

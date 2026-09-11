@@ -1486,4 +1486,43 @@ export const PANEL_STYLES = `
 /* 旧居中 Modal 时代的页脚样式（foot/spacer）子页化后零引用，已删 */
 /* 弹窗内部布局已按弹窗宽度自适应（auto-fit），不再需要视口级 media query；
    旧 760px 断点只强转单栏、解决不了横向溢出，已移除 */
+/* ---- 动画开关 TmSwitch（1.3.1）：统一替换宿主 Kit 原生 checkbox 开关 ----
+   经典顺滑型：滑块 0.25s 缓动平移、轨道同步渐变换色；开启态浅蓝与面板
+   淡蓝磨砂底同族（#93c5fd/#60a5fa 系）。small 档供状态条/引导行等窄位。 */
+.tm-sw { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; vertical-align: middle; min-width: 0; }
+.tm-sw--dis { cursor: not-allowed; opacity: 0.5; }
+/* 隐藏原生 checkbox 但保留键盘可达（focus-visible 环画在轨道上） */
+.tm-sw-input {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  border: 0; clip: rect(0 0 0 0); overflow: hidden; white-space: nowrap;
+}
+.tm-sw-track {
+  position: relative; flex: none; width: 40px; height: 22px; border-radius: 999px;
+  background: rgba(148, 163, 184, 0.30);
+  box-shadow: inset 0 1px 3px rgba(100, 116, 139, 0.20), inset 0 0 0 1px rgba(255, 255, 255, 0.55);
+  transition: background 0.25s ease, box-shadow 0.25s ease;
+}
+.tm-sw--on .tm-sw-track {
+  background: linear-gradient(180deg, #a5cdff 0%, #7db4f5 100%);
+  box-shadow: inset 0 1px 3px rgba(59, 130, 246, 0.25), inset 0 0 0 1px rgba(255, 255, 255, 0.6), 0 2px 8px rgba(125, 180, 245, 0.40);
+}
+.tm-sw-knob {
+  position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(30, 41, 59, 0.28);
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.tm-sw--on .tm-sw-knob { transform: translateX(18px); }
+.tm-sw--sm .tm-sw-track { width: 34px; height: 19px; }
+.tm-sw--sm .tm-sw-knob { width: 15px; height: 15px; }
+.tm-sw--sm.tm-sw--on .tm-sw-knob { transform: translateX(15px); }
+.tm-sw-input:focus-visible + .tm-sw-track { outline: 2px solid rgba(125, 180, 245, 0.75); outline-offset: 2px; }
+.tm-sw:not(.tm-sw--dis):hover .tm-sw-knob { box-shadow: 0 1px 3px rgba(30, 41, 59, 0.34), 0 0 0 4px rgba(125, 180, 245, 0.14); }
+.tm-sw-text { font-size: 12.5px; line-height: 1.5; color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+@media (prefers-color-scheme: dark) {
+  .tm-sw-track { background: rgba(100, 116, 139, 0.42); box-shadow: inset 0 1px 3px rgba(2, 6, 23, 0.45), inset 0 0 0 1px rgba(148, 163, 184, 0.14); }
+  .tm-sw--on .tm-sw-track { background: linear-gradient(180deg, #6ea8ee 0%, #5b93dd 100%); box-shadow: inset 0 1px 3px rgba(2, 6, 23, 0.4), inset 0 0 0 1px rgba(148, 163, 184, 0.18), 0 2px 8px rgba(94, 154, 230, 0.30); }
+  .tm-sw-knob { background: #e8eef7; box-shadow: 0 1px 2px rgba(2, 6, 23, 0.5); }
+  .tm-sw-input:focus-visible + .tm-sw-track { outline-color: rgba(110, 168, 238, 0.8); }
+  .tm-sw:not(.tm-sw--dis):hover .tm-sw-knob { box-shadow: 0 1px 3px rgba(2, 6, 23, 0.55), 0 0 0 4px rgba(110, 168, 238, 0.16); }
+}
 `

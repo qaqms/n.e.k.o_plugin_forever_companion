@@ -1,5 +1,6 @@
 // 设置 · 她的周期（每角色）：自动演算开关 + 周期参数
-import { Card, Field, Grid, NumberInput, Switch } from "@neko/plugin-ui"
+import { Card, Field, Grid, NumberInput } from "@neko/plugin-ui"
+import { TmSwitch } from "./tmswitch"
 import type { FormValues, Settings, TFunc } from "./types"
 
 export function CycleSettingsCard(props: {
@@ -18,7 +19,7 @@ export function CycleSettingsCard(props: {
           {t("panel.settings.sectionCycleHint", { defaultValue: "仅作用于当前查看的角色" })}：{lanlan}
         </div>
       ) : null}
-      <Switch
+      <TmSwitch
         checked={form.auto_derive}
         label={t("panel.settings.autoDerive", { defaultValue: "自动演算（潮汐期长度、活跃日、活跃窗口由周期长度自动推导）" })}
         onChange={(value: boolean) => updateForm({ auto_derive: value })}

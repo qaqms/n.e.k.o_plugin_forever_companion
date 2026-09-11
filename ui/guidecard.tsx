@@ -2,13 +2,15 @@
 // 计算（纯本地零开销），每项带直达动作；must 欠账时卡片常驻，全部就绪整卡收起。
 // hosted-tsx 约束：唯一 export 在任何 JSX 闭合标签之前
 import { Button, Card } from "@neko/plugin-ui"
+import { TmSwitch } from "./tmswitch"
 import type { GuideItem, Readiness, TFunc } from "./types"
 
 export function GuideCard(props: {
   t: TFunc
   readiness?: Readiness
   canEnable: boolean
-  onEnable: () => void
+  // 同状态条总开关：resolve false 时开关回落（确认取消/失败）
+  onEnable: () => any
   onGoto: (tab: string) => void
 }) {
   const { t, readiness, canEnable, onEnable, onGoto } = props
@@ -35,9 +37,13 @@ export function GuideCard(props: {
             ) : null}
             <span className="tm-guide-spacer" />
             {!item.ok && item.id === "rhythm" ? (
-              <Button tone="primary" disabled={!canEnable} onClick={onEnable}>
-                {t("panel.guide.turnOn", { defaultValue: "开启" })}
-              </Button>
+              <TmSwitch
+                checked={false}
+                small
+                disabled={!canEnable}
+                title={t("panel.guide.turnOn", { defaultValue: "开启" })}
+                onChange={() => onEnable()}
+              />
             ) : null}
             {!item.ok && item.id !== "rhythm" && item.tab ? (
               <Button onClick={() => onGoto(String(item.tab))}>

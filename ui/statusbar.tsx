@@ -1,7 +1,8 @@
 // 顶部状态条（精简版）：她是谁 · 今天状态一句话 · 心情胶囊 · 总开关。
 // 详细状态（月相环/天数/情绪详情）都在「总览」页——点击状态条任意空白跳转总览。
 // hosted-tsx 约束：唯一 export 在任何 JSX 闭合标签之前；辅助组件放文件尾部靠函数声明提升
-import { Button, StatusBadge, Tooltip } from "@neko/plugin-ui"
+import { StatusBadge, Tooltip } from "@neko/plugin-ui"
+import { TmSwitch } from "./tmswitch"
 import type { Mood, Status, TFunc } from "./types"
 import { moodBadgeTone, moodDotColor, moodWordOf, stripEmoji, valenceScore, arousalScore, phaseColorOf } from "./utils"
 
@@ -11,7 +12,8 @@ type StatusBarProps = {
   mood: Mood
   lanlan?: string
   canToggle: boolean
-  onToggle: () => void
+  // 返回 Promise：resolve false（确认取消/失败）时开关动画回落（见 tmswitch 乐观回滚契约）
+  onToggle: () => any
   onGotoOverview: () => void
   // 关闭状态细提示（卡片内第二行）：模拟关闭→行内直接开启；情绪关闭→跳「情绪」页
   showOffHint: boolean
@@ -49,9 +51,15 @@ export function StatusBar(props: StatusBarProps) {
             <StatusBadge tone={moodBadgeTone(mood.action)} label={stripEmoji(mood.action_label) || mood.action || ""} />
           )
         ) : null}
-        <Button tone={enabled ? "default" : "primary"} disabled={!canToggle} onClick={onToggle}>
-          {enabled ? t("panel.turnOff", { defaultValue: "关闭模拟" }) : t("panel.turnOn", { defaultValue: "开启模拟" })}
-        </Button>
+        {/* 总开关（1.3.1）：原「关闭模拟/开启模拟」按钮换成动画开关，
+            动作文案保留在悬停 title（也钉住 i18n 键引用面） */}
+        <TmSwitch
+          checked={enabled}
+          disabled={!canToggle}
+          small
+          title={enabled ? t("panel.turnOff", { defaultValue: "关闭模拟" }) : t("panel.turnOn", { defaultValue: "开启模拟" })}
+          onChange={() => onToggle()}
+        />
       </div>
       {showOffHint || showMoodHint ? (
         <div className="tm-status-hints">

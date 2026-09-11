@@ -316,10 +316,11 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     }
   }
 
+  // 总开关切换：返回值供 TmSwitch 乐观回滚（false = 取消/失败，开关动画回落）
   async function onToggle() {
     if (!toggle) {
       toast.error(t("panel.errors.actionUnavailable", { defaultValue: "操作不可用（插件可能未运行）" }))
-      return
+      return false
     }
     const turningOff = status.enabled !== false
     const ok = await confirmDialog({
@@ -328,12 +329,14 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       tone: turningOff ? "warning" : "primary",
       ...confirmLabels,
     })
-    if (!ok) return
+    if (!ok) return false
     try {
       await props.api.call("toggle")
       await props.api.refresh()
+      return true
     } catch (err) {
       toast.error(errorText(err, t))
+      return false
     }
   }
 
@@ -633,6 +636,8 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     return unwrapCallResult(await props.api.call("get_capability_intro", { capability_id: id }))
   }
 
+  // 能力开关：返回值供 TmSwitch 乐观回滚——被否决（reverted）或报错时回落；
+  // persist_error 是"内存已生效、盘未落"的既定契约，开关保持新态不回落
   async function onToggleCap(id: string, enabled: boolean) {
     setCapsBusyId(id)
     try {
@@ -640,19 +645,23 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       const r = (payload || {}) as Record<string, any>
       if (r.note === "reverted_to_default") {
         toast.info(t("panel.features.reverted", { defaultValue: "该功能在功能配置里是关着的（或被依赖的功能挡住），这里无法强行点亮" }))
+        return false
       } else if (r.persist_error) {
         // 既定契约：内存当场生效、盘上保持原样，如实报错可重试；
         // 后端回稳定码（i18n 契约第九轮），经 errorText 翻译而非英文裸串直出
         toast.error(errorText(r.persist_error, t))
       }
       await props.api.refresh()
+      return true
     } catch (err) {
       toast.error(errorText(err, t))
+      return false
     } finally {
       setCapsBusyId("")
     }
   }
 
+  // 返回值供 TmSwitch 乐观回滚（false = 失败回落）
   async function onToggleHideTools(value: boolean) {
     setCapsBusyId("__flags__")
     try {
@@ -664,8 +673,10 @@ export default function Panel(props: PluginSurfaceProps<State>) {
           : t("panel.features.hideToolsOff", { defaultValue: "已回到温和模式：工具始终在位，调用时才拒绝" }),
       )
       await props.api.refresh()
+      return true
     } catch (err) {
       toast.error(errorText(err, t))
+      return false
     } finally {
       setCapsBusyId("")
     }

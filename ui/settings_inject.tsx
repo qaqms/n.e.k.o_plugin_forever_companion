@@ -1,6 +1,7 @@
 // 设置 · 状态注入（全局）：身体状态以何种频率/方式进入对话上下文。
 // 时区在「设置」页；这张卡只管注入行为。周期参数（角色独立）在「周期」页的她周期卡。
-import { Card, Field, Grid, NumberInput, Select, Switch } from "@neko/plugin-ui"
+import { Card, Field, Grid, NumberInput, Select } from "@neko/plugin-ui"
+import { TmSwitch } from "./tmswitch"
 import type { FormValues, TFunc } from "./types"
 
 export function InjectSettingsCard(props: {
@@ -32,7 +33,7 @@ export function InjectSettingsCard(props: {
           </Field>
         ) : null}
       </Grid>
-      <Switch
+      <TmSwitch
         checked={form.phase_openers}
         label={t("panel.settings.phaseOpeners", { defaultValue: "阶段开场白（进入新阶段时她主动说一句，每阶段仅一次）" })}
         onChange={(value: boolean) => updateForm({ phase_openers: value })}

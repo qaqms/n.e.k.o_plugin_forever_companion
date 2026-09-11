@@ -1,6 +1,7 @@
 // 设置 · 语气感知（全局）：回复后异步分析互动情绪，只提醒不自动改状态。
 // 槽位选择在「模型通道」卡；这张卡只管行为（启用/抽查频率/阶段灵敏度）。
-import { Card, Field, Grid, Select, Switch } from "@neko/plugin-ui"
+import { Card, Field, Grid, Select } from "@neko/plugin-ui"
+import { TmSwitch } from "./tmswitch"
 import type { FormValues, TFunc } from "./types"
 
 export function EmotionSenseSettingsCard(props: {
@@ -27,7 +28,7 @@ export function EmotionSenseSettingsCard(props: {
       <div className="tm-derived">
         {t("panel.settings.sectionGlobalHint", { defaultValue: "以下设置对所有角色生效" })}
       </div>
-      <Switch
+      <TmSwitch
         checked={form.emotion_sense_enabled}
         label={t("panel.settings.emotionSenseEnabled", { defaultValue: "启用语气感知" })}
         onChange={(value: boolean) => updateForm({ emotion_sense_enabled: value })}
@@ -47,7 +48,7 @@ export function EmotionSenseSettingsCard(props: {
               </Field>
             ) : null}
           </Grid>
-          <Switch
+          <TmSwitch
             checked={form.tone_phase_sensitivity_enabled}
             label={t("panel.settings.tonePhaseSensitivityEnabled", { defaultValue: "阶段灵敏度（潮汐期/回升期/活跃期筛选更灵敏）" })}
             onChange={(value: boolean) => updateForm({ tone_phase_sensitivity_enabled: value })}

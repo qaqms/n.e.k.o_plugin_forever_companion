@@ -1321,3 +1321,32 @@ H216 冷白对撞。浓度调参救不了配方，1.3.1c 照宿主 DNA 重配**�
   留死键须挂小留账，不如删净）；其余零新键
 - README 书本段与调试段两处口径同步；数据层/后端零触碰
 - **验证（第十五轮）**：release_gate 五门全绿；导入包 round15
+
+### 1.3.0 第十六轮：面板开关统一动画化——TmSwitch 替换宿主 Kit 原生 checkbox（纯 ui 显示层+交互层）
+
+用户反馈面板"按钮想整体改成动画开关"，范围对拍定为**只统一开关系**：一切
+是/否语义的开关统一换成自绘动画开关；一次性动作按钮（保存/快进/写一篇/清除等）
+维持按钮形态不改。风格对拍定案：经典顺滑型（无回弹）、开启态**浅蓝色系**
+（与面板淡蓝磨砂底 rgba(147,197,253) 弥散光同族，非 iOS 绿）。
+
+- **组件（ui/tmswitch.tsx 新增）**：隐藏原生 checkbox（保留键盘可达，
+  focus-visible 环画在轨道上）+ 轨道/滑块两 span，滑块 0.25s
+  cubic-bezier 平移、轨道同步渐变换色；small 档（34×19）供状态条/引导行窄位
+- **乐观回滚契约**：onChange 可返回 Promise——resolve `false`（确认取消/调用
+  失败/被否决回弹）时开关动画回落权威值；其余保持本地态待 checked prop 变化
+  收编。这是把 README「开关拨不动会如实回弹」从文案变成行为的载体
+- **替换面**：11 处 Kit Switch（settings_cycle/inject/mood/emotion/diary、
+  manage 调试模式、features 能力行×9 与高级选项）+ 状态条「关闭模拟/开启模拟」
+  按钮 + 引导卡「开启」按钮（后两处按钮文案退役为悬停 title，键引用面不丢）
+- **panel.tsx 返回值收编**：onToggle/onToggleCap/onToggleHideTools 改为显式
+  回布尔——reverted_to_default 与 catch 回 false（开关回弹），persist_error
+  属"内存已生效"既定契约回 true 不回弹
+- **CSS（styles.ts）**：.tm-sw 段 + 暗色孪生（板岩底/雾蓝渐变/暖白滑块）；
+  Kit `.neko-checkbox` 在面板内自此零引用
+- i18n 零新键（756×8 不变）、后端/数据层零触碰；onboarding 向导步骤按钮是
+  流程动作非开关，有意保留按钮形态
+- 踩坑登记：python `re.sub("<Switch\b")` 在 heredoc 里 `\b` 被 shell 层吃掉
+  生成 `\x08` 退格符混进替换产物，hosted-tsx 门当场逮住（"Invalid character"）
+  ——文本批量替换后必须过编译门，勿裸 grep 行数了就交付
+- **验证（第十六轮）**：release_gate 五门全绿（pytest 418/ruff/链接门 24 模块/
+  check/hosted-tsx）；导入包 round16

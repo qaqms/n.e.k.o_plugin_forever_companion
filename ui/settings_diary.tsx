@@ -1,6 +1,7 @@
 // 设置 · 日记功能行为（全局）：碎片捕获与我的日记的开关/门槛（放在日记页，
 // 与浏览同页）。槽位选择统一在「情绪」页的模型通道卡。
-import { Card, Field, NumberInput, Switch } from "@neko/plugin-ui"
+import { Card, Field, NumberInput } from "@neko/plugin-ui"
+import { TmSwitch } from "./tmswitch"
 import type { FormValues, TFunc } from "./types"
 
 export function DiarySettingsCard(props: {
@@ -17,7 +18,7 @@ export function DiarySettingsCard(props: {
       </div>
 
       {/* 时光日记 · 自动碎片 */}
-      <Switch
+      <TmSwitch
         checked={form.fragments_enabled}
         label={t("panel.settings.fragmentsEnabled", { defaultValue: "自动记下他说过的重要的话（喜好/厌恶/有分量的话/过激言行）" })}
         onChange={(value: boolean) => updateForm({ fragments_enabled: value })}
@@ -30,7 +31,7 @@ export function DiarySettingsCard(props: {
 
       <div className="tm-review-settings">
         <div className="tm-subcard-title">{t("panel.settings.stats", { defaultValue: "相处统计（时光页）" })}</div>
-        <Switch
+        <TmSwitch
           checked={form.anniversary_inject}
           label={t("settings.anniversary.title", { defaultValue: "纪念日提醒" })}
           onChange={(value: boolean) => updateForm({ anniversary_inject: value })}
@@ -42,7 +43,7 @@ export function DiarySettingsCard(props: {
 
       <div className="tm-review-settings">
         <div className="tm-subcard-title">{t("panel.settings.review", { defaultValue: "我的日记（互动评价）" })}</div>
-        <Switch
+        <TmSwitch
           checked={form.review_enabled}
           label={t("panel.settings.reviewEnabled", { defaultValue: "定期把这段时间他对她的互动方式写成一篇客观评价" })}
           onChange={(value: boolean) => updateForm({ review_enabled: value })}

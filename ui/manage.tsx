@@ -1,6 +1,7 @@
 // 设置页：通用设置（时区/调试模式）+ 面板外观 + 危险区（重置全部数据）
 // + 已有状态的角色名单（孤儿清理）。全局杂项归位页——原「管理」页。
-import { Card, Field, Select, StatusBadge, Switch, Button } from "@neko/plugin-ui"
+import { Card, Field, Select, StatusBadge, Button } from "@neko/plugin-ui"
+import { TmSwitch } from "./tmswitch"
 import type { HostedAction } from "@neko/plugin-ui"
 import type { FormValues, LanlanItem, TFunc } from "./types"
 import { lanlanPhaseLabel, moodBadgeTone } from "./utils"
@@ -45,7 +46,7 @@ export function ManagePane(props: {
         <Field label={t("panel.settings.timezone", { defaultValue: "时区" })} help={t("panel.settings.timezoneHelp", { defaultValue: "周期与日历按此时区计算；默认自动跟随系统" })}>
           <Select value={form.timezone} options={timezoneOptions} onChange={(v: any) => updateForm({ timezone: String(v) })} />
         </Field>
-        <Switch
+        <TmSwitch
           checked={form.debug_mode}
           label={t("panel.settings.debugMode", { defaultValue: "调试模式（注册 debug_* 调试入口，把内部机制快进到秒级可验证）" })}
           onChange={(value: boolean) => updateForm({ debug_mode: value })}

@@ -1,5 +1,6 @@
 // 设置 · 情绪系统（全局）：允许她自主使用限时情绪动作
-import { Card, Field, NumberInput, Switch } from "@neko/plugin-ui"
+import { Card, Field, NumberInput } from "@neko/plugin-ui"
+import { TmSwitch } from "./tmswitch"
 import type { FormValues, TFunc } from "./types"
 
 export function MoodSettingsCard(props: {
@@ -14,7 +15,7 @@ export function MoodSettingsCard(props: {
       <div className="tm-derived">
         {t("panel.settings.sectionGlobalHint", { defaultValue: "以下设置对所有角色生效" })}
       </div>
-      <Switch
+      <TmSwitch
         checked={form.mood_enabled}
         label={t("panel.settings.moodEnabled", { defaultValue: "情绪系统（实验性：允许她自主使用冷战沉默等情绪动作）" })}
         onChange={(value: boolean) => updateForm({ mood_enabled: value })}
