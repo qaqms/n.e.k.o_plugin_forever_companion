@@ -1503,8 +1503,11 @@ export const PANEL_STYLES = `
   transition: background 0.25s ease, box-shadow 0.25s ease;
 }
 .tm-sw--on .tm-sw-track {
-  background: linear-gradient(180deg, #a5cdff 0%, #7db4f5 100%);
-  box-shadow: inset 0 1px 3px rgba(59, 130, 246, 0.25), inset 0 0 0 1px rgba(255, 255, 255, 0.6), 0 2px 8px rgba(125, 180, 245, 0.40);
+  /* 十六轮实机反馈：开启态外发光扩散过重——0 2px 8px/40% 洇光收为
+     0 1px 3px/16% 短影，色泽只贴轨道描一圈不向卡面发光；渐变同步提亮
+     降浓一档（#a5cdff/#7db4f5 → #aed2fd/#8cbef6） */
+  background: linear-gradient(180deg, #aed2fd 0%, #8cbef6 100%);
+  box-shadow: inset 0 1px 2px rgba(59, 130, 246, 0.16), inset 0 0 0 1px rgba(255, 255, 255, 0.6), 0 1px 3px rgba(125, 180, 245, 0.16);
 }
 .tm-sw-knob {
   position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
@@ -1516,13 +1519,13 @@ export const PANEL_STYLES = `
 .tm-sw--sm .tm-sw-knob { width: 15px; height: 15px; }
 .tm-sw--sm.tm-sw--on .tm-sw-knob { transform: translateX(15px); }
 .tm-sw-input:focus-visible + .tm-sw-track { outline: 2px solid rgba(125, 180, 245, 0.75); outline-offset: 2px; }
-.tm-sw:not(.tm-sw--dis):hover .tm-sw-knob { box-shadow: 0 1px 3px rgba(30, 41, 59, 0.34), 0 0 0 4px rgba(125, 180, 245, 0.14); }
+.tm-sw:not(.tm-sw--dis):hover .tm-sw-knob { box-shadow: 0 1px 2px rgba(30, 41, 59, 0.30), 0 0 0 3px rgba(125, 180, 245, 0.10); }
 .tm-sw-text { font-size: 12.5px; line-height: 1.5; color: var(--text); min-width: 0; overflow-wrap: anywhere; }
 @media (prefers-color-scheme: dark) {
   .tm-sw-track { background: rgba(100, 116, 139, 0.42); box-shadow: inset 0 1px 3px rgba(2, 6, 23, 0.45), inset 0 0 0 1px rgba(148, 163, 184, 0.14); }
-  .tm-sw--on .tm-sw-track { background: linear-gradient(180deg, #6ea8ee 0%, #5b93dd 100%); box-shadow: inset 0 1px 3px rgba(2, 6, 23, 0.4), inset 0 0 0 1px rgba(148, 163, 184, 0.18), 0 2px 8px rgba(94, 154, 230, 0.30); }
+  .tm-sw--on .tm-sw-track { background: linear-gradient(180deg, #74abe9 0%, #6397da 100%); box-shadow: inset 0 1px 2px rgba(2, 6, 23, 0.35), inset 0 0 0 1px rgba(148, 163, 184, 0.18), 0 1px 3px rgba(94, 154, 230, 0.14); }
   .tm-sw-knob { background: #e8eef7; box-shadow: 0 1px 2px rgba(2, 6, 23, 0.5); }
   .tm-sw-input:focus-visible + .tm-sw-track { outline-color: rgba(110, 168, 238, 0.8); }
-  .tm-sw:not(.tm-sw--dis):hover .tm-sw-knob { box-shadow: 0 1px 3px rgba(2, 6, 23, 0.55), 0 0 0 4px rgba(110, 168, 238, 0.16); }
+  .tm-sw:not(.tm-sw--dis):hover .tm-sw-knob { box-shadow: 0 1px 2px rgba(2, 6, 23, 0.5), 0 0 0 3px rgba(110, 168, 238, 0.12); }
 }
 `

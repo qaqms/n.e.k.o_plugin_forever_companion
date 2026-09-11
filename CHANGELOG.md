@@ -1348,5 +1348,9 @@ H216 冷白对撞。浓度调参救不了配方，1.3.1c 照宿主 DNA 重配**�
 - 踩坑登记：python `re.sub("<Switch\b")` 在 heredoc 里 `\b` 被 shell 层吃掉
   生成 `\x08` 退格符混进替换产物，hosted-tsx 门当场逮住（"Invalid character"）
   ——文本批量替换后必须过编译门，勿裸 grep 行数了就交付
+- **16b（实机追加反馈）**：「开启态扩散色泽过浓」——外发光 `0 2px 8px/40%` 收为
+  `0 1px 3px/16%`（只贴轨道描一圈、不向卡面洇光），渐变提亮降浓一档
+  （#a5cdff/#7db4f5 → #aed2fd/#8cbef6）；暗色孪生与 hover 光圈同向收敛；
+  调档沿革写进 .tm-sw--on 注释防后人回调时丢口径。包 round16b
 - **验证（第十六轮）**：release_gate 五门全绿（pytest 418/ruff/链接门 24 模块/
-  check/hosted-tsx）；导入包 round16
+  check/hosted-tsx）；导入包 round16；16b 复跑五门全绿，包 round16b
