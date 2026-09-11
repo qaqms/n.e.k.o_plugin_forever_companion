@@ -240,3 +240,30 @@ def test_debug_journal_fill_seed_and_restore(tm, plugin_factory):
     assert [pg["page_no"] for pg in shard.journal] == [1], "真实日记原样回来"
     assert shard.journal_archive == []
     assert p.store.data.get("pre_debug@journal@灵") is None, "还原后备份作废"
+
+    # --- 十六轮 clear 档：单独清空（备份在清、restore 找回、互斥闸） ---
+    p3 = plugin_factory()
+    shard3 = p3._get_shard("灵")
+    shard3.journal = _pages(2)
+    run(p3._append_journal_archive("灵", shard3, _pages(1, start_no=9)))
+    res3 = run(p3._debug_journal_fill(clear=True, lanlan="灵"))
+    assert isinstance(res3, tm.Ok), res3
+    assert res3.value["cleared"] == 2 and res3.value["archive_cleared"] == 1
+    assert shard3.journal == [] and shard3.journal_archive == []
+    # 两键盘面同步清空（空列表 blob，clear_review 同口径）
+    assert p3.store.data["journal@灵"] == []
+    assert p3.store.data["journal_archive@灵"] == []
+    # 清空前已整包备份：误清可 restore 找回
+    backup3 = p3.store.data["pre_debug@journal@灵"]
+    assert [pg["page_no"] for pg in backup3["journal"]] == [1, 2]
+    assert [pg["page_no"] for pg in backup3["archive"]] == [9]
+
+    res4 = run(p3._debug_journal_fill(restore=True, lanlan="灵"))
+    assert isinstance(res4, tm.Ok), res4
+    assert [pg["page_no"] for pg in shard3.journal] == [1, 2], "清掉的手记原样回来"
+    assert [pg["page_no"] for pg in shard3.journal_archive] == [9]
+    assert p3.store.data.get("pre_debug@journal@灵") is None
+
+    # restore / clear 互斥（同传当场拒绝，不动任何数据）
+    res5 = run(p3._debug_journal_fill(restore=True, clear=True, lanlan="灵"))
+    assert isinstance(res5, tm.Err)

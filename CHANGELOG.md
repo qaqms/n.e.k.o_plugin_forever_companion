@@ -1352,5 +1352,24 @@ H216 冷白对撞。浓度调参救不了配方，1.3.1c 照宿主 DNA 重配**�
   `0 1px 3px/16%`（只贴轨道描一圈、不向卡面洇光），渐变提亮降浓一档
   （#a5cdff/#7db4f5 → #aed2fd/#8cbef6）；暗色孪生与 hover 光圈同向收敛；
   调档沿革写进 .tm-sw--on 注释防后人回调时丢口径。包 round16b
+
+### 1.3.0 第十七轮：调试入口补「清空个人日记」档（debug_journal_fill clear）
+
+用户实机巡面板发现调试侧缺一个「清空个人日记」的入口点——盘点属实：时光日记有
+clear_diary、我的日记有 clear_review（皆面板常驻危险区），个人日记却在面板无清空
+入口、调试侧也只有注入/还原两档；清它是为了"验完书架/藏书阁回到干净状态再验
+首写邀请"，走 reset_all 又会连周期/情绪一起清掉。
+
+- **落位 debug_journal_fill 第三档 clear=true**（对齐 debug_stats 的
+  seed/restore/clear 单入口三档纪律，不新增入口 id、注册表/注销链/面板零触碰）；
+  restore/clear 互斥闸同 stats
+- **与 stats 的 clear 有意不同档**：个人日记是她手写的真内容，清空前先走既有
+  备份通道（pre_debug@journal@<角色>，首次才备、连清不覆盖最早备份），误清
+  restore=true 原样找回；合订本一并清（写空列表 blob，clear_review 同口径）
+- 备份状态 unreadable 时中止清空（与注入档共用"读失败即不动"纪律）
+- 测试 +2：test_journal_archive 扩 clear→restore→互斥全矩阵（含两键盘面同步
+  断言）；test_persist_errors 反向对照 clear 档 unreadable 中止（418→419）
+- README 调试表藏书阁行补 clear 档口径；插件注册表/Store 布局/注入链路零触碰
+- **验证（第十七轮）**：release_gate 五门全绿（pytest 419）；导入包 round17
 - **验证（第十六轮）**：release_gate 五门全绿（pytest 418/ruff/链接门 24 模块/
   check/hosted-tsx）；导入包 round16；16b 复跑五门全绿，包 round16b

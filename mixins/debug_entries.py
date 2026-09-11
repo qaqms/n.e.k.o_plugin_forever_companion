@@ -175,12 +175,13 @@ class DebugEntriesMixin:
         ),
         (
             "debug_journal_fill",
-            "调试：藏书阁假书架注入/还原",
-            "用确定性假页把个人日记活架垫到写满，再连翻数页走生产淘汰链路入阁——面板书架末尾的横放合订本当场出现；真实日记与阁数据先备份，restore=true 一键还原。",
+            "调试：藏书阁假书架注入/还原/清空",
+            "用确定性假页把个人日记活架垫到写满，再连翻数页走生产淘汰链路入阁——面板书架末尾的横放合订本当场出现；真实日记与阁数据先备份，restore=true 一键还原；clear=true 清空当前角色的个人日记活架与合订本（清空前同样先备份，测完仍可 restore 找回）。",
             {
                 "type": "object",
                 "properties": {
                     "restore": {"type": "boolean", "description": "true = 从备份还原真实日记与合订本（默认 false = 注入）"},
+                    "clear": {"type": "boolean", "description": "true = 清空个人日记活架与藏书阁（清空前先备份，可 restore 还原；与 restore 互斥）"},
                     "pages": {"type": "integer", "description": "注入后再翻几页触发淘汰（默认 3，上限 8；每翻一页挤下最旧一页）"},
                     **_DEBUG_LANLAN_PROP,
                 },
@@ -394,7 +395,7 @@ class DebugEntriesMixin:
         return Ok(payload)
 
     async def _debug_journal_fill(
-        self, restore: bool = False, pages: int = 3, lanlan: str = "", **_: Any
+        self, restore: bool = False, pages: int = 3, clear: bool = False, lanlan: str = "", **_: Any
     ):
         """藏书阁秒级验证（1.3.0 第二轮）：垫满活架→真翻页→生产链路淘汰入阁。
 
@@ -404,9 +405,15 @@ class DebugEntriesMixin:
         _append_journal_archive 落盘）——验的是真链路，不是面板假渲染。
         restore 档：两本整包还原 + 清备份。只动当前角色的日记两键，周期/情绪/
         时光日记/统计一概不碰（debug_stats 同款纪律）。
+        clear 档（十六轮追加）：清空当前角色的个人日记活架与合订本（面板无此入口，
+        重置全部又会连周期/情绪一起清掉——调试现场需要单独清日记本）。与 stats 的
+        clear 不同档：这里清的是她手写的真内容，故清空前同样先走备份通道（首次才
+        备），测完 restore=true 可原样找回。与 restore 互斥。
         """
         name, shard = await self._debug_target_shard(lanlan)
         state, backup = await self._debug_backup_load("journal", _journal_key(name), name)
+        if restore and clear:
+            return Err(SdkError("restore / clear 互斥，一次只传一个"))
         if restore:
             if state != "found" or not isinstance(backup, dict):
                 return Ok({"restored": False, "lanlan": name, "note": "没有可还原的备份（从未注入过）。"})
@@ -431,6 +438,38 @@ class DebugEntriesMixin:
                 "restored": True,
                 "lanlan": name,
                 "note": "真实日记与合订本已还原，备份已清除。",
+                **self._debug_journal_fill_brief(shard),
+            })
+        if clear:
+            if state == "unreadable":
+                return Err(SdkError("备份状态读不出来，已中止清空（读失败时清掉真数据将无从还原）"))
+            if state == "absent":
+                saved = await self._debug_backup_save(
+                    "journal", name,
+                    {"journal": list(shard.journal), "archive": list(shard.journal_archive)},
+                )
+                if isinstance(saved, Err):
+                    return Err(SdkError("备份真实数据失败，已中止清空"))
+            count = len(shard.journal)
+            archive_count = len(shard.journal_archive)
+            shard.journal = []
+            shard.journal_archive = []
+            res_journal = await self._save_shard_journal(name, shard)
+            # 合订本一并清空（写空列表 blob，clear_review 同口径的彻底清理）
+            res_archive = await self._store_write(
+                _journal_archive_key(name), [], f"clear journal archive for {name}",
+            )
+            self.logger.info(
+                "debug journal cleared for {} (pages {}, archive {})", name, count, archive_count,
+            )
+            persist_err = self._persist_error(res_journal, res_archive)
+            if persist_err is not None:
+                return persist_err
+            return Ok({
+                "cleared": count,
+                "archive_cleared": archive_count,
+                "lanlan": name,
+                "note": "个人日记活架与合订本已清空（清空前已备份，测完 restore=true 可找回）。",
                 **self._debug_journal_fill_brief(shard),
             })
         flip = max(1, min(int(pages or 3), 8))

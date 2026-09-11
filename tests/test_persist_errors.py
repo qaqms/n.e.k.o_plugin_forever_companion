@@ -500,3 +500,24 @@ def test_debug_fill_restore_reads_legacy_backup_key(tm, boot_factory):
     assert [pg["page_no"] for pg in p._get_shard("灵").journal] == [1]
     assert store.data["journal@灵"] == real, "还原必须写回盘"
     assert "journal@灵|pre-debug" not in store.data, "还原后旧键一并作废，不留孤儿"
+
+
+def test_debug_clear_aborts_when_backup_state_unreadable(tm, boot_factory):
+    """clear 档与注入档共用备份通道：备份状态读不出来时同样必须中止清空。
+
+    十六轮 clear 档的差异化契约：清的是她手写的真内容，故与 debug_stats 的
+    clear（不备份）不同、清空前必须先备份——备份不可知时唯一安全动作是不动。
+    """
+    real = [_real_journal_page()]
+    store = _ErrStore(
+        tm,
+        initial={"lanlan_index": ["灵"], "cycle@灵": dict(_ENABLED_CYCLE), "journal@灵": real},
+        fail_get={"pre_debug@journal@灵", "journal@灵|pre-debug"},
+    )
+    p = _boot(tm, boot_factory, store, current_lanlan="灵")
+
+    res = run(p._debug_journal_fill(clear=True, lanlan="灵"))
+
+    assert isinstance(res, tm.Err), "备份状态读不出来却仍然清空 = 真日记无从还原"
+    assert "备份" in str(res.error)
+    assert store.data["journal@灵"] == real, "中止后盘上必须原样"
