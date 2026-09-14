@@ -341,6 +341,7 @@ class ShardsMixin:
         review = _cfg_section(cfg.get("review"))
         emotion_sense = _cfg_section(cfg.get("emotion_sense"))
         stats_cfg = _cfg_section(cfg.get("stats"))
+        birthday_cfg = _cfg_section(cfg.get("birthday"))
         capabilities = _cfg_section(cfg.get("capabilities"))
 
         # Store 全局覆盖层：面板保存过的全局字段优先于 toml 默认
@@ -351,6 +352,7 @@ class ShardsMixin:
         review.update(_cfg_section(self._settings_override.get("review")))
         emotion_sense.update(_cfg_section(self._settings_override.get("emotion_sense")))
         stats_cfg.update(_cfg_section(self._settings_override.get("stats")))
+        birthday_cfg.update(_cfg_section(self._settings_override.get("birthday")))
         capabilities.update(_cfg_section(self._settings_override.get("capabilities")))
 
         self._tide_cfg = tide
@@ -364,6 +366,7 @@ class ShardsMixin:
         self._review_cfg = review
         self._emotion_sense_cfg = emotion_sense
         self._stats_cfg = stats_cfg
+        self._birthday_cfg = birthday_cfg
         self._caps_cfg = capabilities
 
         # 锚点缺失（shard 与全局配置都没有）：随机化的默认锚点--反推一个日期

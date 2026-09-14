@@ -14,6 +14,12 @@ import inspect
 import time
 from typing import Any
 
+from ..core.birthday import (
+    birthday_due,
+    birthday_is_today,
+    make_birthday_diary_record,
+    mark_birthday_pushed,
+)
 from ..core.cycle import TideConfigError, _time_bucket, build_body_whisper
 from ..core.journal import journal_due, next_page_no
 from ..core.state import (
@@ -21,6 +27,7 @@ from ..core.state import (
     _JOURNAL_INVITE_THROTTLE_SEC,
     _JOURNAL_RESPOND_COOLDOWN_SEC,
     _LanlanShard,
+    _now_utc,
     _parse_iso_ts,
 )
 
@@ -183,8 +190,13 @@ class WhisperMixin:
         # 提醒却是唯一能把"该调 mood_rising_tide 了"送到她面前的通道）
         await self._maybe_nudge_reconcile(text, name)
         # 静默类情绪动作期间不注入身体轻语（监督循环仍在跑暂停/加固）
+        # 静默类情绪动作期间不注入身体轻语（监督循环仍在跑暂停/加固）
         if self._is_silent_mood_active(shard):
             return False
+        # 生日轻语（1.3.1）：不受 inject_mode 频控辖（一天至多一条、自带角色
+        # 当天水位），但服从沉默闸——她正冷战/已读不回时这条消息本就是她
+        # 选择不理的；水位未盖，当天静默解除后的下一条消息仍能补递
+        await self._maybe_birthday_push(name, shard)
         if not self._should_inject(shard, text):
             # 可观测性：频控拦截必须留痕，否则"注入失效"无从排查（用户消息节奏低，日志量可控）
             self.logger.info(
@@ -629,4 +641,66 @@ class WhisperMixin:
                 if epoch > last_write_epoch:
                     last_write_epoch = epoch
         return shard.last_journal_invite_ts > last_write_epoch
+
+    # ==========================================
+    # 生日轻语（1.3.1）
+    # ==========================================
+
+    async def _maybe_birthday_push(self, lanlan: str, shard: _LanlanShard) -> bool:
+        """主人生日当天，首次聊天时递一条 read 轻语（说不说、怎么说由她）。
+
+        与纪念日轻语同构但**消息驱动**：玩家开口她才收到，read 语义随她
+        回复自然带出祝福，不触发独立回复。per-shard 当天水位存
+        stats["birthday"]（盖水位以提交成功为前提，未盖则当天下一条消息重试）；
+        keep_diary 开启时顺手在时光日记代笔一条纪念手记（README/功能介绍
+        如实说明代笔）。能力中心 birthday 闸；日期未填/非法自然休眠。
+        """
+        cfg = getattr(self, "_birthday_cfg", None) or {}
+        if not self._cap_effective("birthday", lanlan=lanlan):
+            return False
+        birthday = str(cfg.get("date") or "").strip()
+        today = self._stats_today()
+        if not birthday_is_today(birthday, today):
+            return False
+        if not birthday_due(shard.stats, today):
+            return False
+        pushed = self.push_message(
+            visibility=[],
+            ai_behavior="read",
+            parts=[{"type": "text", "text": (
+                "（日期感知）今天是主人的生日，一年一度属于他的日子。"
+                "送上你的祝福，用你的方式庆祝，或者只是让他知道你记得——"
+                "说不说、怎么说都由你自己决定，绝不要提及这条提醒本身。"
+            )}],
+            source=self.plugin_id,
+            target_lanlan=lanlan,
+            coalesce_key=f"{self.plugin_id}.birthday",
+            metadata={"message_type": f"{self.plugin_id}.birthday"},
+        )
+        # 提交结果必须看（与日记邀请同一契约，1.2.4 审查先例）：submitted=False
+        # 表示这条根本没上线，水位不盖——当天下一条消息重试；桩/旧返回按成功处理
+        if isinstance(pushed, dict) and pushed.get("submitted") is False:
+            self.logger.warning(
+                "birthday whisper NOT submitted for {}: {}",
+                lanlan, str(pushed.get("reason") or "unknown"),
+            )
+            return False
+        shard.stats = mark_birthday_pushed(shard.stats, today)
+        saves = [await self._save_shard_stats(lanlan, shard)]
+        keep_diary = cfg.get("keep_diary", True) is not False
+        if keep_diary:
+            shard.diary.append(make_birthday_diary_record(
+                _now_utc().isoformat(timespec="seconds"),
+                self._last_phase_name(shard),
+            ))
+            saves.append(await self._save_shard_diary(lanlan, shard))
+        persist_err = self._persist_error(*saves)
+        if persist_err is not None:
+            # 轻语已上线、水位已盖：落盘失败只影响面板回显，不回滚水位
+            # （重推生日祝福比漏一次更碍事），细节由统一出口留痕
+            self.logger.warning("birthday watermark/diary persist degraded for {}", lanlan)
+        self.logger.info(
+            "birthday whisper pushed for {} (keep_diary={})", lanlan, keep_diary,
+        )
+        return True
 

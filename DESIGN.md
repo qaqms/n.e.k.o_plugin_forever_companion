@@ -186,6 +186,36 @@
   调试入口 `debug_review`（素材统计 + 资格判定 + force 成文）、
   `debug_review_fill`（假卷宗注入/还原，entries 可给 53~60 走真实落盘链验溢出搬家）
 
+## 生日轻语（1.3.1）
+
+记住主人生日：当天玩家**首次聊天**时递一条 read 轻语（说不说、怎么说由她），
+与纪念日轻语同构但驱动不同——消息驱动（挂 `_handle_new_user_message`，
+静默情绪闸后、inject_mode 频控前）：不受频控辖（一天至多一条、自带水位），
+但服从沉默闸（冷战当天不递、水位不盖，静默解除后当天仍可补递）。
+
+- 日期是**全局配置**（`[birthday].date`，面板「时光」页生日设置卡经
+  update_settings 写 settings 覆盖层）；年份只用于合法性校验，**任何链路
+  （面板/存储/注入文案）从不计算/展示年龄**——这是隐私承诺，改功能前先读
+  README「隐私与数据边界」
+- 去重水位 per-shard：`stats["birthday"]["last_pushed"]`（与
+  `stats["anniversary"]` 同构）；**盖水位以 push submitted≠False 为前提**
+  （1.2.4 契约），提交失败当天下一条消息重试
+- 闰日：生日 02-29 平年按 02-28 观察（宁早勿漏，`core/birthday._observed`）
+- `keep_diary`：当天在时光日记**代笔**一条固定文案手记（`source=self` +
+  `kind="birthday"`，与 drift_bottle 同形、时间线零改动兼容）；不另做记忆
+  镜像推送（当天生日轻语本体已随对话历史进宿主记忆管线）
+- 面板入口复用 `update_settings`（不新建动作）：非法日期发稳定码
+  `invalid_birthday_date`（i18n 契约）；「时光」页生日设置卡只读 dashboard
+  的 `birthday` 视图（date/set/keep_diary，纯本地零 IO——倒数/当天查看字段
+  随 1.3.1 改版的总览生日卡一同退役，`days_until_birthday` 随之下架）
+- 日期选择是**自绘月历（内嵌展开，非浮层）**（1.3.1 二次改版；原生 date input
+  的浏览器弹层「今天」不可改文案/行为，整套退役。绝对定位浮层会被 Card 玻璃层
+  overflow/backdrop-filter 裁没——实机踩坑 2026-09-14，展开态改在卡片正常流里）：
+  全 CSS 零 SVG、周一起制与星期表键（`panel.calendar.wd1~7`）和月份标题
+  （`monthLabel`）与「日历」页共用，未来日期不可选；**「确认」= 即时落盘**
+  （保存按钮不存在），纪念手记开关已设日期时即时保存、未设时随确认提交
+  （TmSwitch 乐观回滚契约）
+
 ## 面板 i18n 契约（1.3.0 第九轮，长期有效）
 
 后端→面板的用户可见文案**只准携带稳定 ASCII 码**（`^[a-z][a-z0-9_]*$`），
@@ -289,7 +319,7 @@ CHANGELOG，契约性变化改本文件正文——两边各司其职，不再�
   链接器误判为正则字面量起始（前一字符 `<` 在其正则启发式集合内），其后所有 `export` 声明被吞，
   面板整页空白——因此每个 ui 文件内 export 声明必须排在任何 JSX 闭合标签之前
   （辅助组件如 statusbar.tsx 的 MoodDot 放文件尾部，靠函数声明提升被引用）
-- state/config: `[tide]` / `[mood]` / `[fragments]` / `[journal]` / `[review]` / `[emotion_sense]` 配置段 +
+- state/config: `[tide]` / `[mood]` / `[fragments]` / `[journal]` / `[review]` / `[stats]` / `[birthday]` / `[emotion_sense]` 配置段 +
   PluginStore 键（0.5.0 起按角色分片 `cycle@<角色名>` / `mood@<角色名>` / `diary@<角色名>` /
   `journal@<角色名>`（0.7.0 起，旧 `weekly@` 迁入后保留备份）/ `review@<角色名>`
   （0.8.0 起，`{entries, stats}` 合一存储）/ `journal_archive@<角色名>` /

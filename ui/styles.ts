@@ -219,6 +219,64 @@ export const PANEL_STYLES = `
 .tm-ov-tile-num { font-size: 22px; font-weight: 800; line-height: 1.1; }
 .tm-ov-tile-label { font-size: 13px; font-weight: 650; }
 .tm-ov-tile-sub { color: var(--muted); font-size: 11.5px; }
+/* 生日设置卡（1.3.1 改版·二次，「时光」页）：纯设置项一行——日期按钮 + 自绘月历
+   （内嵌展开，非浮层：Card 玻璃层 overflow/backdrop-filter 会裁掉绝对定位层，
+   实机踩坑 2026-09-14）+ 纪念手记开关 + 清除（确认即保存，「保存」按钮与原生
+   date input 一并退役：原生弹层是浏览器 UI，「今天」改不了文案也改不了行为）。
+   总览生日卡的倒数/当天高亮形态已退役，对应样式随之下架。全 CSS 绘制、零 SVG。 */
+.tm-bday-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tm-bday-field {
+  font: inherit; font-size: 13px; padding: 5px 10px; border-radius: var(--radius-sm);
+  border: 1px solid rgba(148, 163, 184, 0.45); background: rgba(255, 255, 255, 0.85);
+  color: var(--muted); cursor: pointer; font-variant-numeric: tabular-nums;
+}
+.tm-bday-field--set { color: var(--text); font-weight: 650; }
+.tm-bday-field:hover { border-color: var(--primary); }
+.tm-bday-field:disabled { opacity: 0.55; cursor: default; }
+.tm-bday-pop {
+  width: min(260px, 100%); margin-top: 10px; padding: 10px;
+  border-radius: var(--radius-md); border: 1px solid rgba(148, 163, 184, 0.45);
+  background: rgba(255, 255, 255, 0.55);
+}
+.tm-bday-pop-head { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+.tm-bday-pop-title { flex: 1 1 auto; text-align: center; font-size: 12.5px; font-weight: 700; color: var(--text); }
+.tm-bday-nav {
+  font: inherit; font-size: 13px; line-height: 1; cursor: pointer;
+  width: 22px; height: 22px; border-radius: 8px;
+  border: 1px solid transparent; background: transparent; color: var(--muted);
+}
+.tm-bday-nav:hover { background: rgba(148, 163, 184, 0.16); color: var(--text); }
+.tm-bday-nav:disabled { opacity: 0.5; cursor: default; }
+.tm-bday-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; margin-bottom: 2px; }
+.tm-bday-week-cell { text-align: center; font-size: 10.5px; color: var(--muted); }
+.tm-bday-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.tm-bday-day {
+  font: inherit; font-size: 12px; height: 26px; border-radius: 8px; cursor: pointer;
+  border: 1px solid transparent; background: transparent; color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.tm-bday-day:hover { background: rgba(148, 163, 184, 0.16); }
+.tm-bday-day--blank { visibility: hidden; pointer-events: none; }
+.tm-bday-day--today { border-color: rgba(59, 130, 246, 0.65); color: var(--primary); font-weight: 700; }
+.tm-bday-day--sel { background: var(--primary); color: #fff; font-weight: 700; }
+.tm-bday-day:disabled { opacity: 0.35; cursor: default; }
+.tm-bday-pop-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.tm-bday-actions { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+.tm-bday-btn {
+  font: inherit; font-size: 12.5px; font-weight: 650; cursor: pointer;
+  padding: 6px 12px; border-radius: 999px; border: 1px solid transparent;
+  background: var(--primary); color: #fff;
+}
+.tm-bday-btn:hover { filter: brightness(1.05); }
+.tm-bday-btn--ghost { background: transparent; color: var(--muted); border-color: rgba(148, 163, 184, 0.45); }
+.tm-bday-btn:disabled { opacity: 0.55; cursor: default; }
+@media (prefers-color-scheme: dark) {
+  .tm-bday-field { background: rgba(15, 23, 42, 0.6); border-color: rgba(148, 163, 184, 0.3); }
+  .tm-bday-pop { background: rgba(30, 41, 59, 0.45); border-color: rgba(148, 163, 184, 0.3); }
+  .tm-bday-nav:hover { background: rgba(148, 163, 184, 0.18); }
+  .tm-bday-day:hover { background: rgba(148, 163, 184, 0.18); }
+  .tm-bday-day--today { border-color: rgba(96, 165, 250, 0.65); }
+}
 .tm-ov-signals { display: grid; gap: 12px; margin-top: 14px; padding-top: 12px; border-top: 1px dashed rgba(148, 163, 184, 0.35); }
 .tm-ov-signal { display: grid; gap: 6px; }
 .tm-ov-signal-label { color: var(--muted); font-size: 12px; font-weight: 650; }

@@ -1385,3 +1385,60 @@ clear 参数档里，入口列表看不见、不会读 description 的人等于�
 - **验证（第十八轮）**：release_gate 五门全绿（pytest 420）；导入包 round18
 - **验证（第十六轮）**：release_gate 五门全绿（pytest 418/ruff/链接门 24 模块/
   check/hosted-tsx）；导入包 round16；16b 复跑五门全绿，包 round16b
+
+---
+
+### 1.3.1：新能力「生日轻语」——她记得主人的生日
+
+用户诉求：插件能记住玩家生日，生日当天用轻语告诉猫娘，由她送上祝福。
+四问定案：仅生日（不做可扩展日期系统）／当天首条消息时提醒（非零点主动、
+非前一天预告）／轻语内容＝基本识别 + 当天写进她的日记作留念／面板呈现＝
+总览「我的日记」旁加生日卡。
+
+**数据层**（`core/birthday.py`，纯函数零 SDK 依赖）：
+- 日期全局配置 `[birthday].date`（YYYY-MM-DD，或兼容 MM-DD）；**年份只用于
+  合法性校验，从不参与年龄计算**——面板/存储/注入文案三处都绝不告诉她几岁
+- `parse_birthday` 用真日历校验月日组合（2-30/13-01 当场拒），坏数据一律按
+  未设置处理（fail-closed：宁可不提醒，不对着坏 date 提醒）
+- `birthday_is_today` / `days_until_birthday`：闰日 02-29 平年按 02-28 观察
+  （宁早勿漏），倒数因此永远 ≤365、不存在"等四年"读数
+- 去重水位 `stats["birthday"]["last_pushed"]`（与 `stats["anniversary"]` 同构）；
+  `mark_birthday_pushed` 返回新 dict、不原地改；`make_birthday_diary_record`
+  产与 drift_bottle 同形的手记（`source=self` + `kind=birthday`，时间线零改动兼容）
+
+**能力中心**：`CAPABILITY_SPECS` 登记 `birthday`（group=rhythm、
+config=[birthday].enabled、llm=injection），`CAP_INTROS` 补介绍——「功能管理」
+页开关、就绪清单、工具显隐全部自动接入。
+
+**触发线**（`mixins/whisper._maybe_birthday_push`）：挂在 `_handle_new_user_message`
+的静默情绪闸之后、`inject_mode` 频控之前——生日是一年一度的重要信号，不该被
+每 N 条的节流挡掉，也不该在冷战/已读不回时硬塞；不受频控但**服从沉默闸**，
+静默解除后当天仍能补递（水位以 push `submitted≠False` 为前提才盖，1.2.4 契约）。
+`keep_diary` 开启时当天顺手在时光日记代笔一条纪念手记。
+
+**面板契约**：入口复用 `update_settings`（不新建动作）——`_EDITABLE_SETTINGS` /
+`_settings_snapshot` / input_schema 三处补 `birthday_date`/`birthday_enabled`/
+`birthday_keep_diary`，写 settings 覆盖层 `[birthday]` 段；非法日期回稳定码
+`invalid_birthday_date`（i18n 契约，细节进日志）；dashboard 下发 `birthday` 视图
+（date/set/is_today/days_until/keep_diary，纯本地零 IO）。
+
+**UI**：`overview.tsx` 三本日记速览格下加 `BirthdayCard`——未填引导、已填倒数、
+当天暖色高亮；就地改日期用原生 date input + `TmSwitch`（当天留纪念手记），
+保存走 update_settings 定向字段，空串清除。styles.ts 加生日卡样式（含暗色孪生）。
+
+**i18n**：八语各 +28 键（capintro 12 + 生日卡/错误/字段/功能描述 16），zh-CN 的
+介绍文案经脚本逐字回读 `core/intros.py` 事实源登记；ja/ko 译文人工清掉混入的
+简中汉字（当天→当日、插件→플러그인 等，正则门复扫零残留）。
+
+**文档**：README 加「生日轻语」小节 + 功能表/纪念日段/配置表三键/配置段标题；
+DESIGN 加「生日轻语（1.3.1）」契约节 + state/config 段补 [birthday]；
+plugin.toml/config.example.toml 版本号升 1.3.1、加 [birthday] 段、keywords 补生日。
+
+- 当天卡片副文案实机反馈改口：「说不说、怎么庆祝，都是她的自由」→「祝主人生日快乐！」（todaySub 八语同改 + TSX defaultValue 同步，键数不变）
+- **改版（用户实机反馈：移出总览页）**：总览 `BirthdayCard` 三态形态整套退役——生日卡从总览「近况与相处」下架，移入「时光」页最底部（相处徽章收藏墙之后）并**降级为纯设置项** `BirthdaySettingsCard`（文本框式日期按钮 + 自绘月历弹层 + 纪念手记开关 + 清除；无倒数、无当天高亮、无提示小字——一版 hint 行按用户反馈撤下；当天提醒由她的轻语口播承担）。
+- **二次改版（用户反馈：原生日历里的「今天」按钮想换成「确认」）**：原生 `input type=date` 的月历弹层是浏览器内建 UI——文案与行为都改不了，整套退役，换成**自绘月历**（全 CSS 零 SVG，周一起、星期表复用「日历」页 `panel.calendar.wd1~7`，月份标题复用 `monthLabel`/`panel.stats.monthFormat`；« » 步进年、‹ › 步进月，未来日期不可选）。月历形态首版做成绝对定位浮层，被 Card 玻璃层（overflow/backdrop-filter）裁没（实机反馈 2026-09-14），同日改**内嵌展开**：点开时日历长在卡片正常流里、卡片随之变高，取消=关面板弃草稿）。交互口径：**「确认」=直接落盘**（旧「保存」按钮退役，仍走 update_settings 定向字段，不新建动作）；纪念手记开关在已设日期时即时保存（TmSwitch 乐观回滚），未设时存草稿随确认一并提交；「清除」只在已设日期时出现。i18n 随形状换键：退 save、增 pick/confirm/cancel（八语各 778→780；上一枚「增 1 键」累计口径变为净增 3：title/pick/confirm/cancel − save）。dashboard `birthday` 视图收窄为 date/set/keep_diary（`_birthday_view` 不再算日期差），`core/birthday.days_until_birthday` 无消费者随之下架（`_observed` 闰日折算仍归 `birthday_is_today` 用）；i18n 八语退 7 枚展示文案（countdown/notSet/today/todaySub/cta/edit/cancel，上一枚 todaySub 改口随之作废）、增 1 键（title；hint 随提示行撤下），八语各 784→778（其后二次改版再 −save +pick/confirm/cancel 至 780，见下条）。样式 `.tm-ov-birthday*` 整段换成 `.tm-bday*`（暗色孪生同收）；README/DESIGN/plugin.toml 入口口径同步。
+
+**测试**（`tests/test_birthday.py`，15 篇）：纯函数逐门（含闰年回落、
+水位、记录形制）+ 能力闸 + update_settings 往返/非法码/dashboard 视图
+（改版后钉死视图键形制）+ whisper 桩直调（触发/休眠/清水位重试/keep_diary
+开关/submitted=False 不盖水位）。能力计数断言 9→10。验证：release_gate 五门全绿。

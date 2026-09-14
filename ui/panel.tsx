@@ -734,6 +734,24 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     }
   }
 
+  // 生日设置卡保存（1.3.1）：复用 update_settings 定向写生日字段（空串 = 清除休眠）；
+  // 非法日期由后端发码、errorText 翻译
+  async function onSetBirthday(date: string, keepDiary: boolean): Promise<boolean> {
+    try {
+      await props.api.call("update_settings", { birthday_date: date, birthday_keep_diary: keepDiary })
+      await props.api.refresh()
+      if (date) {
+        toast.success(t("panel.birthday.saved", { defaultValue: "已记下主人的生日" }))
+      } else {
+        toast.success(t("panel.birthday.cleared", { defaultValue: "已清除生日设置" }))
+      }
+      return true
+    } catch (err) {
+      toast.error(errorText(err, t))
+      return false
+    }
+  }
+
   const VALID_TABS = ["overview", "calendar", "diary", "moment", "features", "cycle", "mood", "settings"]
   const activeTab = VALID_TABS.indexOf(tab) >= 0 ? tab : "overview"
 
@@ -907,6 +925,9 @@ export default function Panel(props: PluginSurfaceProps<State>) {
               month={monthData}
               monthAvailable={monthList}
               monthLoading={statsLoading}
+              birthday={state.birthday}
+              canSaveBirthday={!!updateSettingsAction}
+              onSetBirthday={onSetBirthday}
               onPickMonth={(month: string) => onLoadStats(month)}
               // 翻年份时保住当前正在看的月份，月报不跟着跳回当月
               onPickYear={(year: string) =>

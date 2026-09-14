@@ -289,6 +289,17 @@ export type State = {
   onboarding?: Onboarding
   // 能力中心总览（1.2.7）：功能页数据源随 5s 轮询下发（纯内存小载荷）
   capabilities?: CapabilitiesPayload
+  // 生日轻语（1.3.1）：dashboard 的生日设置卡视图（纯本地，零 IO）
+  birthday?: BirthdayView
+}
+
+// ---- 生日轻语（1.3.1）----
+// set = 填了合法日期；日期是全局配置（各角色同值）。
+// 1.3.1 改版：只喂「时光」页生日设置卡，倒数/当天视图字段随总览生日卡一同退役
+export type BirthdayView = {
+  date?: string
+  set?: boolean
+  keep_diary?: boolean
 }
 
 // ---- 能力中心（1.2.7）----

@@ -203,7 +203,7 @@ def test_list_capabilities_payload(plugin_factory_full):
     assert by_id["fragments"]["source"] == "upstream_off"
     assert by_id["fragments"]["blocked_by"] == ["mood_engine"]
     assert by_id["whisper"]["enabled"] is True
-    assert "capabilities" in data and len(data["capabilities"]) == 9
+    assert "capabilities" in data and len(data["capabilities"]) == 10
 
 
 def test_whisper_veto_stops_injection_only(plugin_factory_full):

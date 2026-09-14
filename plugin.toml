@@ -2,8 +2,8 @@
 name = "永远的陪伴"
 description = "赋予 AI 更全面的陪伴能力：她有真实的身体节律（潮汐周期）、会起伏的情绪（十二个自主情绪工具）、属于自己的三本日记（时光日记/个人日记/我的日记），以及能看见你们相处痕迹的总览仪表盘。插件只递状态与工具，如何回应由她自己决定。"
 short_description = "Full companionship for your AI companion: body rhythm, self-directed moods, her own diaries, and a dashboard of your time together."
-keywords = ["陪伴", "companion", "companionship", "情绪", "mood", "emotion", "周期", "period", "身体", "body", "潮汐", "tide", "日历", "calendar", "日记", "diary", "journal", "记忆", "memory"]
-version = "1.3.0"
+keywords = ["陪伴", "companion", "companionship", "情绪", "mood", "emotion", "周期", "period", "身体", "body", "潮汐", "tide", "日历", "calendar", "日记", "diary", "journal", "记忆", "memory", "生日", "birthday"]
+version = "1.3.1"
 id = "forever_companion"
 type = "plugin"
 entry = "plugin.plugins.forever_companion:ForeverCompanionPlugin"
@@ -179,6 +179,19 @@ days_threshold = 7
 # 纪念日注入：今天恰好是相伴第 30/60/…/365/… 天时递一条 read 轻语
 #（说不说由她决定）；false 关闭
 anniversary_inject = true
+
+[birthday]
+# 生日轻语（1.3.1）：主人生日当天、玩家第一条聊天消息时递一条 read 轻语
+#「今天是主人的生日」，怎么祝福、要不要庆祝全由她自己决定。
+# 能力中心 birthday 闸（关掉后不再递，其余链路不受牵连）；未填日期自然休眠。
+# 生日是 02-29 时平年按 02-28 过（宁早勿漏）；冷战等沉默情绪生效当天不递，
+# 届时她结束沉默后的下一条消息仍能把提醒递到（当天内不丢）。
+enabled = true
+# 当天自动在时光日记留一条纪念手记（插件代笔、固定文案，面板可单删）
+keep_diary = true
+# 主人生日 YYYY-MM-DD（面板时光页生日设置卡可填改）；年份只用于校验日期合法性，
+# 从不参与年龄计算——插件不会告诉她几岁。留空 = 未设置（功能休眠）
+date = ""
 
 [capabilities]
 # 能力中心（1.2.7）：全部功能模块的统一开关体系——面板「功能管理」页可按角色

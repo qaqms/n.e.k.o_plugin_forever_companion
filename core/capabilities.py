@@ -105,6 +105,13 @@ CAPABILITY_SPECS: dict[str, CapabilitySpec] = {
             config=("stats", "anniversary_inject", True),
             llm="injection",
         ),
+        CapabilitySpec(
+            id="birthday",
+            group="rhythm",
+            label="生日轻语",
+            config=("birthday", "enabled", True),
+            llm="injection",
+        ),
         # ---- 情绪与感知（mood）----
         CapabilitySpec(
             id="mood_engine",

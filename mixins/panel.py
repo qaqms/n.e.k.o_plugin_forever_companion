@@ -32,6 +32,10 @@ from ..core.appearance import (
     legacy_to_gallery,
     parse_image_data_url,
 )
+from ..core.birthday import (
+    normalize_birthday,
+    parse_birthday,
+)
 from ..core.cycle import (
     TideConfigError,
     build_month_calendar,
@@ -304,6 +308,9 @@ class PanelEntriesMixin:
             # 相处统计（1.1.0）：数字摘要 + 徽章墙进 5s 轮询（纯本地即时计算，
             # 开销可忽略）；热力图/月报数据量大，走 get_stats 入口按需拉取
             "stats_summary": self._stats_summary_view(shard),
+            # 生日轻语（1.3.1）：时光页生日设置卡数据（纯本地，零 IO）。
+            # 1.3.1 改版：倒数/当天视图字段随总览生日卡一同退役
+            "birthday": self._birthday_view(),
             # 新手引导 + 就绪清单（1.2.6）：wizard_pending 读内存位（面板关闭
             # 向导时同步更新，5s 轮询滞后期不会重复弹窗）；清单纯本地即时计算，
             # 零模型开销、零新增 IO
@@ -320,6 +327,16 @@ class PanelEntriesMixin:
                     "together": bool(shard.stats.get("first_seen")),
                 }),
             },
+        }
+
+    def _birthday_view(self) -> JsonObject:
+        """生日设置卡轮询视图：哪天/设没设/留不留纪念手记（全局日期，各角色同值）。"""
+        cfg = getattr(self, "_birthday_cfg", None) or {}
+        raw = str(cfg.get("date") or "").strip()
+        return {
+            "date": raw,
+            "set": parse_birthday(raw) is not None,
+            "keep_diary": cfg.get("keep_diary", True) is not False,
         }
 
     @staticmethod
@@ -381,6 +398,7 @@ class PanelEntriesMixin:
         "fragments_enabled", "fragments_slot",
         "review_enabled", "review_slot", "review_turns_threshold", "review_days_threshold",
         "anniversary_inject",
+        "birthday_enabled", "birthday_keep_diary", "birthday_date",
     )
 
     # per-character 字段：写当前角色 shard 的 enabled / params；其余为全局字段（写 settings 覆盖层）
@@ -426,6 +444,10 @@ class PanelEntriesMixin:
             "review_days_threshold": self._review_days_threshold(),
             # 相处统计：纪念日注入开关（[stats].anniversary_inject，纯统计本身无开关）
             "anniversary_inject": (self._stats_cfg or {}).get("anniversary_inject", True) is not False,
+            # 生日轻语（1.3.1）：能力开关/纪念手记/主人生日（全局，年份不参与年龄计算）
+            "birthday_enabled": (self._birthday_cfg or {}).get("enabled", True) is not False,
+            "birthday_keep_diary": (self._birthday_cfg or {}).get("keep_diary", True) is not False,
+            "birthday_date": str((self._birthday_cfg or {}).get("date") or ""),
         }
 
     @ui.action(
@@ -482,6 +504,12 @@ class PanelEntriesMixin:
                 "review_turns_threshold": {"type": "integer", "minimum": 10, "maximum": 500},
                 "review_days_threshold": {"type": "integer", "minimum": 1, "maximum": 90},
                 "anniversary_inject": {"type": "boolean"},
+                "birthday_enabled": {"type": "boolean"},
+                "birthday_keep_diary": {"type": "boolean"},
+                "birthday_date": {
+                    "type": "string",
+                    "description": tr("fields.birthday_date", default="主人生日 YYYY-MM-DD，空串清除"),
+                },
             },
         },
     )
@@ -500,6 +528,7 @@ class PanelEntriesMixin:
             frag_patch: JsonObject = {}
             review_patch: JsonObject = {}
             stats_patch: JsonObject = {}
+            birthday_patch: JsonObject = {}
             params_patch: JsonObject = {}
             # shard 落盘合并标记：enabled 与 params 同时变更时只写一次 cycle@<lanlan>
             cycle_dirty = False
@@ -604,10 +633,22 @@ class PanelEntriesMixin:
             # ---- 相处统计（[stats]），全局 ----
             if "anniversary_inject" in updates:
                 stats_patch["anniversary_inject"] = bool(updates["anniversary_inject"])
+            # ---- 生日轻语（[birthday]），全局（1.3.1）----
+            if "birthday_enabled" in updates:
+                birthday_patch["enabled"] = bool(updates["birthday_enabled"])
+            if "birthday_keep_diary" in updates:
+                birthday_patch["keep_diary"] = bool(updates["birthday_keep_diary"])
+            if "birthday_date" in updates:
+                try:
+                    # 校验+归一：非法日期当场拒（不能让坏 date 静默休眠到用户以为设好了）
+                    birthday_patch["date"] = normalize_birthday(updates["birthday_date"])
+                except ValueError as exc:
+                    self.logger.warning("birthday_date rejected: {}", exc)
+                    return Err(SdkError("invalid_birthday_date"))
 
             # Store 为权威存储（Steam 上配置文件写常超时，Store 稳定且重启不丢）；
             # 配置文件同步放后台，不阻塞保存响应
-            if tide_patch or mood_patch or es_patch or frag_patch or review_patch or stats_patch:
+            if tide_patch or mood_patch or es_patch or frag_patch or review_patch or stats_patch or birthday_patch:
                 overrides = self._settings_override
                 if tide_patch:
                     overrides["tide"] = {**_cfg_section(overrides.get("tide")), **tide_patch}
@@ -635,6 +676,11 @@ class PanelEntriesMixin:
                         **_cfg_section(overrides.get("stats")), **stats_patch,
                     }
                     self._stats_cfg.update(stats_patch)
+                if birthday_patch:
+                    overrides["birthday"] = {
+                        **_cfg_section(overrides.get("birthday")), **birthday_patch,
+                    }
+                    self._birthday_cfg.update(birthday_patch)
                 res_settings = await self._save_settings()
                 self._sync_debug_entries()
         except (TideConfigError, ValueError, TypeError) as exc:
