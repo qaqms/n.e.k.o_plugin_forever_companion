@@ -512,6 +512,7 @@ class PanelEntriesMixin:
                 },
             },
         },
+        metadata={"agent_hidden": True},
     )
     async def update_settings(self, **kwargs: Any):
         updates = {k: v for k, v in kwargs.items() if k in self._EDITABLE_SETTINGS and not k.startswith("_")}
@@ -752,6 +753,7 @@ class PanelEntriesMixin:
             },
             "required": ["date"],
         },
+        metadata={"agent_hidden": True},
     )
     async def set_anchor(self, date: str = "", **_: Any):
         lanlan, shard = await self._current_shard_async()
@@ -812,6 +814,7 @@ class PanelEntriesMixin:
             },
             "required": ["action"],
         },
+        metadata={"agent_hidden": True},
     )
     async def set_onboarding(self, action: str = "done", **_):
         """新手引导收尾（1.2.6）：done/skip 后不再自动弹，reopen 清回未引导态。
@@ -844,6 +847,7 @@ class PanelEntriesMixin:
                 "days": {"type": "integer", "description": tr("fields.days", default="天数，可为负")},
             },
         },
+        metadata={"agent_hidden": True},
     )
     async def advance_days_entry(self, days: int = 1, **_: Any):
         lanlan, shard = await self._current_shard_async()
@@ -903,6 +907,7 @@ class PanelEntriesMixin:
             default="清空当前角色的快进天数、情绪状态与心情手记（不改配置锚点，不影响其他角色）。",
         ),
         input_schema={"type": "object", "properties": {}},
+        metadata={"agent_hidden": True},
     )
     async def reset_all(self, **_: Any):
         # 只清当前角色的 shard：其他角色的周期/情绪/手记不受影响
@@ -972,7 +977,7 @@ class PanelEntriesMixin:
         name=tr("entries.get_panel_gallery.name", default="读取面板图库"),
         description=tr("entries.get_panel_gallery.description", default="读取面板图库索引与外观参数，并迁移旧版单图背景（面板内部用）。"),
         input_schema={"type": "object", "properties": {}},
-        metadata={"result_kind": "event"},
+        metadata={"result_kind": "event", "agent_hidden": True},
     )
     async def get_panel_gallery(self, **_: Any):
         index = await self._gallery_index()
@@ -1018,6 +1023,7 @@ class PanelEntriesMixin:
             },
             "required": ["data_url"],
         },
+        metadata={"agent_hidden": True},
     )
     async def gallery_add(self, data_url: str = "", thumb: str = "", name: str = "", **_: Any):
         try:
@@ -1072,6 +1078,7 @@ class PanelEntriesMixin:
             },
             "required": ["item_id"],
         },
+        metadata={"agent_hidden": True},
     )
     async def gallery_remove(self, item_id: str = "", **_: Any):
         gid = str(item_id or "").strip()
@@ -1112,6 +1119,7 @@ class PanelEntriesMixin:
             },
             "required": ["item_id", "thumb"],
         },
+        metadata={"agent_hidden": True},
     )
     async def gallery_set_thumb(self, item_id: str = "", thumb: str = "", **_: Any):
         gid = str(item_id or "").strip()
@@ -1149,7 +1157,7 @@ class PanelEntriesMixin:
             },
             "required": ["item_id"],
         },
-        metadata={"result_kind": "event"},
+        metadata={"result_kind": "event", "agent_hidden": True},
     )
     async def get_gallery_image(self, item_id: str = "", **_: Any):
         gid = str(item_id or "").strip()
@@ -1193,6 +1201,7 @@ class PanelEntriesMixin:
                 "text_weight": {"type": "number", "minimum": 40, "maximum": 100, "description": tr("fields.appearanceTextWeight", default="整体字体显示强度（%，越低越淡并自动描边）")},
             },
         },
+        metadata={"agent_hidden": True},
     )
     async def set_panel_appearance(self, **kwargs: Any):
         appearance = clamp_appearance(kwargs)
@@ -1327,6 +1336,7 @@ class PanelEntriesMixin:
                 "offset": {"type": "integer", "description": tr("fields.offset", default="跳过条数（倒序翻页用）")},
             },
         },
+        metadata={"agent_hidden": True},
     )
     async def get_diary(self, limit: int = 10, offset: int = 0, **_: Any):
         lanlan, shard = await self._current_shard_async()
@@ -1355,6 +1365,7 @@ class PanelEntriesMixin:
             default="立即向她递一条写日记的邀请（带写作素材）：当面递到她手上，她当场收到、自己决定写不写；10 分钟内刚递过时改为安静补递。仅作用于当前角色。",
         ),
         input_schema={"type": "object", "properties": {}},
+        metadata={"agent_hidden": True},
     )
     async def invite_journal(self, **_: Any):
         # 返回 (invited, deliver)：deliver ∈ ""(未递出：开关未开) / failed(传输拒收) /
@@ -1390,6 +1401,7 @@ class PanelEntriesMixin:
             },
             "required": ["ts"],
         },
+        metadata={"agent_hidden": True},
     )
     async def delete_diary_item(self, ts: str = "", **_: Any):
         lanlan, shard = await self._current_shard_async()
@@ -1425,6 +1437,7 @@ class PanelEntriesMixin:
                 },
             },
         },
+        metadata={"agent_hidden": True},
     )
     async def get_journal(self, scope: str = "", **_: Any):
         lanlan, shard = await self._current_shard_async()
@@ -1451,6 +1464,7 @@ class PanelEntriesMixin:
             default="只读翻阅藏书阁：个人日记写满下架的旧页合订本（全部页，含每页全部段落）。面板翻阅默认走 get_journal(scope=archive) 同数据通道（兼容宿主运行中覆盖导入不重扫静态入口白名单）；本入口供 API/跨插件与整启后使用。仅作用于当前角色。",
         ),
         input_schema={"type": "object", "properties": {}},
+        metadata={"agent_hidden": True},
     )
     async def get_journal_archive(self, **_: Any):
         lanlan, shard = await self._current_shard_async()
@@ -1481,6 +1495,7 @@ class PanelEntriesMixin:
                 },
             },
         },
+        metadata={"agent_hidden": True},
     )
     async def get_review(self, scope: str = "", **_: Any):
         lanlan, shard = await self._current_shard_async()
@@ -1524,6 +1539,7 @@ class PanelEntriesMixin:
             default="只读翻阅档案室：「我的日记」攒满下架的旧卷宗合档。面板翻阅默认走 get_review(scope=archive) 同数据通道（兼容宿主运行中覆盖导入不重扫静态入口白名单）；本入口供 API/跨插件与整启后使用。仅作用于当前角色。",
         ),
         input_schema={"type": "object", "properties": {}},
+        metadata={"agent_hidden": True},
     )
     async def get_review_archive(self, **_: Any):
         lanlan, shard = await self._current_shard_async()
@@ -1542,6 +1558,7 @@ class PanelEntriesMixin:
             default="排队成文一篇「我的日记」：跳过双门槛，秒回受理，实际写作在后台一拍内开始并自动落盘（素材不足 10 轮时会当场拒绝）。仅作用于当前角色。",
         ),
         input_schema={"type": "object", "properties": {}},
+        metadata={"agent_hidden": True},
     )
     async def write_review_now(self, **_: Any):
         # 受理式入口（1.2.3）：过去在这里同步等 5～20 秒的模型成文——点击干等
@@ -1589,6 +1606,7 @@ class PanelEntriesMixin:
         name=tr("entries.clear_review.name", default="清空我的日记"),
         description=tr("entries.clear_review.description", default="删除当前角色的全部「我的日记」评价与档案室旧卷宗，并清零素材统计。不可恢复。"),
         input_schema={"type": "object", "properties": {}},
+        metadata={"agent_hidden": True},
     )
     async def clear_review(self, **_: Any):
         lanlan, shard = await self._current_shard_async()
@@ -1631,6 +1649,7 @@ class PanelEntriesMixin:
                 },
             },
         },
+        metadata={"agent_hidden": True},
     )
     async def get_stats(self, month: str = "", year: str = "", **_: Any):
         """「时光」页签的数据入口：热力图（日历年视图）+ 指定月月报（数据量大，按需拉取）。"""
@@ -1681,6 +1700,7 @@ class PanelEntriesMixin:
         name=tr("entries.clear_stats.name", default="清零相处统计"),
         description=tr("entries.clear_stats.description", default="清零当前角色的相处统计（相伴起点/徽章/热力图/月报）。不可恢复。"),
         input_schema={"type": "object", "properties": {}},
+        metadata={"agent_hidden": True},
     )
     async def clear_stats(self, **_: Any):
         lanlan, shard = await self._current_shard_async()
@@ -1703,6 +1723,7 @@ class PanelEntriesMixin:
         name=tr("entries.clear_diary.name", default="清空时光日记"),
         description=tr("entries.clear_diary.description", default="删除当前角色的全部时光日记（她的手记与自动碎片）。不可恢复。"),
         input_schema={"type": "object", "properties": {}},
+        metadata={"agent_hidden": True},
     )
     async def clear_diary(self, **_: Any):
         lanlan, shard = await self._current_shard_async()
@@ -1737,6 +1758,7 @@ class PanelEntriesMixin:
             },
             "required": ["lanlan"],
         },
+        metadata={"agent_hidden": True},
     )
     async def prune_lanlan(self, lanlan: str = "", **_: Any):
         """清除孤儿角色的全部分片数据（四个 Store key + 索引 + 内存 shard）。

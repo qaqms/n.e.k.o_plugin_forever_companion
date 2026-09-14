@@ -221,6 +221,7 @@ class CapabilityMixin:
             },
             "required": ["capability_id"],
         },
+        metadata={"agent_hidden": True},
     )
     async def get_capability_intro(self, capability_id: str = "", **_: Any):
         """一项功能的介绍卡片数据（按需拉取，不进 5s 轮询）。
@@ -327,6 +328,7 @@ class CapabilityMixin:
                 "hide_disabled_tools": {"type": "boolean"},
             },
         },
+        metadata={"agent_hidden": True},
     )
     async def set_capability_flags(self, hide_disabled_tools: bool | None = None, **_: Any):
         """能力中心全局选项（写 settings 覆盖层的 capabilities 段）。"""

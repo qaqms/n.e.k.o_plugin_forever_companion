@@ -1442,3 +1442,41 @@ plugin.toml/config.example.toml 版本号升 1.3.1、加 [birthday] 段、keywor
 水位、记录形制）+ 能力闸 + update_settings 往返/非法码/dashboard 视图
 （改版后钉死视图键形制）+ whisper 桩直调（触发/休眠/清水位重试/keep_diary
 开关/submitted=False 不盖水位）。能力计数断言 9→10。验证：release_gate 五门全绿。
+
+**增补（1.3.1 修订轮·Agent 可见面收敛）——「44 个入口点要不要合并」的正确答案是隐藏优先、不合并**：
+
+用户问"44 个入口点要不要优化减少"。AST 精确盘点：**32 个静态 @plugin_entry +
+12 个 @llm_tool 后备动态入口 = 前端"入口点"计数 44**（此前各处 grep 的 34/30 把
+docstring 提及计了重）。核对宿主源码后结论：数量本身宿主无硬限制、面板刷新 O(N)
+可忽略，**合并是错的杠杆**——真问题有两个：①宿主 Agent 评估路由
+（`brain/task_executor.py::_build_plugin_desc_lines`）把全部 Agent 可见入口逐条
+塞进分析器 prompt，全插件总描述 >3000 token 触发 Stage 1（多一次 LLM 粗筛 +
+BM25 top-10 截断），本插件 32 行是最大单块，挤占的是宿主里所有插件的分发精度；
+②Agent 触发直连 IPC、不经面板 confirm——`reset_all`/`clear_diary`/`clear_review`/
+`clear_stats`/`prune_lanlan`/`update_settings` 挂在可见面，聊天一句话就可能误触发
+免确认破坏操作。另核出：未声明 `llm_result_fields` 的入口被 Agent 触发后只回
+"执行完成"（宿主 `utils/result_parser.py` fallback），读态入口留可见面既无信息
+增益纯是噪音（真要在聊天里读日记，模型有 mood_drift_bottle/recall_fragments）。
+
+**修法**：按消费者面逐入口挂 `metadata={"agent_hidden": True}`（宿主判定
+`_is_plugin_entry_agent_hidden`，agent_auto/agent_exposed/llm_exposed=False 同效，
+本仓统一 agent_hidden 一种写法）。可见白名单 6 枚：`get_status`/`toggle`/
+`set_mood`/`lift_mood`/`list_capabilities`/`set_capability`（状态查询、总开关、
+情绪——第九轮账明载消费者是模型与命令面板、能力开关是真实聊天意图）；其余 26 枚
+一律隐藏。`get_panel_gallery`/`get_gallery_image` 装饰器原有
+`metadata={"result_kind": "event"}` 合并不覆盖。入口契约、ui.action、跨插件调用、
+命令面板零改动——面板 5s 轮询与全部按钮原样工作。
+
+**常驻门** `tests/test_agent_surface.py`（AST，2 篇）：门 1 白名单外每个
+@plugin_entry 必须带字面量 agent_hidden=True（**新入口默认必须隐藏**）；门 2
+白名单↔代码可见面互为充要（不留死名、不许白名单内自相矛盾、静态入口 id 不撞名）。
+反向对照：摘 clear_diary 标记 → 门 1 红；给 get_status 补标记 → 门 2 红；还原全绿。
+
+**留账**：`debug_*` 动态入口宿主 `register_dynamic_entry` 不透传 metadata，
+debug_mode 开启期间仍对 Agent 可见——开发者态知情接受；要堵需宿主加参数
+（escalation，见 DESIGN 新节）。
+
+**文档**：DESIGN 加「Agent 可见面契约（1.3.1 修订轮，长期有效）」节；README
+「平台机制与已知限制」补聊天可见面条目；版本号按 1.3.x 修订号归位维持 1.3.1
+（本增补记入 1.3.1 节内，不另起版本）。i18n 零新键、ui/ 零触碰、数据层零触碰。
+测试 435→437。验证：release_gate 五门全绿。

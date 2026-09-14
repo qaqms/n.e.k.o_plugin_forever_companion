@@ -266,6 +266,28 @@ ID 和错误类型**。本插件的落地形态：
   注释，历史说明不得残留可复制的违规样例）；均带反向对照。
 
 
+## Agent 可见面契约（1.3.1 修订轮，长期有效）
+
+宿主 Agent 评估路由（`brain/task_executor.py`）会把运行中插件的全部「Agent 可见
+入口」逐条拼进分析器 prompt（全插件总描述超 3000 token 即触发 BM25+LLM 粗筛与
+top-10 截断，挤占的是宿主内所有插件的分发精度）；且 Agent 触发直连 IPC、**不经过
+面板 confirm**。本插件入口面据此分两档，由常驻门 `tests/test_agent_surface.py` 钉死：
+
+- **Agent 可见（6/32）**：`get_status` / `toggle` / `set_mood` / `lift_mood` /
+  `list_capabilities` / `set_capability`——状态查询、总开关、情绪（消费者本就是
+  模型与命令面板）、能力开关（"帮她开/关某功能"是真实聊天意图）。
+- **一律隐藏（26/32）**：装饰器带字面量 `metadata={"agent_hidden": True}`。面板
+  取数/写入/破坏性操作的消费者是 ui.action 桥，从不该被聊天触发；clear_*/reset_all/
+  prune_lanlan 留在可见面等于给一句口误开了免确认后门。未声明 `llm_result_fields`
+  的入口被 Agent 触发后也只会回"执行完成"（宿主 `utils/result_parser.py` 的
+  fallback 分支），挂着只是 prompt 噪音。隐藏只影响 Agent 路由：面板 action、跨
+  插件调用、命令面板一律照旧。
+- **新增静态入口默认必须隐藏**；确需可见面把 id 进白名单并给聊天场景依据。
+- 账外两笔：`@llm_tool` 的后备动态入口（`__llm_tool__` 前缀）本就被 Agent 路由
+  剥除，不在此账内；`debug_*` 动态入口因宿主 `register_dynamic_entry` 不透传
+  metadata，debug_mode 开启期间仍对 Agent 可见——开发者态知情接受，要堵需宿主
+  加参数（escalation）。
+
 ## 版本日志（已迁出）
 
 0.7.1 起的全部版本变更条目已原文归档到仓根 **CHANGELOG.md**（同样不进发行包）。
