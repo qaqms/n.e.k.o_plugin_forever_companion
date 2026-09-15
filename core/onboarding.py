@@ -7,14 +7,18 @@
 
 向导完成/跳过之后不再自动弹（管理页可 reopen 清回 ""）；角色级"还差什么"
 由就绪清单（readiness）从当前状态即时计算，无额外持久化。
+
 """
 
 from typing import Any
 
 JsonObject = dict[str, Any]
 
-# 当前引导版本：写进 guide 记录，日后引导流程改版时可据此判定旧记录是否失效
-_GUIDE_VERSION = "1"
+# 当前引导版本：写进 guide 记录，引导流程改版时据此判定旧记录失效——
+# 版本不符的 done/skip 记录按"未引导"再放行一次（1.3.1 修订轮三升 "2"：
+# 六步向导新增生日与外观两页，老用户值得再看一次；宁可多看一次向导，
+# 不可把新功能永久关在引导之外）。走完新向导后 done/skip 会盖新版本号
+_GUIDE_VERSION = "2"
 _WIZARD_STATES = frozenset({"", "done", "skip"})
 
 
@@ -37,8 +41,15 @@ def norm_guide_record(raw: Any) -> JsonObject:
 
 
 def wizard_pending(record: Any) -> bool:
-    """是否应当自动弹向导：仅"从未完成/跳过"时为 True（幂等，含坏记录自愈）。"""
-    return norm_guide_record(record)["wizard"] == ""
+    """是否应当自动弹向导（幂等，含坏记录自愈）。
+
+    未引导 → True；done/skip 但记录版本 ≠ 当前引导版本 → 也 True（改版重弹，
+    见 _GUIDE_VERSION 注释）；版本相符的 done/skip → False。
+    """
+    rec = norm_guide_record(record)
+    if rec["wizard"] == "":
+        return True
+    return rec["version"] != _GUIDE_VERSION
 
 
 def make_guide_record(action: str, now_iso: str) -> JsonObject:

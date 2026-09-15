@@ -193,6 +193,13 @@
 静默情绪闸后、inject_mode 频控前）：不受频控辖（一天至多一条、自带水位），
 但服从沉默闸（冷战当天不递、水位不盖，静默解除后当天仍可补递）。
 
+- **链路前提（1.3.1 审查轮明载）**：整条消息注入链路在 tick 的 fail-closed
+  拦截之后（`[tide].enabled` 或任一角色总开关都关着时 tick 后半段整体不跑），
+  且单角色的轻语要**该角色自己的模拟开着**（`_enabled(msg_shard)`）才递——
+  与纪念日轻语同口径。生日能力自身默认开，但"独立能力"不等于"独立链路"；
+  「功能」页四道闸会把这种情形标成"总开关未开"，README「平台机制与已知限制」
+  有用户侧说明
+
 - 日期是**全局配置**（`[birthday].date`，面板「时光」页生日设置卡经
   update_settings 写 settings 覆盖层）；年份只用于合法性校验，**任何链路
   （面板/存储/注入文案）从不计算/展示年龄**——这是隐私承诺，改功能前先读
@@ -213,7 +220,10 @@
   overflow/backdrop-filter 裁没——实机踩坑 2026-09-14，展开态改在卡片正常流里）：
   全 CSS 零 SVG、周一起制与星期表键（`panel.calendar.wd1~7`）和月份标题
   （`monthLabel`）与「日历」页共用，未来日期不可选；**「确认」= 即时落盘**
-  （保存按钮不存在），纪念手记开关已设日期时即时保存、未设时随确认提交
+  （保存按钮不存在），纪念手记开关已设日期时即时保存、未设时随确认提交；
+  即时保存**必须成功后才动本地草稿值**（1.3.1 审查轮修复：提前写草稿会让
+  TmSwitch 的乐观回滚翻到"已改未存"的假权威值上，5s 轮询因服务端值不变
+  不会纠正，假状态一路挂到下次确认补存或重开面板）
   （TmSwitch 乐观回滚契约）
 
 ## 面板 i18n 契约（1.3.0 第九轮，长期有效）
@@ -324,7 +334,10 @@ CHANGELOG，契约性变化改本文件正文——两边各司其职，不再�
   顶级入口组件 `overview.tsx` 总览 / `calendar.tsx` 日历 / `diary.tsx` 三本日记 /
   `moment.tsx` 时光 / `features.tsx`+`capintro.tsx` 功能与页内介绍 /
   `settings_cycle|inject|mood|emotion|tone|diary.tsx` 六张设置卡（由 panel.tsx 按页拼装）、
-  `appearance.tsx` 面板外观 / `manage.tsx` 危险区与角色名单 / `onboarding.tsx` 新手向导；
+  `appearance.tsx` 面板外观 / `manage.tsx` 危险区与角色名单 / `birthdaycard.tsx`
+  生日设置卡（`ui/moment.tsx` 与向导共用一份）/ `onboarding.tsx` 新手向导（六步：
+  认识→开启→通道体检→记生日→看壁纸→收尾；guide 记录带版本号，改版后旧
+  done/skip 重弹一次，契约在 `core/onboarding.py`）；
   设置类页签各自带 `savebar.tsx` 吸底保存条，顶部 `statusbar.tsx`（含 `ring.tsx` 圆环）常驻；
   **日记书本层的三条长期约束（1.3.0，改 diary.tsx/styles_book.ts 前先读）**：
   ① 正文里的 `【这段时间】/【我在想】/【对他的感觉】/【想说的】` 分节**只在显示层解析**

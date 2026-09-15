@@ -33,10 +33,27 @@ def test_wizard_pending(tm) -> None:
     pending = tm.wizard_pending
     assert pending({}) is True
     assert pending(None) is True
-    assert pending({"wizard": "done"}) is False
-    assert pending({"wizard": "skip"}) is False
+    assert pending({"wizard": "done", "version": tm._GUIDE_VERSION}) is False
+    assert pending({"wizard": "skip", "version": tm._GUIDE_VERSION}) is False
     # reopen 清回未引导后重新自动弹
     assert pending({"wizard": ""}) is True
+
+
+def test_wizard_pending_regates_on_guide_version_bump(tm) -> None:
+    """引导改版（修订轮三：六步新增生日/外观页）：旧 done/skip 记录再放行一次。
+
+    版本不符或记录缺版本（旧版手工/盘上数据）→ pending True；用户走完新向导
+    后 make_guide_record 盖当前版本 → 恢复正常不再弹（幂等，不反复骚扰）。
+    """
+    pending = tm.wizard_pending
+    assert pending({"wizard": "done", "version": "1"}) is True
+    assert pending({"wizard": "skip", "version": "1"}) is True
+    # 无版本字段的旧记录同样失效重弹（fail-open 到"多看一次向导"侧）
+    assert pending({"wizard": "done"}) is True
+    # 走完新向导 → 盖章当前版本，收工不再弹
+    fresh = tm.make_guide_record("done", "2026-09-15T00:00:00")
+    assert pending(fresh) is False
+    assert pending(tm.make_guide_record("skip", "t")) is False
 
 
 # ---------- make_guide_record ----------

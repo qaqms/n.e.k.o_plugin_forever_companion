@@ -984,6 +984,15 @@ export default function Panel(props: PluginSurfaceProps<State>) {
         channelStatus={state.channel_status}
         canToggle={!!toggle}
         onEnableRhythm={() => { onToggle() }}
+        birthday={state.birthday}
+        canSaveBirthday={!!updateSettingsAction}
+        onSetBirthday={onSetBirthday}
+        onGotoAppearance={() => {
+          // 外观页只做引导跳转：向导收尾（记 done）并把面板落到设置页——
+          // 真实的外观卡原地可用，向导里不复刻那份逻辑
+          void closeWizard("done")
+          setTab("settings")
+        }}
         onFinish={(action: "done" | "skip") => { closeWizard(action) }}
       />
       </div>

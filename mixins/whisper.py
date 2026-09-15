@@ -190,7 +190,6 @@ class WhisperMixin:
         # 提醒却是唯一能把"该调 mood_rising_tide 了"送到她面前的通道）
         await self._maybe_nudge_reconcile(text, name)
         # 静默类情绪动作期间不注入身体轻语（监督循环仍在跑暂停/加固）
-        # 静默类情绪动作期间不注入身体轻语（监督循环仍在跑暂停/加固）
         if self._is_silent_mood_active(shard):
             return False
         # 生日轻语（1.3.1）：不受 inject_mode 频控辖（一天至多一条、自带角色

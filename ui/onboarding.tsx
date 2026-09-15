@@ -1,11 +1,15 @@
-// 新手引导（1.2.6）：首次安装四步向导（Modal）。仅 guide.wizard 为空时由宿主
-// 状态自动弹出；完成/跳过经 set_onboarding 落盘，管理页可 reopen 再看一次。
-// 向导本身不改任何配置（除了第 2 步用户主动点的"开启"）——锚点沿随机默认值，
-// 我们只解释"她早就有自己的节律，只是今天开始被观测"，不要求用户设锚点。
+// 新手引导（1.2.6）：首次安装向导（Modal）；修订轮三扩到六步——新增
+// "记住生日"（内嵌生日设置卡，与时光页同一组件同一保存通路）与
+// "她的房间"（壁纸/外观引导，点按钮直达设置页）。仅 wizard_pending 时自动弹
+// （引导记录带版本：老用户在新版引导改版后会被再放行一次，走完盖新版本号）；
+// 完成/跳过经 set_onboarding 落盘，管理页可 reopen 再看一次。
+// 向导本身不改任何配置（除第 2 步用户主动点的"开启"与第 4 步主动填的生日）——
+// 锚点沿随机默认值，我们只解释"她早就有自己的节律，只是今天开始被观测"。
 // hosted-tsx 约束：唯一 export 在任何 JSX 闭合标签之前；辅助组件放文件尾部靠提升
 import { Button, Modal, StatusBadge } from "@neko/plugin-ui"
 import { useState } from "@neko/plugin-ui"
-import type { ChannelStatus, Status, TFunc } from "./types"
+import type { BirthdayView, ChannelStatus, Status, TFunc } from "./types"
+import { BirthdaySettingsCard } from "./birthdaycard"
 
 export function OnboardingWizard(props: {
   t: TFunc
@@ -14,11 +18,18 @@ export function OnboardingWizard(props: {
   channelStatus?: ChannelStatus
   canToggle: boolean
   onEnableRhythm: () => void
+  // 修订轮三：生日页复用「时光」页设置卡（数据/保存通路同源）；外观页只做
+  // 引导与跳转（去设置页看真实卡片），不在向导里复刻外观逻辑
+  birthday?: BirthdayView
+  canSaveBirthday: boolean
+  onSetBirthday: (date: string, keepDiary: boolean) => Promise<boolean>
+  onGotoAppearance: () => void
   onFinish: (action: "done" | "skip") => void
 }) {
-  const { t, open, status, channelStatus, canToggle, onEnableRhythm, onFinish } = props
+  const { t, open, status, channelStatus, canToggle, onEnableRhythm,
+    birthday, canSaveBirthday, onSetBirthday, onGotoAppearance, onFinish } = props
   const [step, setStep] = useState(0)
-  const total = 4
+  const total = 6
 
   if (!open) return null
 
@@ -61,7 +72,11 @@ export function OnboardingWizard(props: {
         <EnableStep t={t} enabled={enabled} canToggle={canToggle} onEnable={onEnableRhythm} />
       ) : null}
       {step === 2 ? <ChannelStep t={t} channelStatus={channelStatus} /> : null}
-      {step === 3 ? <DoneStep t={t} /> : null}
+      {step === 3 ? (
+        <BirthdayStep t={t} birthday={birthday} canSave={canSaveBirthday} onSave={onSetBirthday} />
+      ) : null}
+      {step === 4 ? <RoomStep t={t} onGoto={onGotoAppearance} /> : null}
+      {step === 5 ? <DoneStep t={t} /> : null}
     </Modal>
   )
 }
@@ -102,7 +117,7 @@ function WelStep(props: { t: TFunc }) {
         </div>
       </div>
       <p className="tm-ob-note">
-        {t("onboarding.wel.note", { defaultValue: "插件不替她做任何决定：只把她的状态递到她面前。所有功能都是可选的，接下来两页帮你确认环境。" })}
+        {t("onboarding.wel.note", { defaultValue: "插件不替她做任何决定：只把她的状态递到她面前。所有功能都是可选的，接下来几页帮你确认环境、记下两件小事。" })}
       </p>
     </div>
   )
@@ -193,6 +208,53 @@ function channelStatusLabel(t: TFunc, ch: { enabled?: boolean; dormant_reason?: 
   if (ch.dormant_reason === "no_model") return t("onboarding.channels.noModel", { defaultValue: "休眠 · 槽位没配模型" })
   if (ch.dormant_reason === "free_route") return t("onboarding.channels.freeRoute", { defaultValue: "休眠 · 宿主免费端点限制" })
   return t("onboarding.channels.dormant", { defaultValue: "休眠中" })
+}
+
+function BirthdayStep(props: {
+  t: TFunc
+  birthday?: BirthdayView
+  canSave: boolean
+  onSave: (date: string, keepDiary: boolean) => Promise<boolean>
+}) {
+  const { t, birthday, canSave, onSave } = props
+  const set = birthday?.set === true
+  return (
+    <div className="tm-ob-step">
+      <p className="tm-ob-lead">
+        {t("onboarding.bday.lead", { defaultValue: "她记得主人的生日：当天你开口聊的第一句话时，她会收到「今天是主人的生日」的轻语——说不说、怎么祝福，全由她自己决定。现在就把日子记下吧。" })}
+      </p>
+      <BirthdaySettingsCard t={t} birthday={birthday} canSave={canSave} onSave={onSave} />
+      <p className="tm-ob-note">
+        {t("onboarding.bday.privacy", { defaultValue: "年份只用来校验日期合法性，插件从不告诉她岁数。" })}
+      </p>
+      <p className="tm-ob-note">
+        {set
+          ? t("onboarding.bday.done", { defaultValue: "已记下。以后想改，还是在「时光」页底部的这张卡。" })
+          : t("onboarding.bday.later", { defaultValue: "现在不想填也完全可以：没填日期前这个功能安静休眠，「时光」页底部随时能补。" })}
+      </p>
+    </div>
+  )
+}
+
+function RoomStep(props: { t: TFunc; onGoto: () => void }) {
+  const { t, onGoto } = props
+  return (
+    <div className="tm-ob-step">
+      <p className="tm-ob-lead">
+        {t("onboarding.room.lead", { defaultValue: "这个面板是她和你共处的房间——顺手给房间挑一张壁纸吧。" })}
+      </p>
+      <p className="tm-ob-note">
+        {t("onboarding.room.what", { defaultValue: "「设置」页的「面板外观」卡：从图库挑一张当壁纸，或导入新图进图库；填充方式、背景明暗、字体浓度都在那张卡上实时预览。" })}
+      </p>
+      <p className="tm-ob-note">
+        {t("onboarding.room.privacy", { defaultValue: "图库图片只存进插件的本地数据，不会上传到任何地方。" })}
+      </p>
+      <div className="tm-ob-state">
+        <span className="tm-ob-state-text">{t("onboarding.room.hint", { defaultValue: "现在就去看看，或者以后再说——外观永远等得起。" })}</span>
+        <Button onClick={onGoto}>{t("onboarding.room.btn", { defaultValue: "去设置页看看" })}</Button>
+      </div>
+    </div>
+  )
 }
 
 function DoneStep(props: { t: TFunc }) {

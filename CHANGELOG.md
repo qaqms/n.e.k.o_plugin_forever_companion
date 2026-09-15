@@ -1480,3 +1480,71 @@ debug_mode 开启期间仍对 Agent 可见——开发者态知情接受；要�
 「平台机制与已知限制」补聊天可见面条目；版本号按 1.3.x 修订号归位维持 1.3.1
 （本增补记入 1.3.1 节内，不另起版本）。i18n 零新键、ui/ 零触碰、数据层零触碰。
 测试 435→437。验证：release_gate 五门全绿。
+
+---
+
+**增补（1.3.1 修订轮二 · 发版前审查修复）**：
+
+对 1.3.0→1.3.1 全量 diff 做逐块审查，核出三处并修复：
+
+- **B1（真 bug·UI）生日卡纪念手记开关的失败回滚失效**：`moment.tsx`
+  `onToggleKeep` 在即时保存分支先 `setDraftKeep(v)` 再 `onSave`——TmSwitch
+  乐观回滚契约是"失败翻回 checked"，而 checked 正是被提前写脏的草稿值，
+  失败时翻回"已改未存"的假状态；5s 轮询因服务端值没变（deps 不变）不会
+  纠正，假状态挂到用户点确认补存或重开面板。修法：即时保存分支只在
+  ok 后动草稿值（成功时 refresh 收编在前、就地同步做双保险）；未设日期
+  的草稿分支纯本地，保持提前写。DESIGN 生日节同步记录该契约。
+- **B2（真 bug·文本）whisper.py 重复注释行**：生日轻语接线时"静默类情绪
+  动作期间不注入身体轻语"注释写了两遍，删一行。
+- **D1（文档口径）生日轻语的链路前提从未写明**：触发挂在
+  `_handle_new_user_message`，上游有 tick 的 fail-closed 全局拦截
+  （`[tide].enabled` ∧ 各角色总开关都关着时整条注入链路不跑）与
+  `_enabled(msg_shard)` 逐角色闸——只开 `[birthday]` 不开潮汐模拟的
+  新装用户会永远等不到轻语，而 README「真机验证」与功能介绍都没提。
+  纪念日轻语同病（1.1.0 起一贯如此），本轮按家族口径明载：README 生日节
+  补「链路前提」条 + 「平台机制与已知限制」补"一切轻语都挂在潮汐模拟
+  开关上"总条、plugin.toml/config.example.toml `[birthday]` 段注释镜像、
+  DESIGN 生日节补同条、capintro 生日 limits 增补第 5 条（八语 +limit5，
+  zh-CN 与 `core/intros.py` 事实源逐字同）。功能页四道闸本就会标
+  "总开关未开"，故只修口径不动链路（生日挪链路会破掉"消息驱动、当天
+  首聊"的设计语义，得不偿失）。
+
+**核对过不是问题的**：`PushMessageResult` 实为 TypedDict（运行时真 dict），
+`submitted is False` 水位保护在生产路径有效；`invalid_birthday_date` 走
+`codeToCamel` 通用映射有八语译文；`update_settings` 早退非原子
+（cycle 字段先落盘再参数拒收）是六枚稳定码共有的既有模式且面板从不混发
+字段，不构成回归；debug_\* 动态入口 Agent 可见泄漏已在修订轮留账（待宿主）。
+测试 437 不变（B1 属 hosted-tsx 编译面、B2/D1 属注释文档面）；验证：
+release_gate 五门全绿。
+
+---
+
+**增补（1.3.1 修订轮三 · 新手向导扩到六步：记生日 + 看壁纸）**：
+
+用户点名：给新手引导加"设置生日"和"壁纸设置"的引导。1.3.1 的生日能力默认开
+但入口藏得深（「时光」页底部），壁纸/图库同理（「设置」页「面板外观」卡）——
+都指望用户自己发现不如引导里走一遍。
+
+**修法**：向导四步 → **六步**，`0 认识 → 1 开启节律 → 2 通道体检 → 3 记住生日
+→ 4 她的房间（壁纸）→ 5 收尾`。第 4 步把「时光」页的生日设置卡**原地内嵌**进
+向导：先抽 `ui/birthdaycard.tsx`（组件与注释整体迁出 moment.tsx，B1 修复随行），
+时光页与向导 import 同一份，保存仍走 `update_settings` 定向字段——两处行为
+永远一致，向导不复刻第二套日期逻辑。第 5 步只做引导与跳转（说明 + "去设置页
+看看"按钮 → `closeWizard("done") + setTab("settings")`，真实外观卡原地可用），
+不在向导里复刻图库/上传。向导仍然不改任何配置：生日页是用户主动填、壁纸页
+只是领路；wel 页"接下来两页"改去计数化措辞（八语同改）。
+
+**改版重弹（核心契约变更）**：`_GUIDE_VERSION` "1"→"2"，`wizard_pending` 从
+"wizard=='' 才弹"扩为"done/skip 但版本不符也再弹"——老用户（含升级实机）会
+再见到一次六步向导，走完盖新版本号收工；坏记录/无版本记录 fail-open 到
+"多看一次向导"侧（与 norm 既有哲学同）。reopen 语义不变。
+
+**i18n**：新增 9 键 ×8 语（onboarding.bday.lead/privacy/done/later +
+onboarding.room.lead/what/privacy/hint/btn），改 1 键（wel.note 去"两页"计数），
+每语 780→790；TSX defaultValue 与 zh-CN 逐字对齐（自造一次性对拍查出）。
+DESIGN 页签清单行同步（birthdaycard 登记 + 六步与重弹契约一句）；README
+快速开始改六步口径 + 老用户重弹说明。
+
+**测试**：`test_onboarding.py` 改 `test_wizard_pending`（版本相符才 False）+
+新增 `test_wizard_pending_regates_on_guide_version_bump`（旧版 done/skip、无版本
+记录重弹；走完新向导盖章后不再弹）。其余门零触碰。验证：release_gate 五门全绿。
