@@ -1548,3 +1548,48 @@ DESIGN 页签清单行同步（birthdaycard 登记 + 六步与重弹契约一句
 **测试**：`test_onboarding.py` 改 `test_wizard_pending`（版本相符才 False）+
 新增 `test_wizard_pending_regates_on_guide_version_bump`（旧版 done/skip、无版本
 记录重弹；走完新向导盖章后不再弹）。其余门零触碰。验证：release_gate 五门全绿。
+
+### 1.3.2：面板保存面收口——设置页那枚「保存设置」一趟落设置+外观（实机反馈）
+
+用户反馈：设置区块没有保存按钮，满页只看得见外观卡那枚「保存外观」，容易读成
+"这页只能存外观"。读码确诊两条病同在：① `ManagePane`（设置页）压根没挂 `SaveBar`，
+页内可改的**通用设置（时区 / 调试模式）在本页没有任何落点**——要存就得切去
+周期/情绪/日记任一页签点那边的「保存设置」；② 同时外观卡自带「保存外观 / 还原」
+私有钮，于是这页唯一的"保存"字样恰好只管一摊。
+
+主人拍板三点口径：保留「还原」、**只让设置页那枚管外观**（另三页维持只存设置）、
+文案沿用「保存设置」（外观本就长在设置页，不算错位；也免了八语改文案）。
+
+- **外观卡去钮**：`ui/appearance.tsx` 删「保存外观」与在飞态，props 去掉 `saving`/`onSave`
+  （不留哑参数）；卡底只留"有未保存的外观调整 / 外观已同步"读数 + 「还原」（`disabled={!dirty}`）。
+  卡顶口径行随之改指页面底部（八语 `panel.appearance.hint`）。
+- **`ui/savebar.tsx` 加 busy 闸**：新增可选 `saving`，在飞只**禁用**按钮不改文案——
+  统一保存一趟发两趟写盘，连点会重复落；零新增 i18n 键。
+- **`ui/manage.tsx` 加 `footer` 槽**：渲染在最后一张卡之后（与另三页同位）。危险区与
+  角色名单是"点了即生效"的入口，保存条压在它们上面会让吸底条一直浮着盖住名单。
+- **`ui/panel.tsx` 拆通道再接统一口**：原 `saveAppearance`（自带 toast）→ `postAppearanceDraft`
+  （只发不弹），原 `saveSettings` 里的入口体 → `postSettings`（动作缺失/锚点未设都抛错，
+  由调用方翻 toast）；新增 `saveSettingsPage`：先 `postSettings`，**外观 dirty 才**
+  `postAppearanceDraft`（没动过不发第二趟，省一次无谓写盘），两半各自独立成败——
+  设置被锚点闸挡下时外观照样存住、读数当场转"已同步"；失败只报第一条（两半同因居多），
+  没存住的那半由可见状态兜底（表单未回填 / 读数仍亮）。
+  `apSaving` 状态由 `savingAll` 取代（唯一在飞闸门）。
+- **i18n 八语 790→787**：`panel.appearance.saveBtn` / `savingNow` / `applied` 三键随钮退场
+  八语同删（钮没了还留译文=下一轮凭旧串把钮加回来的口粮）。改前先验过 json load+dump
+  与原文件逐字节一致，确认脚本只动目标行。
+- **常驻门 `tests/test_save_surface.py`（四条）**：外观落盘出口在 ui/ 内唯一（且不在外观卡，
+  卡内禁 `api.call`）；设置页必须注入且只注入一条保存条并接 `saveSettingsPage`；
+  统一保存体内 `postSettings`+`postAppearanceDraft` 两半齐、且带 `if (apDirty)` 闸；
+  另三页 `onSave={saveSettings}` 恰三处、全盘面 `<SaveBar` 恰四处；三枚淘汰键在
+  `ui/`+`i18n/` 整文件钉死不得复活。**反向对照已做**：往外观卡塞一枚假
+  `"set_panel_appearance"` + 假 `panel.appearance.saveBtn` → 两条断言当场红，撤样回绿。
+- 文档：README「面板外观」段与「设置」页签行换口径（底部保存条统一落盘、
+  危险区不经保存条）。DESIGN 无涉及本口径的条款，未动。
+- **验证（1.3.2）**：release_gate 五门全绿（pytest 442 = 1.3.1 线 438 + 本门 4 /
+  ruff / 链接门 25 模块 / check / hosted-tsx）；宿主寄放副本已同步并 diff 对拍一致；
+  包 `dist/forever_companion_1.3.1_save_unify.neko-plugin`（889706B，sha 前缀
+  `1ae4d7e2`，98 条目，实测不含 store.db/data/）。
+- **版号账**：本轮 rebase 到已发版的 1.3.1（`v1.3.1` tag 在远端）之上，按主人拍板**只在台账上
+  占 1.3.2 号**——`plugin.toml` 仍 1.3.1，涨不涨号归发行侧定。rebase 唯一冲突在 CHANGELOG
+  （双方在文件尾各自追加），八语自动合净（790→787）、`ui/panel.tsx` 两侧改动共存
+  （他们的 `onSetBirthday` 与本脚 `saveSettingsPage` 各在一处，`<SaveBar` 仍恰四处）。

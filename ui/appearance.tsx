@@ -1,6 +1,7 @@
 // 面板外观卡（1.2.0）：图片图库 + 可调背景。
 // 图库（入册/删除/缩略图）由 panel.tsx 经 gallery_* 入口即时落盘；
-// "用哪张 + 十项调节"是 draft 参数——实时预览，点「保存外观」才生效。
+// "用哪张 + 十项调节"是 draft 参数——实时预览，落盘交给设置页底部那枚「保存设置」
+// （1.3.2：卡内不再自设保存钮，一页两个"保存"会让人以为外观改丢了）。
 // hosted-tsx 约束：唯一 export 在任何 JSX 闭合标签之前；不支持 <svg>（九宫格/占位图纯 CSS）
 import { Button, Card, Field, ImageUpload, SegmentedControl, Slider } from "@neko/plugin-ui"
 import { useState } from "@neko/plugin-ui"
@@ -18,15 +19,13 @@ export function AppearanceCard(props: {
   items: GalleryItem[]
   draft: Appearance
   saved: Appearance
-  saving: boolean
   uploading: boolean
   onDraft: (patch: Record<string, string | number>) => void
-  onSave: () => void
   onRevert: () => void
   onAdd: (dataUrl: string, thumb: string, name: string) => void
   onAskRemove: (item: GalleryItem) => void
 }) {
-  const { t, items, draft, saved, saving, uploading, onDraft, onSave, onRevert, onAdd, onAskRemove } = props
+  const { t, items, draft, saved, uploading, onDraft, onRevert, onAdd, onAskRemove } = props
   // 压缩档只影响"怎么入册"，不是面板状态，留在卡内；上传错误本地化同前
   const [quality, setQuality] = useState<string>("auto")
   const [uploadError, setUploadError] = useState<string | null>(null)
@@ -210,19 +209,15 @@ export function AppearanceCard(props: {
           </div>
         </Field>
 
+        {/* 待存读数 + 还原：真正的落盘在页面底部那条「保存设置」上 */}
         <div className="tm-appearance-save">
           <span className="tm-save-hint">
             {dirty
               ? t("panel.appearance.unsavedHint", { defaultValue: "有未保存的外观调整" })
               : t("panel.appearance.savedHint", { defaultValue: "外观已同步" })}
           </span>
-          <Button tone="default" disabled={!dirty || saving} onClick={onRevert}>
+          <Button tone="default" disabled={!dirty} onClick={onRevert}>
             {t("panel.appearance.revert", { defaultValue: "还原" })}
-          </Button>
-          <Button tone="primary" disabled={!dirty || saving} onClick={onSave}>
-            {saving
-              ? t("panel.appearance.savingNow", { defaultValue: "保存中…" })
-              : t("panel.appearance.saveBtn", { defaultValue: "保存外观" })}
           </Button>
         </div>
       </div>

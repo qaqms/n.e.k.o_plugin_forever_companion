@@ -9,6 +9,7 @@ import type { HostedAction, PluginSurfaceProps } from "@neko/plugin-ui"
 import type { Appearance, FormValues, GalleryItem, Settings, State } from "./types"
 import {
   DATE_RE,
+  appearanceEquals,
   appearanceVars,
   bgLayerStyle,
   compressImageDataUrl,
@@ -75,8 +76,9 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   const [imgCache, setImgCache] = useState<Record<string, string>>({})
   const imgInflight = useRef<Record<string, boolean>>({})
   const thumbTried = useRef<Record<string, boolean>>({})
-  const [apSaving, setApSaving] = useState(false)
   const [apBusy, setApBusy] = useState(false)
+  // 设置页那枚「保存设置」在飞标记：它一趟按两摊（设置 + 外观），连点会重复写盘
+  const [savingAll, setSavingAll] = useState(false)
   // 时光页：相处统计的热力图/月报数据量大，进页时按需拉取（不随 5s 轮询）；
   // 切角色时清掉旧数据等下次进页重拉
   const [heatData, setHeatData] = useState<Heatmap | null>(null)
@@ -202,27 +204,20 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     setDraftAp((prev) => normAppearance(Object.assign({}, prev, patch)))
   }
 
-  // 外观保存：整包 draft 参数发后端（悬空 bg_id 会被后端静默解除），回填归一结果
-  async function saveAppearance() {
+  // 外观落盘：整包 draft 参数发后端（悬空 bg_id 会被后端静默解除），回填归一结果。
+  // 只发不弹——成功与否由调用方（设置页的统一保存）汇成一条反馈
+  async function postAppearanceDraft() {
     const next = draftAp
-    setApSaving(true)
-    try {
-      const payload = unwrapCallResult(await props.api.call("set_panel_appearance", {
-        bg_id: next.bg_id, fill: next.fill, position: next.position,
-        blur: next.blur, dim: next.dim, brightness: next.brightness,
-        saturate: next.saturate, contrast: next.contrast, glass: next.glass,
-        card_alpha: next.card_alpha, text_weight: next.text_weight,
-      }))
-      const r = (payload || {}) as Record<string, any>
-      const ap = normAppearance(r.appearance || next)
-      setSavedAp(ap)
-      setDraftAp(ap)
-      toast.success(t("panel.appearance.applied", { defaultValue: "背景已更新" }))
-    } catch (err) {
-      toast.error(errorText(err, t))
-    } finally {
-      setApSaving(false)
-    }
+    const payload = unwrapCallResult(await props.api.call("set_panel_appearance", {
+      bg_id: next.bg_id, fill: next.fill, position: next.position,
+      blur: next.blur, dim: next.dim, brightness: next.brightness,
+      saturate: next.saturate, contrast: next.contrast, glass: next.glass,
+      card_alpha: next.card_alpha, text_weight: next.text_weight,
+    }))
+    const r = (payload || {}) as Record<string, any>
+    const ap = normAppearance(r.appearance || next)
+    setSavedAp(ap)
+    setDraftAp(ap)
   }
 
   // 导入：面板侧已压好并生成缩略图；入册即时生效但不自动选为壁纸（选图走 draft+保存）
@@ -288,23 +283,28 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     cancelLabel: t("panel.cancel", { defaultValue: "取消" }),
   }
 
-  async function saveSettings() {
+  // 设置落盘（周期/注入/情绪/日记/通用同一入口）：锚点未设与动作缺失都当场抛错，
+  // 由调用方翻成 toast
+  async function postSettings() {
     if (!updateSettingsAction) {
-      toast.error(t("panel.errors.actionUnavailable", { defaultValue: "操作不可用（插件可能未运行）" }))
-      return
+      throw new Error(t("panel.errors.actionUnavailable", { defaultValue: "操作不可用（插件可能未运行）" }))
     }
+    if (!DATE_RE.test(String(state.anchor_date || ""))) {
+      throw new Error(t("panel.errors.setAnchorFirst", { defaultValue: "请先设置潮汐首日锚点，再开启模拟" }))
+    }
+    const result = await props.api.call("update_settings", { ...form })
+    // 用入口返回的最新快照立即回填表单，不依赖 context 重取
+    const snap = (result && typeof result === "object" && (result as Record<string, any>).enabled !== undefined)
+      ? (result as Partial<Settings>)
+      : null
+    if (snap) {
+      setForm(settingsToForm({ ...settings, ...snap }))
+    }
+  }
+
+  async function saveSettings() {
     try {
-      if (!DATE_RE.test(String(state.anchor_date || ""))) {
-        throw new Error(t("panel.errors.setAnchorFirst", { defaultValue: "请先设置潮汐首日锚点，再开启模拟" }))
-      }
-      const result = await props.api.call("update_settings", { ...form })
-      // 用入口返回的最新快照立即回填表单，不依赖 context 重取
-      const snap = (result && typeof result === "object" && (result as Record<string, any>).enabled !== undefined)
-        ? (result as Partial<Settings>)
-        : null
-      if (snap) {
-        setForm(settingsToForm({ ...settings, ...snap }))
-      }
+      await postSettings()
       toast.success(t("panel.messages.saved", { defaultValue: "设置已保存" }))
       try {
         await props.api.refresh()
@@ -314,6 +314,41 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     } catch (err) {
       toast.error(errorText(err, t))
     }
+  }
+
+  // 设置页的统一保存（1.3.2）：这页既能改通用设置、又能改面板外观，
+  // 而外观卡不再有自家保存钮——一趟把两摊待存内容都落盘。
+  // 两半各自独立成败：设置被锚点闸挡下时外观照样存住（卡内读数随之转"已同步"）；
+  // 外观没动过就不发第二趟，省一次无谓写盘。失败只报第一条（两半同因居多），
+  // 没存住的那半由各自的可见状态兜底：表单未回填、外观读数仍亮着"有未保存的调整"
+  async function saveSettingsPage() {
+    if (savingAll) return
+    setSavingAll(true)
+    const apDirty = !appearanceEquals(draftAp, savedAp)
+    let failure: unknown = null
+    try {
+      await postSettings()
+    } catch (err) {
+      failure = err
+    }
+    if (apDirty) {
+      try {
+        await postAppearanceDraft()
+      } catch (err) {
+        if (!failure) failure = err
+      }
+    }
+    try {
+      await props.api.refresh()
+    } catch {
+      // 回读失败不影响落盘结论
+    }
+    if (failure) {
+      toast.error(errorText(failure, t))
+    } else {
+      toast.success(t("panel.messages.saved", { defaultValue: "设置已保存" }))
+    }
+    setSavingAll(false)
   }
 
   // 总开关切换：返回值供 TmSwitch 乐观回滚（false = 取消/失败，开关动画回落）
@@ -958,16 +993,15 @@ export default function Panel(props: PluginSurfaceProps<State>) {
               canPrune={!!pruneLanlan}
               onPruneLanlan={onPruneLanlan}
               onReopenGuide={reopenGuide}
+              footer={<SaveBar t={t} canSave={!!updateSettingsAction} saving={savingAll} onSave={saveSettingsPage} />}
             >
               <AppearanceCard
                 t={t}
                 items={galleryItems}
                 draft={draftAp}
                 saved={savedAp}
-                saving={apSaving}
                 uploading={apBusy}
                 onDraft={onDraftChange}
-                onSave={saveAppearance}
                 onRevert={() => { setDraftAp(savedAp) }}
                 onAdd={addImage}
                 onAskRemove={(item: GalleryItem) => removeImage(String(item.id || ""))}

@@ -21,6 +21,9 @@ export function ManagePane(props: {
   // 再看一次新手引导（1.2.6）：只清引导记录，不动任何配置
   onReopenGuide?: () => void
   children?: any
+  // 页面底部的吸底保存条由 panel.tsx 注入（放在最后一张卡之后，与其它设置页同位；
+  // 危险区与角色名单是"点了即生效"的区，不该被保存条压在下面）
+  footer?: any
 }) {
   const { t, form, updateForm, resetAll, onResetAll, lanlanList, lanlan, canPrune, onPruneLanlan, onReopenGuide } = props
 
@@ -59,7 +62,8 @@ export function ManagePane(props: {
         ) : null}
       </Card>
 
-      {/* 面板外观由 panel.tsx 以 children 注入（保持背景图状态在顶层管理） */}
+      {/* 面板外观由 panel.tsx 以 children 注入（保持背景图状态在顶层管理）；
+          卡内只留「还原」，落盘与通用设置共用下方那一条保存条 */}
       {props.children}
 
       <Card title={t("panel.settings.dangerZone", { defaultValue: "危险区" })}>
@@ -105,6 +109,7 @@ export function ManagePane(props: {
           </div>
         </Card>
       ) : null}
+      {props.footer}
     </div>
   )
 }
