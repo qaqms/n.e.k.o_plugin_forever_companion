@@ -1593,3 +1593,69 @@ DESIGN 页签清单行同步（birthdaycard 登记 + 六步与重弹契约一句
   占 1.3.2 号**——`plugin.toml` 仍 1.3.1，涨不涨号归发行侧定。rebase 唯一冲突在 CHANGELOG
   （双方在文件尾各自追加），八语自动合净（790→787）、`ui/panel.tsx` 两侧改动共存
   （他们的 `onSetBirthday` 与本脚 `saveSettingsPage` 各在一处，`<SaveBar` 仍恰四处）。
+
+
+### 1.3.2 追加轮：内部提示不得上屏——阶段开场白与情绪恢复台词的 visibility 收口（实机日志钉出）
+
+主人实机看到 `[潮汐·今日状态] 你刚意识到自己进入了新的身体阶段…请以你自己的口吻…` 整段出现在
+聊天框（署名 forever_companion），随后 YUI 又把那句话复述一遍。定责三条硬证据：①三棵树
+（装机态 `%LOCALAPPDATA%\...\plugins`、宿主寄放副本、Steam 内置 `resourcesin\plugin\plugins`）
+里含该文案的文件**只有** `mixins/whisper.py`；②主日志 `N.E.K.O_Plugin_20260921.log:320`
+`release batch n=1 keys=['forever_companion.phase_opener']`——coalesce key 就是我们传的 source；
+③别家用 `visibility=["chat"]` 的都是"本来就要显形"的内容（sticker_manager 发图、jukebox/
+netease 播报），与这句话无关。⇒ **插件自身两处传参错**；宿主按契约办事，无需改平台、也无可提上游。
+
+根因是把"给她看"与"让她说"当成同一件事：宿主 `visibility` 管用户可见面（含 `"chat"` →
+`character_runtime.py:1374-1379` 走 `render_chat_blocks` 原样渲染 parts，署名取 `source`），
+`ai_behavior` 管起不起轮（`proactive_bridge.py` 明写 "visibility is NOT consulted here"）。
+1.0.0 起 `whisper.py:472`（阶段开场白）与 `mood_actions.py:72`（限时情绪到期恢复台词）都带
+`visibility=["chat"]`，而这两句文案自称"仅给你看的内部提示，不要复述本句"——契约与实现自相矛盾。
+
+- 两处改回 `visibility=[]`，`ai_behavior="respond"` 不动：她照旧主动开口，只是提示原文不再上屏。
+  插件其余六处推送本来就是 `[]`，`__init__.py:17` 的房规也写着 `[]`（`["chat"]` 是全仓仅两例外）。
+- 新常驻门 `tests/test_push_visibility.py`（五测）：①②行为门真跑开场白与恢复台词两条链路，
+  断言"不上屏 + 仍起轮"；③AST 静态门扫**推送出口**——直调 `push_message` 之外还算上主类注入
+  services 的 `self._push` 转发口（只盯 `push_message` 会漏掉整条语气链路），visibility 只准
+  空列表字面量、`**kwargs` 必须静态解析到字面量，解析不出即红；④八种坏形态反向对照逐个必须
+  报红；另设"至少扫到 10 个出口"的防空转闸。**反向对照当场验了两轮**：头一次把恢复台词改回
+  `["chat"]` 后门却全绿——脚本按整串字面量（含换行符）做 replace，而工作树是 CRLF，改动根本没落地（假验证）；
+  改成按行替换、并先确认 `git diff --stat` 真变了，行为门 + 静态门一起红、撤样回绿。
+- 文档：DESIGN 新增「推送可见面契约（1.3.2，长期有效）」，含纯转发口的已知残余（新开一条
+  转发口必须同时把名字进测试的 `_OUTLETS`）；README「平台机制与已知限制」加"内部提示永不上屏"条。
+- 验证（1.3.2 追加轮）：release_gate 五门全绿（pytest 447 = 1.3.2 首轮 442 + 本门 5 / ruff /
+  链接门 25 模块 / check / hosted-tsx）；宿主寄放副本已同步并 diff 对拍一致；包
+  `dist/forever_companion_1.3.1_visibility_fix.neko-plugin`（890171B，sha 前缀 `68a977bf`，
+  98 条目，包内两处 `visibility=["chat"]` 实测归零）——**该包是叠加包**，含 1.3.2 首轮的
+  保存面收口 + 本轮可见面修复。未加新 callable 入口，覆盖导入即生效、无需整启宿主。
+
+
+### 1.3.2 追加轮二：日记邀请节流水位落盘——重启不再重递首邀（实机日志计数钉出）
+
+台账 §6-4 挂着的债今天又复现。日志计数（`logs/plugin/N.E.K.O_Plugin_forever_companion_20260921.log`）：
+20:22:07 与 20:53:39 两次 `startup ok` 之后各跟一条 `journal invite pushed for YUI via read
+(0 pages, force=False)`——她一页日记都没写，`journal_due()` 恒真，而节流水位
+`last_journal_invite_ts` 只是 shard 的**内存字段**（`core/state.py` 旧注自陈"内存即可：
+重启最多重推一次邀请"）⇒ 切角色卡/改设置/覆盖导入每次都算一次重启，每算一次就多一条
+read 邀请流进她的上下文。
+
+- 落盘位置取 `cycle@<角色>`（与 `phase_seen` 同一块 shard blob、同一个 `_save_shard_cycle`
+  出口）：零新键、零迁移；`_ensure_shard` 读回 cycle 时一并回灌水位，脏值回落 0.0。
+- **只有递成功那次才写盘**：`submitted is False` 的拒收档在原逻辑里就直接 return，
+  不占 24h 窗口（1.2.4 手动档"可立刻重按"的语义在盘上同样成立）。
+- 顺带修好一条更早就存在的口径：面板「正等她落笔」判据是"上次递邀晚于末笔时刻"，
+  过去一重启水位归零、提示凭空消失——README 承诺的"挂到她写出新页为止"现在才真跨重启；
+  手动档 10 分钟冷却同批受益。
+- 陈旧注释两处改口：`core/state.py` 的"内存即可"、`_journal_invite_pending` 文档串里的
+  "重启即弃…最多重新递邀一次"（就是这句谎话让挂起态一直断）。
+- 测试 +3（`tests/test_journal.py`）：递成功必写盘 / 同盘重建实例后 24h 内不再递 +
+  挂起态仍在 + 越过窗口照常再递 / 拒收那次不落盘。**两轮反向对照都做了**：抽掉落盘行
+  → 前两条当场红；把落盘挪到提交回执检查之前 → 第三条红；撤样后 33 条全绿。
+- 文档：README「日记邀请双档」补跨重启口径；DESIGN 个人日记段新增「递邀节流落盘」条。
+- 已知残余（有意不动）：非 force 档递失败时内存水位照旧被消耗（1.2.4 定案，防通道长期
+  故障时每趟监督重推刷屏），所以"通道一直坏 + 中途重启"这一格仍会再试一次——比原来少，
+  不是零。
+- **验证（1.3.2 追加轮二）**：release_gate 五门全绿（pytest 450 = 447 + 本批 3 / ruff /
+  链接门 25 模块 / check / hosted-tsx）；宿主寄放副本已同步并 diff 对拍一致；包
+  `dist/forever_companion_1.3.1_invite_throttle.neko-plugin`（891008B，sha 前缀
+  `2c516f60`，98 条目）——**叠加包**，含本轮 + 可见面修复 + 保存面收口三批改动，
+  实测包内 `visibility=["chat"]` 归零、邀请落盘行在位。零新入口，覆盖导入即生效。

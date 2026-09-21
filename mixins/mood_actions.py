@@ -70,7 +70,8 @@ class MoodActionsMixin:
         style = "gentle" if action in _POSITIVE_ACTIONS or action == "ripple" else "conflict"
         text = self._RECOVERY_STYLES[style].format(label=label_text, master=MASTER_NAME_TOKEN)
         self.push_message(
-            visibility=["chat"],
+            # 同阶段开场白：只起轮、不上屏（文案自称"内部提示，不要复述本句"）
+            visibility=[],
             ai_behavior="respond",
             parts=[{"type": "text", "text": text}],
             source=self.plugin_id,

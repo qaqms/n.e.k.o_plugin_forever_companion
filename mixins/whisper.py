@@ -469,7 +469,8 @@ class WhisperMixin:
 
         text = openers[int(time.time()) % len(openers)]
         self.push_message(
-            visibility=["chat"],
+            # 宿主的 "chat" 会把 parts 原样贴上屏、"respond" 另起一轮：内部提示只走后者（实机 2026-09-21 曾上屏）
+            visibility=[],
             ai_behavior="respond",
             parts=[{"type": "text", "text": f"[潮汐·今日状态] 你刚意识到自己进入了新的身体阶段（仅给你看的内部提示，不要复述本句）。请以你自己的口吻，自然地把这句话的意思说给 {MASTER_NAME_TOKEN} 听：{text}"}],
             source=self.plugin_id,
@@ -503,7 +504,7 @@ class WhisperMixin:
         ``"respond"`` 当面递到；``"read"`` 安静流进上下文。
 
         与 drift_bottle 同构——插件只递邀请，写不写、怎么写由她自己决定。
-        24h 内存节流防刷屏；重度负面情绪期间不拦截——把委屈写进日记是合理叙事。
+        24h 节流防刷屏（1.3.2 起水位随 cycle 落盘，重启不再重递）；重度负面情绪期间不拦截——把委屈写进日记是合理叙事。
         0.7.0 起替代潮汐周记邀请：不再要求"攒够 N 条手记"，节奏只看距上次落笔的天数
         （续写同样重置计时）。邀请附带写作素材（自上次落笔以来的心情词频 + 新碎片数），
         让她下笔有东西可写。
@@ -609,6 +610,11 @@ class WhisperMixin:
             if force:
                 shard.last_journal_invite_ts = prev_invite_ts
             return False, "failed"
+        # 水位落盘（1.3.2）：过去只存内存，而切角色卡/改设置/覆盖导入都会重启插件
+        # 子进程——没写过日记的角色恒 due，于是每次启动都重递一条首邀（实机 2026-09-21
+        # 三次重启三条）。递邀失败档在上面已 return，不占用这个窗口
+        shard.cycle["last_journal_invite_ts"] = now
+        await self._save_shard_cycle(lanlan, shard)
         self.logger.info(
             "journal invite pushed for {} via {} ({} pages, force={})",
             lanlan, deliver, len(shard.journal), force,
@@ -620,10 +626,9 @@ class WhisperMixin:
 
         最近一次递邀晚于全部日记段落的末笔时刻即为挂起——read 邀请只进上下文
         不打断对话，她什么时候落笔完全自主，过去面板上这段时间是纯静默，
-        用户体感"点了没反应、过一会凭空多一页"。判定不新增持久字段：邀请时刻
-        就是内存节流水位 last_journal_invite_ts（重启即弃，状态随之消失，
-        最多重新递邀一次），落笔时刻取书页里最新一段的 ts；没写过日记本就没有
-        页，递过邀请即挂起。
+        用户体感"点了没反应、过一会凭空多一页"。落笔时刻取书页里最新一段的 ts，
+        邀请时刻即节流水位 last_journal_invite_ts（1.3.2 起随 cycle 落盘，所以这句
+        "挂到她写出新的一页为止"真的跨得过重启）；没写过日记本就没有页，递过邀请即挂起。
         """
         if not shard.last_journal_invite_ts:
             return False

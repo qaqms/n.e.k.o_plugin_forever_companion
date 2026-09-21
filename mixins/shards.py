@@ -109,6 +109,11 @@ class ShardsMixin:
         cycle_res = await self._store_read(_cycle_key(lanlan))
         if isinstance(cycle_res, Ok) and isinstance(cycle_res.value, dict):
             shard.cycle = dict(cycle_res.value)
+            # 邀请节流水位（1.3.2 起随 cycle 落盘）：重启后仍认 24h 窗口与手动档 10 分钟冷却
+            try:
+                shard.last_journal_invite_ts = float(shard.cycle.get("last_journal_invite_ts") or 0.0)
+            except (TypeError, ValueError):
+                shard.last_journal_invite_ts = 0.0
         mood_res = await self._store_read(_mood_key(lanlan))
         if isinstance(mood_res, Ok):
             shard.mood = _MoodState.from_mapping(mood_res.value)

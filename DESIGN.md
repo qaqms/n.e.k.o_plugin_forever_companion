@@ -147,6 +147,9 @@
 - **节奏**：距上一篇日记**最近一次落笔**满 `interval_days`（默认 7）才递邀请
   （续写同样重置计时）；删掉旧周记"攒够 N 条手记"的门槛；邀请文案保留
   "不想写就由你自己决定"
+- **递邀节流（24h / 手动档 10 分钟冷却）的水位 1.3.2 起随 `cycle@<角色>` 落盘**：
+  内存态时插件子进程每次重启（切角色卡/改设置/覆盖导入都算）都会给"恒 due"的角色
+  重递一条首邀；只有**递成功**那次写盘，通道拒收那次不占窗口
 - **迁移**：旧 `weekly@<角色>` 一次性迁成个人日记页（每条周记一页、legacy 标记），
   旧 key 保留作备份；`prune_lanlan` 两把 key 都清
 
@@ -275,6 +278,29 @@ ID 和错误类型**。本插件的落地形态：
   链；`len()`/`_exc_shape()` 等 helper 包裹豁免）+ 已淘汰写法整文件文本钉死（含
   注释，历史说明不得残留可复制的违规样例）；均带反向对照。
 
+
+## 推送可见面契约（1.3.2，长期有效）
+
+宿主 `push_message` 的 `visibility` 与 `ai_behavior` 是**两个互不参考的出口**
+（`plugin/server/messaging/proactive_bridge.py` 明写 "visibility is NOT consulted here"）：
+`visibility` 含 `"chat"` 就把 parts **原样画进聊天框**（`app/main_server/character_runtime.py`
+的 `render_chat_blocks` 通道，署名取 `source`）；要不要起一轮由 `ai_behavior` 决定。
+本插件的推送**全部**是给她看的内部提示（身体轻语 / 阶段开场白 / 日记邀请 / 纪念日 /
+生日 / 情绪恢复台词 / 语气与碎片轻语），因此：
+
+- **`visibility` 一律 `[]`**（完全省略也等于 `[]`——宿主默认）。要她"主动说一句"靠
+  `ai_behavior="respond"` 起轮，而不是把提示词贴上屏。
+- 常驻门 `tests/test_push_visibility.py` 三层：①②行为门真跑开场白与恢复台词两条链路，
+  断言 `visibility == []` 且 `ai_behavior == "respond"`；③AST 静态门扫全插件推送出口
+  （直调 `push_message` + 主类注入 services 的 `self._push` 转发口），visibility 只准
+  空列表字面量、`**kwargs` 必须静态解析到字面量，解析不出即红；④八种坏形态的反向对照
+  逐个必须报红（含"纯转发口的调用方泄漏"）。
+- **已知残余**：纯转发口本体（`push=lambda **kw: self.push_message(**kw)`）放行——它不
+  决定可见面，交给调用方；调用方只有在**也走出口名**（`push_message` / `_push`）时才被
+  覆盖。新开一条自定义转发口，必须同时把它的名字进 `_OUTLETS`。
+- 由来（实机 2026-09-21 20:22）：阶段开场白与恢复台词自 1.0.0 起带 `visibility=["chat"]`，
+  提示词整段上屏、她随后又说一遍 → 同一段话出现两次；而文案自称"仅给你看的内部提示，
+  不要复述本句"，与实际渲染行为自相矛盾。
 
 ## Agent 可见面契约（1.3.1 修订轮，长期有效）
 

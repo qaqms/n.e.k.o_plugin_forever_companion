@@ -585,7 +585,8 @@ class _LanlanShard:
         self.last_activity_context_key = ""
         self.last_reconcile_nudge_ts = 0.0
         self.last_mood_instruction_ts = 0.0
-        # 个人日记邀请节流（内存即可：重启最多重推一次邀请，参照 reconcile nudge 先例）
+        # 个人日记邀请节流（1.3.2 起随 cycle@<角色> 落盘）：插件子进程会因切角色卡/
+        # 改设置/覆盖导入反复重启，内存水位一弃就让"恒 due 的角色"每次启动重递一条
         self.last_journal_invite_ts = 0.0
         # 语气感知（[emotion_sense]）：recent.json 水位（"轮数:末条回复hash"，diff 新增回复对）、
         # 校正模式的语气趋势窗口、分析节流与筛选提醒节流
