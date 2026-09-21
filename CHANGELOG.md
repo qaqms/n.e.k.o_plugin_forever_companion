@@ -1659,3 +1659,30 @@ read 邀请流进她的上下文。
   `dist/forever_companion_1.3.1_invite_throttle.neko-plugin`（891008B，sha 前缀
   `2c516f60`，98 条目）——**叠加包**，含本轮 + 可见面修复 + 保存面收口三批改动，
   实测包内 `visibility=["chat"]` 归零、邀请落盘行在位。零新入口，覆盖导入即生效。
+
+
+### 1.3.2 发版（2026-09-21）
+
+本版三批，全部由主人实机巡测钉出、各自带常驻门与反向对照：
+
+1. **面板保存面收口**——设置页底部一枚「保存设置」一趟落"通用设置 + 面板外观"
+   （此前设置页压根没有保存落点，只有外观卡那枚「保存外观」在误导）；八语 790→787；
+   新门 `tests/test_save_surface.py`（四条）。
+2. **内部提示不上屏**——阶段开场白与限时情绪恢复台词的 `visibility` 由 `["chat"]`
+   收口为 `[]`（宿主的 chat 面会把提示原文贴进聊天框，起轮只看 ai_behavior）；
+   新门 `tests/test_push_visibility.py`（五条：两条行为门 + 推送出口 AST 静态门
+   + 八种坏形态反向对照 + 防空转闸）。
+3. **日记邀请节流水位落盘**——`last_journal_invite_ts` 随 `cycle@<角色>` 持久化，
+   修掉"每次重启重递一条首邀"（她 0 页日记时节奏闸恒开）；「正等她落笔」挂起态与
+   手动档 10 分钟冷却自此真的跨重启；`tests/test_journal.py` +3。
+
+- **涨号**：`plugin.toml` 与 `pyproject.toml` 同步 1.3.1 → 1.3.2（宿主 CI 会核 tag
+  与版本号对齐，`GITHUB_REF_NAME=v1.3.2` 下已当场验过）。
+- **发行前自验**：`neko-plugin check -r --market-release` 在独立仓通过
+  （version=1.3.2 / tests=passed / payload_hash_verified=True）；CI 那支 ruff
+  （0.12.4 `--isolated --select E4,E7,E9,F,I --line-length 120`）同样全绿；
+  插件五门全绿（pytest 450 / ruff / 链接门 25 模块 / check / hosted-tsx）。
+- **包**：`dist/forever_companion_1.3.2.neko-plugin`（890995B，98 条目，
+  sha256 `d4bfd4562a002922635d5bbbb4c983e55dde5fe903cb8494de38abbdef77e544`）。
+- **市场**：本仓 `release.yml` 走的宿主 reusable workflow 只做 `check -r --market-release`
+  + evidence 工件 + 建 GitHub Release，不向市场发任何请求；市场通知与收录由主人自行处理。
