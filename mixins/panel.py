@@ -56,13 +56,19 @@ from ..core.review import (
     review_due,
 )
 from ..core.state import (
+    _AGENT_TIER_MAX_BUDGET,
+    _AGENT_TIER_MIN_BUDGET,
+    _CHANNEL_BREAK_REASON,
+    _CHANNEL_BUDGET_REASON,
     _CHANNEL_MODE_CUSTOM,
     _CHANNEL_MODE_HOST,
     _CHANNEL_MODES,
     _CHANNEL_TRANSPORT_DIRECT,
     _CHANNEL_TRANSPORT_HOST,
+    _FRAGMENT_DEFAULT_MODE,
     _FRAGMENT_DEFAULT_SLOT,
     _GALLERY_THUMB_MAX_CHARS,
+    _REVIEW_DEFAULT_MODE,
     _REVIEW_DEFAULT_SLOT,
     _REVIEW_MIN_TURNS_FORCED,
     _STORE_GALLERY_INDEX,
@@ -73,6 +79,7 @@ from ..core.state import (
     _TONE_SLOT_PREFIXES,
     _caps_key,
     _cfg_section,
+    _channel_route,
     _cycle_key,
     _debug_backup_key,
     _diary_key,
@@ -89,6 +96,7 @@ from ..core.state import (
     _review_stats_key,
     _stats_key,
     _weekly_key,
+    tier_budget_used,
 )
 from ..core.stats import (
     badges_payload,
@@ -256,11 +264,13 @@ class PanelEntriesMixin:
             },
             "fragments": await self._channel_dormancy(
                 self._fragments_enabled(shard), self._fragments_cfg,
-                default_slot=_FRAGMENT_DEFAULT_SLOT,
+                default_slot=_FRAGMENT_DEFAULT_SLOT, lanlan=lanlan, channel="fragments",
+                shard=shard,
             ),
             "review": await self._channel_dormancy(
                 self._review_enabled(shard), self._review_cfg,
-                default_slot=_REVIEW_DEFAULT_SLOT,
+                default_slot=_REVIEW_DEFAULT_SLOT, lanlan=lanlan, channel="review",
+                shard=shard,
             ),
         }
         # 近 7 天互动轮数（总览"相处信号"卡）：从时光日记/手记时间戳聚合太粗，
@@ -311,6 +321,12 @@ class PanelEntriesMixin:
             "review_archive_brief": review_archive_brief(shard.review_archive),
             # 模型通道状态灯（情绪页"模型通道"卡）：""(正常) / free_route / no_model / disabled
             "channel_status": channel_status,
+            # agent 档当日消耗读数（1.3.3 修订轮）：预算是全局配置、消耗按角色记，
+            # 所以这一份随 shard 下发而不塞进 settings 快照；面板只给读数
+            "agent_tier_usage": {
+                "used": tier_budget_used(shard.cycle, str(self._today_str())),
+                "budget": self._agent_tier_budget(),
+            },
             # 能力中心总览（1.2.7）：功能页数据源随 5s 轮询下发（纯内存小载荷）。
             # 与总开关/设置页/后台变化同帧一致——"按需拉一次就定格"的窗口不存在；
             # list_capabilities 入口保留（API/调试），同一构建器口径唯一
@@ -373,29 +389,67 @@ class PanelEntriesMixin:
             return {"summary": {}, "badges": []}
 
     async def _channel_dormancy(
-        self, enabled: bool, cfg: JsonObject, *, default_slot: str
+        self,
+        enabled: bool,
+        cfg: JsonObject,
+        *,
+        default_slot: str,
+        lanlan: str = "",
+        channel: str = "",
+        shard: _LanlanShard | None = None,
     ) -> JsonObject:
         """模型通道状态灯：{enabled, dormant_reason, transport}。
 
-        dormant_reason 的下发值是 ""(正常) / free_route / no_model / disabled 四个，
-        "正常"用空串表示（没有 "ok" 这个字面量，面板灯按空串走正常分支）；disabled 这
-        个分支根本没发请求，也就没有"实际走了哪条路"可言，故它不带 transport 键。
+        dormant_reason 的下发值是 ""(正常) / free_route / no_model / rejected / budget /
+        disabled 六个，"正常"用空串表示（没有 "ok" 这个字面量，面板灯按空串走正常分支）；
+        disabled 这个分支根本没发请求，也就没有"实际走了哪条路"可言，故它不带 transport 键。
         判据与运行时完全同源（_resolve_channel_endpoint 的镜像）：mode=host 先问
         宿主管线能不能给出该槽端点，能就绿灯；宿主模块不可用才回落直连诊断——
         所以灯报的永远是"这条路实际会怎么走"，不是配置字面。mode=custom 直接按
         直连诊断（free_route = 免费路由的端点/模型名不在存盘配置里，直连拼不出；
         no_model = 槽位没配模型）。
+
+        rejected 是 1.3.3 修订轮补的一层：**解析得到端点只证明"知道往哪发"，不证明
+        "发得通"**。灯先看熔断器（真发过请求、连续被拒到阈值才开闸），开着就不给绿灯。
+        缺这一层的代价实机付过：免费路由文字档 15 次全被服务端拒，面板一路绿灯。
+        budget 是同轮的第二层：agent 档带服务端日配额（宿主自己定 500 次/天，且与宿主
+        agent 功能共用），当日预算用完时这条通道**是我们自己按下不发**——那既不是故障
+        也不该显示成正常。两个都命中时先报 budget：那是"今天还会不会动"的直接答案，
+        而 rejected 描述的那次失败早已被预算闸挡在门外、不会再发生。
+        lanlan/channel 两个键供调用方点名要看哪条通道的熔断态（总览与成文回执都传）。
         """
         if not enabled:
             return {"enabled": False, "dormant_reason": "disabled"}
         slot = str(cfg.get("slot") or "").strip() or default_slot
-        if _channel_mode(cfg) != _CHANNEL_MODE_CUSTOM and await self._resolve_host_slot(slot) is not None:
+        if shard is not None and self._agent_tier_gate(shard, slot) == _CHANNEL_BUDGET_REASON:
             return {
                 "enabled": True,
-                "dormant_reason": "",
-                "transport": _CHANNEL_TRANSPORT_HOST,
+                "dormant_reason": _CHANNEL_BUDGET_REASON,
+                "transport": (
+                    _CHANNEL_TRANSPORT_DIRECT
+                    if _channel_mode(cfg) == _CHANNEL_MODE_CUSTOM
+                    else _CHANNEL_TRANSPORT_HOST
+                ),
             }
+        host = (
+            await self._resolve_host_slot(slot)
+            if _channel_mode(cfg) != _CHANNEL_MODE_CUSTOM
+            else None
+        )
+        if host is not None:
+            if channel and self._channel_break_open(lanlan, channel, _channel_route(slot, host)):
+                return {
+                    "enabled": True,
+                    "dormant_reason": _CHANNEL_BREAK_REASON,
+                    "transport": _CHANNEL_TRANSPORT_HOST,
+                }
+            return {"enabled": True, "dormant_reason": "", "transport": _CHANNEL_TRANSPORT_HOST}
         reason = diagnose_slot_dormancy(await self._aload_core_config(), slot)
+        # 直连侧同理：诊断说"这端点能拼出来"之后，还要看真发出去的请求有没有被拒
+        if not reason and channel and self._channel_break_open(
+            lanlan, channel, _channel_route(slot, None)
+        ):
+            reason = _CHANNEL_BREAK_REASON
         return {"enabled": True, "dormant_reason": reason, "transport": _CHANNEL_TRANSPORT_DIRECT}
 
     def _week_activity_count(self, shard: _LanlanShard) -> int:
@@ -423,6 +477,7 @@ class PanelEntriesMixin:
         "fragments_enabled", "fragments_slot", "fragments_mode",
         "review_enabled", "review_slot", "review_mode",
         "review_turns_threshold", "review_days_threshold",
+        "agent_daily_budget",
         "anniversary_inject",
         "birthday_enabled", "birthday_keep_diary", "birthday_date",
     )
@@ -470,6 +525,9 @@ class PanelEntriesMixin:
             "review_mode": _channel_mode(self._review_cfg),
             "review_turns_threshold": self._review_turns_threshold(),
             "review_days_threshold": self._review_days_threshold(),
+            # agent 档每日预算（[agent_tier]，1.3.3 修订轮）：面板上能改（钳 5~150），
+            # 当日已用是另一摊——那份按角色走 dashboard 的 agent_tier_usage 下发
+            "agent_daily_budget": self._agent_tier_budget(),
             # 相处统计：纪念日注入开关（[stats].anniversary_inject，纯统计本身无开关）
             "anniversary_inject": (self._stats_cfg or {}).get("anniversary_inject", True) is not False,
             # 生日轻语（1.3.1）：能力开关/纪念手记/主人生日（全局，年份不参与年龄计算）
@@ -533,6 +591,13 @@ class PanelEntriesMixin:
                 "review_mode": {"type": "string", "enum": [_CHANNEL_MODE_HOST, _CHANNEL_MODE_CUSTOM]},
                 "review_turns_threshold": {"type": "integer", "minimum": 10, "maximum": 500},
                 "review_days_threshold": {"type": "integer", "minimum": 1, "maximum": 90},
+                # agent 档每日预算（[agent_tier]）：范围与后端校验同一把尺子（5~150），
+                # 越界前端挡一次、后端再拒一次（稳定码 invalid_agent_budget）
+                "agent_daily_budget": {
+                    "type": "integer",
+                    "minimum": _AGENT_TIER_MIN_BUDGET,
+                    "maximum": _AGENT_TIER_MAX_BUDGET,
+                },
                 "anniversary_inject": {"type": "boolean"},
                 "birthday_enabled": {"type": "boolean"},
                 "birthday_keep_diary": {"type": "boolean"},
@@ -558,6 +623,8 @@ class PanelEntriesMixin:
             es_patch: JsonObject = {}
             frag_patch: JsonObject = {}
             review_patch: JsonObject = {}
+            # agent 档节流（[agent_tier]）：日预算是全局字段，跟通道一起进覆盖层
+            agent_tier_patch: JsonObject = {}
             stats_patch: JsonObject = {}
             birthday_patch: JsonObject = {}
             params_patch: JsonObject = {}
@@ -647,7 +714,9 @@ class PanelEntriesMixin:
                     return Err(SdkError("invalid_fragments_slot"))
                 frag_patch["slot"] = slot
             if "fragments_mode" in updates:
-                mode = str(updates["fragments_mode"]).strip() or _CHANNEL_MODE_HOST
+                # 空串回落出厂默认（不是回落 host）：碎片出厂是 custom，写死 host 会把
+                # 一次空提交变成"替用户改回会被服务端拒的那条路"
+                mode = str(updates["fragments_mode"]).strip() or _FRAGMENT_DEFAULT_MODE
                 if mode not in _CHANNEL_MODES:
                     self.logger.warning("invalid fragments_mode: {}", mode)
                     return Err(SdkError("invalid_fragments_mode"))
@@ -664,7 +733,7 @@ class PanelEntriesMixin:
                     return Err(SdkError("invalid_review_slot"))
                 review_patch["slot"] = slot
             if "review_mode" in updates:
-                mode = str(updates["review_mode"]).strip() or _CHANNEL_MODE_HOST
+                mode = str(updates["review_mode"]).strip() or _REVIEW_DEFAULT_MODE
                 if mode not in _CHANNEL_MODES:
                     self.logger.warning("invalid review_mode: {}", mode)
                     return Err(SdkError("invalid_review_mode"))
@@ -673,6 +742,19 @@ class PanelEntriesMixin:
                 review_patch["turns_threshold"] = max(10, min(500, int(updates["review_turns_threshold"])))
             if "review_days_threshold" in updates:
                 review_patch["days_threshold"] = max(1, min(90, int(updates["review_days_threshold"])))
+            # ---- agent 档节流（[agent_tier]），全局（1.3.3 修订轮）----
+            if "agent_daily_budget" in updates:
+                try:
+                    budget = int(updates["agent_daily_budget"])
+                except (TypeError, ValueError):
+                    self.logger.warning("invalid agent_daily_budget: not a number")
+                    return Err(SdkError("invalid_agent_budget"))
+                if not _AGENT_TIER_MIN_BUDGET <= budget <= _AGENT_TIER_MAX_BUDGET:
+                    # 越界是拒收而不是钳制：这一档花的是宿主 agent 功能与服务端配额的公共
+                    # 池子，静默放大等于把一次笔误变成一整天的额度流失
+                    self.logger.warning("invalid agent_daily_budget: {}", budget)
+                    return Err(SdkError("invalid_agent_budget"))
+                agent_tier_patch["daily_budget"] = budget
             # ---- 相处统计（[stats]），全局 ----
             if "anniversary_inject" in updates:
                 stats_patch["anniversary_inject"] = bool(updates["anniversary_inject"])
@@ -691,7 +773,8 @@ class PanelEntriesMixin:
 
             # Store 为权威存储（Steam 上配置文件写常超时，Store 稳定且重启不丢）；
             # 配置文件同步放后台，不阻塞保存响应
-            if tide_patch or mood_patch or es_patch or frag_patch or review_patch or stats_patch or birthday_patch:
+            if (tide_patch or mood_patch or es_patch or frag_patch or review_patch
+                    or agent_tier_patch or stats_patch or birthday_patch):
                 overrides = self._settings_override
                 if tide_patch:
                     overrides["tide"] = {**_cfg_section(overrides.get("tide")), **tide_patch}
@@ -714,6 +797,11 @@ class PanelEntriesMixin:
                         **_cfg_section(overrides.get("review")), **review_patch,
                     }
                     self._review_cfg.update(review_patch)
+                if agent_tier_patch:
+                    overrides["agent_tier"] = {
+                        **_cfg_section(overrides.get("agent_tier")), **agent_tier_patch,
+                    }
+                    self._agent_tier_cfg.update(agent_tier_patch)
                 if stats_patch:
                     overrides["stats"] = {
                         **_cfg_section(overrides.get("stats")), **stats_patch,
@@ -1625,7 +1713,9 @@ class PanelEntriesMixin:
                 # 判据只留一份：状态灯怎么算，这里的 toast 就怎么报（1.3.2 起灯是
                 # mode 感知的，自己再复刻一遍必然和面板漂移出两个答案）
                 status = await self._channel_dormancy(
-                    True, self._review_cfg, default_slot=_REVIEW_DEFAULT_SLOT
+                    True, self._review_cfg,
+                    default_slot=_REVIEW_DEFAULT_SLOT, lanlan=lanlan, channel="review",
+                    shard=shard,
                 )
                 payload["dormant_reason"] = status.get("dormant_reason") or "no_model"
             return Ok(payload)

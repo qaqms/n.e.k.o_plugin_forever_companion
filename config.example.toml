@@ -56,8 +56,12 @@ extreme_invite_cooldown_minutes = 30  # 邀请冷却（分钟）
 # 过激言行）记进时光日记，供她自主检索；只存插件本地，不改变她的行为
 enabled = true
 slot = "summary"                   # 提取模型槽位：summary（默认）/conversation/correction/vision/agent
-mode = "host"                      # 通道：host（默认）复用宿主模型管线，零配置即用、免费路由下也可用；
-                                   # custom = 插件读宿主本地 core_config.json 直连该槽端点（接本地模型/独立服务商时用）
+                                   # 注：免费路由下 summary 这档（free-model）被服务端拒，这条通道因此休眠
+                                   # （连拒两次即熔断）；换 agent 槽可跑通，但会占宿主 agent 的日配额
+mode = "custom"                    # 通道：custom（默认）插件读宿主本地 core_config.json 直连该槽端点——
+                                   #   免费路由下拼不出端点，这条通道就安静休眠、一个请求都不发；配了自己的服务商即自动可用
+                                   # host = 复用宿主模型管线（不读盘），但 summary 档在免费路由下会被服务端拒，
+                                   #   想让碎片零配置跑：slot 换 agent + mode 切 host（会占宿主 agent 的当日额度）
 min_interval_sec = 60              # 相邻两次分析的最小间隔（秒）
 confidence_threshold = 0.6         # 置信度门槛：低于此不记（宁漏勿错）
 nudge_gap_minutes = 30             # 吵架轻语间隔（分钟）：重度负面情绪中记到过激/厌恶碎片时的提醒间隔
@@ -71,10 +75,17 @@ interval_days = 7                  # 邀请节奏（天）：距上一篇日记�
 # 我的日记（0.8.0）：关于主人的互动评价——素材纯本地累计，双门槛先到先写时
 # 由小模型以中性观察者口吻成文；只给用户看，不注入她的上下文、不进宿主记忆
 enabled = true
-slot = "summary"                   # 成文模型槽位（与碎片提取同款通道）
+slot = "agent"                     # 成文模型槽位：agent（默认）/summary/conversation/correction/vision
+                                   # 默认走 agent 档：免费路由只放行它，summary 那档从插件调用必被服务端拒
 mode = "host"                      # 通道：host（默认）复用宿主模型管线，零配置即用；custom = 插件直连该槽端点
 turns_threshold = 50               # 成文门槛：攒满 N 轮互动（与天数门槛先到先写）
 days_threshold = 7                 # 成文门槛：距统计起点满 N 天且期间有聊天（挂机不写空篇）
+
+[agent_tier]
+# agent 档每日预算（碎片提取 + 我的日记成文合记一份，按角色分账，次日自动归零）：
+# 免费路由只放行 agent 档，而那一档带服务端日配额（宿主自己定 500 次/天）且与宿主
+# agent 功能共用同一份池子，所以先按下不发；推荐 5~50，硬顶 150
+daily_budget = 20                  # 每天最多让 agent 档替插件跑几次（另有一道 300 秒间隔地板在代码里）
 
 [capabilities]
 # 能力中心（1.2.7）：面板「功能」页的统一开关体系——按角色否决任意能力

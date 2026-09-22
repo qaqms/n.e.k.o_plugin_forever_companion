@@ -11,8 +11,8 @@
 // 先于 options 设置会进 dirty 态，selectedIndex 停在 -1，change 事件回传的是 option
 // 的 label 文本而不是空串（实测复现）。因此"宿主默认"选项的 value 用哨兵 "__default"，
 // onChange 时翻译回空串再进表单；后端校验只认空串。哨兵不会出现在表单/存储里。
-import { Card, Select } from "@neko/plugin-ui"
-import type { ChannelStatusItem, FormValues, TFunc, ToneSlotOption } from "./types"
+import { Card, NumberInput, Select } from "@neko/plugin-ui"
+import type { AgentTierUsage, ChannelStatusItem, FormValues, TFunc, ToneSlotOption } from "./types"
 
 const DEFAULT_SLOT_SENTINEL = "__default__"
 
@@ -26,6 +26,7 @@ export function ChannelSettingsCard(props: {
   updateForm: (patch: Partial<FormValues>) => void
   toneSlotOptions?: ToneSlotOption[]
   channelStatus?: { tone?: ChannelStatusItem; fragments?: ChannelStatusItem; review?: ChannelStatusItem }
+  agentUsage?: AgentTierUsage
 }) {
   const { t, form, updateForm } = props
 
@@ -109,11 +110,39 @@ export function ChannelSettingsCard(props: {
         />
       </ChannelRow>
 
+      <div className="tm-channel-divider" />
+
+      {/* agent 档节流（1.3.3 修订轮）：碎片与成文只要走 agent 槽就合记一份当日计数
+          （按角色分账），用完休眠到次日。这里给的是全局预算旋钮 + 当前角色的已用读数；
+          300 秒间隔地板刻意不开放配置（它防的是自动节拍砸配额，用户没有调它的理由），
+          只在说明里讲清"还有一道在代码里"。5/150/20 三个字面量与后端同值，
+          由 test_ui_budget_input_range_matches_backend_bounds / 出厂值同源门钉住 */}
+      <div className="tm-derived">
+        {t("panel.settings.agentBudgetHelp", { defaultValue: "碎片提取与我的日记成文只要走 agent 槽就合记这一份当日计数（按角色分账），用完即休眠到次日。宿主免费路由的 agent 档带服务端日配额（500 次/天），而且宿主自己的 agent 功能花的是同一个池子——推荐 5~50，最多 150。另有一道 300 秒间隔地板在代码里，配置写更小也不生效。" })}
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <span>{t("panel.settings.agentBudget", { defaultValue: "agent 档每日预算" })}</span>
+        <NumberInput
+          value={form.agent_daily_budget}
+          min={5}
+          max={150}
+          step={1}
+          onChange={(v: number | string) => updateForm({ agent_daily_budget: typeof v === "number" ? v : 20 })}
+        />
+        <span>
+          {t("panel.settings.agentBudgetUsed", {
+            defaultValue: "今日已用 {used}/{budget} 次",
+            used: String(props.agentUsage?.used ?? 0),
+            budget: String(props.agentUsage?.budget ?? form.agent_daily_budget),
+          })}
+        </span>
+      </div>
+
       {/* 免费路由说明只在"直连这条路确实因为免费路由而不通"时说：自定义模式选了
           免费路由，或宿主模式回落到直连后仍拼不出端点——其余状态各灯自己解释 */}
       {isFreeRoute(fragCh) || isFreeRoute(reviewCh) ? (
         <div className="tm-channel-warn">
-          {t("panel.settings.freeRouteWarn", { defaultValue: "直连通道要从宿主本地配置拼出端点，而免费路由的端点与模型名并不写在配置里，所以拼不出可用端点、功能休眠。把上方通道切回「宿主」即可零配置使用；想继续用直连，先在宿主设置里配置自己的 API 服务商。" })}
+          {t("panel.settings.freeRouteWarn", { defaultValue: "直连通道要从宿主本地配置拼出端点，而免费路由的端点与模型名并不写在配置里，所以拼不出可用端点、功能休眠。想零配置跑通：把上方槽位换成「agent」（会占用宿主 agent 功能的当日额度）；或先在宿主设置里配置自己的 API 服务商。" })}
         </div>
       ) : null}
     </Card>
@@ -124,7 +153,7 @@ export function ChannelSettingsCard(props: {
 function channelHint(t: TFunc, mode: string | undefined): string {
   return (mode || MODE_HOST) === MODE_CUSTOM
     ? t("panel.settings.channelHintCustom", { defaultValue: "插件读宿主本地配置直连该槽端点；该槽未配模型、或宿主在用免费路由时拼不出可用端点，功能自动休眠" })
-    : t("panel.settings.channelHintHost", { defaultValue: "复用宿主自己的模型管线（与宿主内置插件同一条路）：不用配任何东西，免费路由下也可用；宿主管线不可用时自动回落直连" })
+    : t("panel.settings.channelHintHost", { defaultValue: "复用宿主自己的模型管线（与宿主内置插件同一条路）：端点与客户端身份都由宿主给出，插件不读你的配置文件。能不能真用起来还要看服务端放行哪一档——免费路由下目前只有「agent」槽实测可通" })
 }
 
 // 通道行：名称 + 状态灯 + 说明 + 槽位/通道下拉
@@ -160,6 +189,16 @@ function channelLight(
   }
   if (ch.dormant_reason === "no_model") {
     return { cls: "tm-light-dormant", text: t("panel.channel.noModel", { defaultValue: "槽位未配模型 · 休眠" }) }
+  }
+  // 端点解析得到、真发出去却被服务端连着拒 → 已熔断（不再发请求）。这一档必须单独
+  // 有灯：1.3.3 实机就是"解析成功=绿灯 + 15 次静默失败"，用户看不出任何异常
+  if (ch.dormant_reason === "rejected") {
+    return { cls: "tm-light-dormant", text: t("panel.channel.rejected", { defaultValue: "服务端拒了 · 已熔断" }) }
+  }
+  // 当日 agent 档预算用完：这是我们自己按下不发（不是故障），说明与"改路"无关，
+  // 所以不和 rejected 共用文案，免得用户以为服务端把他拒了
+  if (ch.dormant_reason === "budget") {
+    return { cls: "tm-light-dormant", text: t("panel.channel.budget", { defaultValue: "今日额度已用完 · 休眠" }) }
   }
   if (ch.dormant_reason === "disabled") {
     return { cls: "tm-light-off", text: t("panel.channel.off", { defaultValue: "未启用" }) }

@@ -366,12 +366,16 @@ export function settingsToForm(settings: Settings): FormValues {
     tone_slot: String(settings.tone_slot || ""),
     fragments_enabled: settings.fragments_enabled !== false,
     fragments_slot: String(settings.fragments_slot || "summary"),
-    fragments_mode: String(settings.fragments_mode || "host"),
+    fragments_mode: String(settings.fragments_mode || "custom"),
     review_enabled: settings.review_enabled !== false,
-    review_slot: String(settings.review_slot || "summary"),
+    review_slot: String(settings.review_slot || "agent"),
     review_mode: String(settings.review_mode || "host"),
     review_turns_threshold: Number(settings.review_turns_threshold ?? 50),
     review_days_threshold: Number(settings.review_days_threshold ?? 7),
+    // 兜底值镜像 [agent_tier].daily_budget：只在快照未到的第一帧用得上，真值永远由
+    // 后端 settings 快照覆盖。这类"前端另抄一份默认"的漂移由
+    // test_ui_form_fallbacks_match_shipped_defaults 钉死
+    agent_daily_budget: Number(settings.agent_daily_budget ?? 20),
     anniversary_inject: (settings as Record<string, any>).anniversary_inject !== false,
     debug_mode: settings.debug_mode === true,
   }

@@ -1801,3 +1801,145 @@ host 命中时不读盘、回落直连、`_channel_chat` 按 transport 分派、
 依赖运行环境，改为显式把 `utils.config_manager` 置成不可导入。
 
 验证：本地五门 + 在宿主环境里跑一遍 `check -r`（等价于 CI 第 9 步）全绿。
+
+
+### 1.3.3 修订轮：免费路由按档位放行（实机钉的）+ 通道熔断 + 灯说真话
+
+**这轮的全部来历是主人一次实机**：1.3.3 包导入后点「立即写一篇」没写成，日志
+20:26:01 `host pipeline chat failed: BadRequestError`。400 的原文是
+`{"error": "Invalid request: you are not using Lanlan. STOP ABUSE THE API."}`。
+排查过程中我先下过一个错结论，也记在这里防后来人重犯（见末段）。
+
+**钉出来的真实规则**：宿主免费路由（`https://www.lanlan.tech/text/v1`，key
+`free-access`）**按模型档位放行，不按进程身份**。用插件解析到的同一份三元组手工复刻，
+`free-model`（`summary`/`conversation`/`correction` 三个槽都落在这档）无论请求体怎么
+变形（`model+messages` 最简形、`max_completion_tokens` 1200/400/256/64）一律 400；
+而**同一个插件子进程换成 `agent` 档（`free-agent-model`）就 200**——主人在面板把成文
+槽位切成 agent 后 21:12:49 `review composed for YUI (turns=43, entries=1)`，宿主侧同
+一秒同 URL 一条 200。所以 `mode=host` 只决定"用谁的配置和客户端"，不决定"服务端放行
+哪一档"。`free-mini-model`/`free-vision-model` 未测。
+
+**默认值跟着改（出厂形态）**：`[review].slot` 默认 `summary`→**`agent`**、`[review].mode`
+保持 `host`——那是实测唯一零配置可通的一档。`[fragments]` 则**两条都退到 custom**：
+`slot` 留 `summary`、`mode` 默认 `host`→**`custom`**。理由是主人拍板的取舍：碎片约每
+62 秒一拍，压在 agent 档会吃光宿主 agent 功能自己的当日额度（`quota.py:150` 明写"本地
+计数只是少发无用请求，真正的限制在服务端"，且两侧共用一份池子）；而留在 summary 档走
+host 只是"晚一步失败 + 先撞两次"，不如让 custom 在免费路由下**连端点都拼不出来**、
+开局就安静休眠、一个请求都不发（配了自己的服务商即自动醒来）。`test_config_docs_sync`
+把 plugin.toml / README 表 / config.example.toml 三处钉在一起，
+`test_default_slots_stay_deliberately_asymmetric` 再把"出厂形态 = 碎片 summary+custom /
+成文 agent+host"这个不对称本身钉住，防以后"顺手统一默认值"。
+
+**新增通道熔断**（`_CHANNEL_BREAK_FAILURES = 2`）：同一角色的同一通道在同一条路上
+连续失败两次就不再发任何请求，面板灯转 `rejected`。复位有三条路，都不需要专门入口：
+改槽位/改通道（`_channel_route` 指纹变）、宿主 `config_change`、进程重启。只把
+"请求层面失败"计入（返回 None）；空回复/非 JSON 是模型输出质量，不算这条路走不通。
+落点在 `_maybe_capture_fragments` 与 `_review_compose` 两处，成文那处沿用
+`slot_unresolved` 回执码（面板据此去问灯，灯答 `rejected`），不新增原因码。
+**为什么必须熔断而不是继续按节拍重试**：实机今天撞了 15 次全被拒，方向是服务端明确
+标为滥用的，代价落在用户的账号与出口 IP 上，而功能并不会因此变通。
+
+**状态灯补一层真话**（`mixins/panel.py::_channel_dormancy`）：旧灯的判据是"槽位能不能
+解析出端点"，从不回看真实调用结果——本次事故的本质正是**面板一路绿灯 + 15 次静默
+失败**。现在 host/直连两条分支都要再看熔断器，开着就不给绿灯。前端
+`channelLight` 与新手向导 `channelStatusLabel`、成文回执 toast 三处同时认这个值
+（toast 旧逻辑只有 `free_route`/其余一律"槽位没配模型"两分支，会把"被服务端拒了"说成
+"你没配"，已补第三分支）。
+
+**顺手修的一处误导**：成文失败留痕写着 `request failed (see 'tone direct chat
+completion' warning above)`，但走 host 传输时那行 warning 是 `host pipeline chat
+failed`——1.3.3 起这句话把用户指向了一行根本不存在的日志。现在按 transport 指对。
+
+**agent 档每日预算 + 间隔地板（同日追加，主人拍的）**：把碎片切到 agent 档虽然能跑，
+但那一档带**服务端**日配额——宿主自己定 500 次/天（`utils/config_manager/__init__.py:154`，
+`quota.py:150` 明写"本地计数只是少发无用请求"），**且宿主的 agent 功能与插件共用同一份
+池子**。碎片约每 62 秒一拍，不加闸就是拿宿主正经功能换她的碎片。新增 `[agent_tier]`
+配置段：`daily_budget` 出厂 **20** 次/角色/天（推荐带 5~50，硬顶 150，越界**拒收**而不是
+钳制——一次笔误不该换掉一整天的公共额度，稳定码 `invalid_agent_budget`）。两道闸：
+①当日预算用完 → 该角色的 agent 档调用全部按下，通道灯 `budget`（新 reason，与 `rejected`
+分开写文案：一个是"我们自己不发"，一个是"服务端拒了"）；②**300 秒间隔地板**（代码常量、
+不开放配置，防的是自动节拍）。计数落 `cycle@<角色>` 块（`agent_budget_date` /
+`agent_budget_used` / `agent_budget_last_ts`，与 1.3.2 邀请水位同法：零新键、零迁移、
+按角色分账、跨日自动归零，且**落盘**——只放内存等于每次重启多发一发，那个坑 1.3.2 踩过）。
+只管实际走 agent 槽的调用：付费服务商不该按免费档的稀缺性限死；**成文豁免间隔地板**
+（它自带双门槛 + 在飞锁 + 队列，不可能连点），但预算照管它。碎片被地板挡下的那一拍
+**不推进水位**（素材留着，下一拍回来）——限速不等于故障，丢 marker 就是把那条碎片扔了。
+
+**新增两道出厂值同源门**（`test_config_docs_sync.py`）：`ui/utils.ts::settingsToForm` 的
+兜底字面量必须等于 plugin.toml 出厂值；面板数字框的 `min/max` 必须等于后端取值口的
+`_AGENT_TIER_MIN/MAX_BUDGET`。立项理由就在今天：plugin.toml 已改成 `custom`/`agent`，
+`ui/utils.ts` 还写着 `host`/`summary`——这类重复不报错，只会让面板第一眼说谎。
+两道门都做过反向核验（故意把 `fragments_mode` 改回 host、`max` 改成 999 → 双双变红）。
+熔断与预算也各验过一次：把 `_CHANNEL_BREAK_FAILURES` 2→3 三条熔断门立刻红；把
+`_AGENT_TIER_MIN_INTERVAL_SEC` 300→0 只有地板门红、预算门照绿（各管各的，没有互相兜底）。
+
+**i18n**：新增 6 键 ×8 语（`panel.channel.rejected`、`panel.channel.budget`、
+`panel.errors.invalidAgentBudget`、`panel.settings.agentBudget` / `agentBudgetHelp` /
+`agentBudgetUsed`），每语 **792→798**；`budget` 与 `rejected` 各占一灯位（一个是"我们自己
+按下不发"，一个是"服务端拒了"），新手向导与成文回执 toast 复用同一键、不另立文案。
+另**改写 2 键 ×8 语**
+（`panel.settings.channelHintHost`、`panel.settings.freeRouteWarn`）：旧文案承诺
+"切回「宿主」即可零配置使用"，而免费路由下 summary 档切回宿主照样被拒——按实测改成
+"把**槽位**换成 agent（并说明它会占宿主 agent 的当日额度）/ 或在宿主配自己的服务商"，
+`channelHintHost` 也补上"能不能真用还看服务端放行哪一档"。两处 `defaultValue` 与 zh-CN
+逐字对齐（`ui/settings_tone.tsx` 同步）。
+
+**测试**：**471→486**（熔断与预算 15 项 + 同源门 2 项 + 既有改写）。新增 6 项：连拒两次后一次都不许多发（反向对照=把桩换成"肯定
+成功"的回复，若真发出去就红）、改槽位即复活、成败交替不误伤（四拍脚本）、面板灯报
+`rejected` 且未熔断那条不受牵连、成文熔断后回执 `slot_unresolved` 且停止调用、默认
+槽位不对称钉死。门做过反向核验：把阈值临时从 2 改成 3，三条立即红。
+`test_dashboard_channel_status_custom_slot_ok` 的替身补上 `agentModel*` 三键（两条
+通道默认槽不同了，只配 summary 会让成文按自己的默认槽诊断成 `free_route`）。
+
+**我犯过的错，记下来**：中途我拿宿主仓 `tests/testbench/pipeline/chat_runner.py:201-252`
+那句"免费文字预设仅 NEKO 主程序可用"外推成"插件走宿主管线必被拒、1.3.3 前提作废"，
+还据此给了一版"配了付费才开箱"的方案。主人按实测把槽位切成 agent 直接证伪了它。
+教训：**仓内注释的射程只有它写下的那一条路、那一档**（那句讲的是 testbench + 文字
+档），不能外推成整条路不通；下结论前先花一次点击换一档试试。
+
+**保存条不再"整张表单回写"（同日追加，实机逼出来的）**：上面这套新默认在主人那份存档上
+**完全没生效**——存档 `settings` 键里躺着 `fragments = {slot: agent, mode: host}`，而
+`mixins/shards.py` 的 Store 全局覆盖层优先于 toml 默认，出厂值被压了一整天。根因不是存档
+坏了，是 `ui/panel.tsx::postSettings` 过去发的是 `update_settings({...form})`：**整张表单
+回写**，用户从没碰过的下拉也会被写进覆盖层，从此该字段永远以那次保存的值为准——插件后续
+任何默认值变更都追不到这份存档。修法：面板加一条已落盘基线（`formBaseline`，与服务端快照
+同源，由 `syncForm` 一处维护），提交前按字段与基线比对（数组/对象按序列化比），**只发真的
+改过的**；一个都没改则整趟不发（不写盘=不钉死）。后端 `update_settings` 本来就逐键
+`if key in updates`，天然接受偏集提交，零改动。顺带把两处出厂值兜底对齐新默认
+（`ui/utils.ts::settingsToForm` 的 `fragments_mode`/`review_slot`；`mixins/panel.py` 里
+空串 mode 的回落从写死 `host` 改为回落各通道出厂默认常量）——这几处是"前端自己抄一份
+默认值"的老漂移源。⚠️ **这一条只能由类型检查与链接检查兜住，本仓没有 JS 单测层**，
+真实效果要在面板上验：改一个字段保存后，另一个没碰过的下拉不该进存档。
+**注意本修法不治旧账**：已经写进覆盖层的值不会被清掉（清了就是替用户做决定），
+所以老存档要恢复"跟随出厂默认"必须在面板上手动改一次。
+
+验证：本地五门全绿（486 passed / ruff / link / check version=1.3.3 / hosted-tsx）。
+### 1.3.3 发版（2026-09-22）
+
+提交两枚：`b7c1319`（1.3.3 首发·模型通道开箱即用）+ 本轮修订轮（免费路由按档位放行、
+通道熔断、agent 档日预算与间隔地板、状态灯说实话、保存条只提交改过的字段、两道出厂值
+同源门）。版本号在 `b7c1319` 就已归位到 **1.3.3**，本轮不涨号（v1.3.2 已单独发行过）。
+
+**出厂形态（三句话）**：语气分析——跟随宿主情感端点，一直可用；碎片提取——`summary` 槽
++ `custom` 直连，免费路由下拼不出端点因此安静休眠、零请求；我的日记成文——`agent` 槽
++ `host` 管线，实测唯一零配置可通的一档。凡实际走 agent 槽的调用合记一份按角色的当日
+预算（出厂 20，面板可改 5~150）与 300 秒间隔地板。
+
+**发行物**：`distorever_companion_1.3.3_fix4_agent_tier_budget.neko-plugin`
+（938744B / 100 条目 / sha256 前缀 `22664420`；抽 14 个文件与工作树逐字节对拍一致；
+**不含 `store.db`/`data/`** ⇒ 导入本身不可能覆盖她的三本日记与统计）。
+tag `v1.3.3`（附注 tag，与 v1.3.2 同型）驱动宿主 reusable workflow
+`Release N.E.K.O Plugin`；`push main` 只触发只读 `Verify`。**本仓工作流不向市场发任何
+请求**——市场侧由主人自己走。
+
+**实机验收状态**（2026-09-22，Steam 版宿主）：已钉住的——成文经 agent 档真出一篇
+（21:12:49 `review composed for YUI (turns=43, entries=1)`，宿主侧同秒同 URL 一条 200）；
+`400` 在 20:58:32 之后归零（全天 15 次全在切槽位之前）；覆盖导入不动数据；面板保存
+只落改动字段（存档里 `fragments` 从 `{slot: agent, mode: host}` 变成 `{slot:
+conversation, mode: custom}`，host 那层覆盖消失）。**待她复验的**——预算用满时那盏
+"今日额度已用完 · 休眠"的灯与"今日已用 X/20 次"读数、以及 `rejected` 灯（需要把碎片
+切到 host 才会现场出现）。
+
+**遗留（不阻塞发行）**：`plugin.sdk` 至今没有"主程序代发补全"的官方入口，所以免费路由
+下的零配置只能靠挑档位绕开；`agent` 档限额真值在服务端，本仓只知道宿主自己按 500/天
+计——插件侧配额是否与之独立尚未实测，用一段时间后可从日志数出每天实际打了几次。

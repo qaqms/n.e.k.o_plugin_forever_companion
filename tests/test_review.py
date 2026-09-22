@@ -629,7 +629,11 @@ def test_diagnose_slot_custom_and_follow_chain(tm) -> None:
 
 
 def test_dashboard_channel_status_custom_slot_ok(plugin_factory, tm) -> None:
-    """custom 自配槽的用户：通道灯应为正常（不再是误判的 no_model 休眠）。"""
+    """custom 自配槽的用户：通道灯应为正常（不再是误判的 no_model 休眠）。
+
+    两条通道的默认槽不同（1.3.3 修订轮：碎片 summary、成文 agent），所以替身要把
+    两个槽都配齐——只配 summary 会让成文这条按它的默认槽去诊断，得到 free_route。
+    """
     import pytest as _pytest
 
     p = plugin_factory()
@@ -639,6 +643,9 @@ def test_dashboard_channel_status_custom_slot_ok(plugin_factory, tm) -> None:
         "summaryModelProvider": "custom",
         "summaryModelId": "gpt-x", "summaryModelUrl": "https://api.example.com/v1",
         "summaryModelApiKey": "sk-x",
+        "agentModelProvider": "custom",
+        "agentModelId": "gpt-x", "agentModelUrl": "https://api.example.com/v1",
+        "agentModelApiKey": "sk-x",
     })
     try:
         payload = run(p.dashboard())

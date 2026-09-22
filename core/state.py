@@ -239,7 +239,9 @@ _FRAGMENT_KINDS = frozenset({"like", "dislike", "important", "overstep"})
 # 重度负面情绪生效期间值得轻语提醒她"你记得吗"的碎片类型
 _FRAGMENT_NUDGE_KINDS = frozenset({"overstep", "dislike"})
 # 碎片提取的默认模型槽位与置信度门槛：summary 槽与宿主记忆抽取同层级，
-# 适合"理解用户话语含义"；默认经宿主管线调用（[fragments].mode），零配置即用
+# 适合"理解用户话语含义"。注意：免费路由下该档（`free-model`）被服务端拒，
+# 这条通道因此默认休眠（连拒两次即熔断，见 _CHANNEL_BREAK_FAILURES）；
+# 有意不上 agent 档——它高频，会抢宿主 agent 功能的日配额（理由见 _REVIEW_DEFAULT_SLOT）
 _FRAGMENT_DEFAULT_SLOT = "summary"
 _FRAGMENT_DEFAULT_CONFIDENCE = 0.6
 # 碎片捕获的最小间隔（秒，[fragments].min_interval_sec）：与语气感知共用"每轮至多分析一次"的节奏
@@ -289,9 +291,15 @@ _JOURNAL_INVITE_THROTTLE_SEC = 24 * 3600
 _JOURNAL_RESPOND_COOLDOWN_SEC = 10 * 60
 
 # ---- 我的日记（0.8.0）：关于主人的互动评价 ----
-# 成文模板槽位：与碎片提取同款"可自定义 prompt 的通道"，summary 槽与宿主
-# 记忆抽取同层级；默认经宿主管线调用（[review].mode），零配置即用
-_REVIEW_DEFAULT_SLOT = "summary"
+# 成文模板槽位：与碎片提取同款"可自定义 prompt 的通道"，但默认槽位**不同**——
+# 成文用 agent 槽，碎片用 summary 槽。原因是 2026-09-22 实机钉出来的：宿主免费
+# 路由按模型档位放行，`summary`/`conversation`/`correction` 三个槽都映射到
+# `free-model`，该档从插件子进程调用一律被服务端拒（400 "you are not using
+# Lanlan"），而 `free-agent-model` 实测 200 并能正常成文。成文是"攒满门槛点一次
+# 才一篇"的低频调用，压在 agent 档上代价可控；碎片提取约每 62 秒一次，会吃掉宿主
+# agent 功能的日配额（`quota.py:150`：限额真在服务端），所以它留在 summary 档、
+# 在免费路由下走熔断休眠，等文字档可用。
+_REVIEW_DEFAULT_SLOT = "agent"
 # 双门槛默认值：攒满 N 轮 或 距上篇满 N 天（且期间有新聊天）先到先写
 _REVIEW_DEFAULT_TURNS = 50
 _REVIEW_DEFAULT_DAYS = 7
@@ -371,13 +379,92 @@ _TONE_SLOT_PREFIXES = {
 _CHANNEL_MODE_HOST = "host"
 _CHANNEL_MODE_CUSTOM = "custom"
 _CHANNEL_MODES = frozenset({_CHANNEL_MODE_HOST, _CHANNEL_MODE_CUSTOM})
-_FRAGMENT_DEFAULT_MODE = _CHANNEL_MODE_HOST
+# 碎片提取默认走 **custom**：它落在 summary 档（`free-model`），而免费路由对这一档是
+# "解析得到端点、发过去必被拒"——host 只是晚一步失败、还要先撞两次。custom 在免费路由
+# 下连端点都拼不出来，于是开局就安静休眠、一个请求都不发，灯直接说"直连不可用"。
+# 想真跑起来有两条路（面板上都说得清）：把这条的槽位换成 agent（占宿主 agent 当日额度），
+# 或在宿主里配自己的服务商（配了之后 custom 直连立刻可用；不想让插件读盘就手动切 host）。
+# 成文相反：它默认 host + agent 档，那是实测唯一零配置可通的一档。
+_FRAGMENT_DEFAULT_MODE = _CHANNEL_MODE_CUSTOM
 _REVIEW_DEFAULT_MODE = _CHANNEL_MODE_HOST
 # 通道解析结果（resolved dict）的传输标签。缺省按 direct 处理——1.3.1 之前
 # resolved 只有 {model, api_key, base_url} 三个键，tests 打桩 _resolve_tone_slot
 # 也照这个形状返回，不新增必填键才能保住既有锚点。
 _CHANNEL_TRANSPORT_HOST = "host"
 _CHANNEL_TRANSPORT_DIRECT = "direct"
+# ---- 通道熔断（1.3.3 修订轮）----
+# 同一角色的同一通道连续失败到这个次数就停止发请求，直到该通道的槽位/通道被改动
+# 或进程重启才复活。为什么必须熔断而不是照节拍重试：免费路由的文字档会被服务端
+# 判为滥用（400 "you are not using Lanlan. STOP ABUSE THE API."），而碎片提取的
+# 节拍约 62 秒一次——2026-09-22 实机 12 分钟撞了 8 次、全天 15 次，全部被拒且
+# 面板一路绿灯。继续撞既有风控代价、又永远等不来结果。
+# 状态只活在内存里（不落盘）：每次启动最多多花这么多次失败去重新认清现实，
+# 换来零新键、零迁移，且"改了配置就想再试一次"天然成立。
+_CHANNEL_BREAK_FAILURES = 2
+# 熔断打开时上报面板的 dormant_reason 取值（前端据此出灯；空串仍是"正常"）
+_CHANNEL_BREAK_REASON = "rejected"
+# 预算用完时的 dormant_reason（与 _CHANNEL_BREAK_REASON 并列：一个是"发了被拒"，
+# 一个是"我们自己先按下不发"）
+_CHANNEL_BUDGET_REASON = "budget"
+
+# ---- agent 档每日预算与间隔地板（1.3.3 修订轮）----
+# 免费路由上只有 agent 档放行（README「模型通道」节），而那一档带**服务端**日配额：
+# 宿主自己定的是 500 次/天（宿主 utils/config_manager/__init__.py:154，注释明写"免费
+# 配额并非只在本地实施"），且宿主的 agent 功能与本插件**共用同一份池子**。碎片节拍约
+# 每 62 秒一次，一旦把它切到 agent 档就是拿宿主正经功能的额度在跑，所以按"档"记一份
+# 当日消耗：碎片与成文只要走 agent 槽就合记同一个计数器。
+_AGENT_TIER_SLOT = "agent"
+# 出厂默认 20 次/角色/天（约等于"每小时想得起你一次"，占宿主配额 4%）。主人定的口径：
+# 5~50 是推荐带，用户自行上调的硬顶 150（再高就是拿宿主 agent 换她的碎片了）
+_AGENT_TIER_DEFAULT_BUDGET = 20
+_AGENT_TIER_MIN_BUDGET = 5
+_AGENT_TIER_MAX_BUDGET = 150
+# agent 档的最小间隔地板（秒）：配置写得更小也不生效。预算管"一天总共几次"，地板管
+# "别连着砸"——两个都是同一份额度的事，缺一个都能把另一绕过去
+_AGENT_TIER_MIN_INTERVAL_SEC = 300.0
+# 计数字段落在 cycle@<角色> 这块里（与 1.3.2 的邀请水位同法：零新键、零迁移，
+# 且天然按角色分账）
+_CYCLE_AGENT_BUDGET_DATE = "agent_budget_date"
+_CYCLE_AGENT_BUDGET_USED = "agent_budget_used"
+# 上一次真正发出 agent 档请求的时刻（间隔地板的水位）。跟预算一起落盘而不是放内存：
+# 插件子进程会因切角色卡/改设置/覆盖导入反复重启（1.3.2 的邀请水位就是被这个坑过），
+# 只放内存的地板等于每次启动都能重来一发
+_CYCLE_AGENT_BUDGET_LAST_TS = "agent_budget_last_ts"
+
+
+def tier_budget_used(cycle: JsonObject, day: str) -> int:
+    """当天（本地 ISO 日期）已消耗的 agent 档次数；日期不是今天就视为 0（自动归零）。"""
+    if str(cycle.get(_CYCLE_AGENT_BUDGET_DATE) or "") != day:
+        return 0
+    try:
+        return max(0, int(cycle.get(_CYCLE_AGENT_BUDGET_USED) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def tier_budget_spend(cycle: JsonObject, day: str) -> int:
+    """记一次消耗（调用方负责随后把 cycle 落盘）；返回记完之后的当日计数。"""
+    used = tier_budget_used(cycle, day) + 1
+    cycle[_CYCLE_AGENT_BUDGET_DATE] = day
+    cycle[_CYCLE_AGENT_BUDGET_USED] = used
+    return used
+
+
+def tier_budget_left(cycle: JsonObject, day: str, budget: int) -> int:
+    """今天还剩多少次 agent 档额度（≥0）。预算配到 0 或非法也按"一次都不给"算，
+    但取值口 [agent_tier].daily_budget 已经把下限钳在 _AGENT_TIER_MIN_BUDGET。"""
+    return max(0, int(budget) - tier_budget_used(cycle, day))
+
+
+def _channel_route(slot: str, resolved: JsonObject | None) -> str:
+    """这条通道此刻实际走的那条路 = 熔断的指纹（`transport|slot`）。
+
+    只由槽位名与传输方式组成，不含端点、模型名与任何凭据——它会被存在进程的内存
+    状态里，而日志/面板的脱敏契约不覆盖这类衍生键，少一样就少一样。改槽位、改通道
+    （host/custom）都会换掉指纹，熔断因此自动作废：用户动过设置就让他再试一次。
+    """
+    transport = str((resolved or {}).get("transport") or _CHANNEL_TRANSPORT_DIRECT)
+    return f"{transport}|{slot}"
 # 单次补全的超时（秒）与输出上限（token）。超时两条传输共用同一组数字：这个旋钮必须
 # 对用户说得出一个值，不能"看这次走哪条路"——README 与面板都按它承诺"点一下要让后台
 # 等多久"。输出上限目前只有宿主管线用得上（插件那份 urllib 请求体没带

@@ -41,9 +41,17 @@ from ..core.review import (
 )
 from ..core.review import new_stats as review_new_stats
 from ..core.state import (
+    _AGENT_TIER_DEFAULT_BUDGET,
+    _AGENT_TIER_MAX_BUDGET,
+    _AGENT_TIER_MIN_BUDGET,
+    _AGENT_TIER_MIN_INTERVAL_SEC,
+    _AGENT_TIER_SLOT,
+    _CHANNEL_BREAK_FAILURES,
+    _CHANNEL_BUDGET_REASON,
     _CHANNEL_MODE_CUSTOM,
     _CHANNEL_TRANSPORT_HOST,
     _CORE_CONFIG_CACHE_TTL,
+    _CYCLE_AGENT_BUDGET_LAST_TS,
     _FRAGMENT_DEFAULT_CONFIDENCE,
     _FRAGMENT_DEFAULT_MIN_INTERVAL_SEC,
     _FRAGMENT_DEFAULT_NUDGE_GAP_MIN,
@@ -56,8 +64,11 @@ from ..core.state import (
     _REVIEW_DEFAULT_DAYS,
     _REVIEW_DEFAULT_SLOT,
     _REVIEW_DEFAULT_TURNS,
+    _channel_route,
     _LanlanShard,
     _now_utc,
+    tier_budget_left,
+    tier_budget_spend,
 )
 from ..core.stats import record_milestone
 from ..services import host_llm as _host_llm
@@ -265,6 +276,98 @@ class SensesMixin:
         core_cfg = await self._aload_core_config()
         return self._resolve_tone_slot(core_cfg, slot), slot, core_cfg
 
+    # ---- 模型通道熔断（1.3.3 修订轮）----
+    # 为什么必须有：免费路由的文字档从插件子进程调用必被服务端拒（400 "you are not
+    # using Lanlan. STOP ABUSE THE API."），而碎片提取约每 62 秒一拍——2026-09-22 实机
+    # 因此连撞 15 次，全部失败、面板全程绿灯。继续撞既救不回功能，又是在被官方明确
+    # 标为滥用的方向上加码，代价落在用户的账号/出口 IP 上。
+    def _channel_break_entry_id(self, lanlan: str, channel: str) -> str:
+        return f"{lanlan}|{channel}"
+
+    def _channel_break_open(self, lanlan: str, channel: str, route: str) -> bool:
+        """这条通道当前这条路是否已经熔断（熔断中 = 一拍都不再发）。"""
+        entry_id = self._channel_break_entry_id(lanlan, channel)
+        hit = self._channel_break.get(entry_id)
+        if not hit:
+            return False
+        if hit.get("route") != route:
+            # 路变了（改槽位/改 mode/宿主那侧生效配置换了）：旧账作废，重新给机会
+            self._channel_break.pop(entry_id, None)
+            return False
+        return int(hit.get("fails") or 0) >= _CHANNEL_BREAK_FAILURES
+
+    def _channel_break_note(self, lanlan: str, channel: str, route: str, *, ok: bool) -> None:
+        """记一次通道调用的成败；成功即销案，连拒到阈值就熔断并留一行 warning。
+
+        只把"请求层面失败"（通道返回 None）计一次。回复为空/不是 JSON 是模型输出
+        质量的事，跟"这条路能不能走通"无关，计进来会让一次坏回复误伤整条通道。
+        """
+        entry_id = self._channel_break_entry_id(lanlan, channel)
+        if ok:
+            self._channel_break.pop(entry_id, None)
+            return
+        hit = self._channel_break.get(entry_id)
+        if not hit or hit.get("route") != route:
+            hit = {"route": route, "fails": 0}
+        before = int(hit.get("fails") or 0)
+        hit["fails"] = before + 1
+        self._channel_break[entry_id] = hit
+        if before < _CHANNEL_BREAK_FAILURES <= int(hit["fails"]):
+            self.logger.warning(
+                "channel {} fused after {} consecutive failures on {} (no more requests until the route changes)",
+                channel, hit["fails"], route,
+            )
+
+    # ---- agent 档节流（1.3.3 修订轮）----
+    # 免费路由上只有 agent 档放行，而那一档带服务端日配额（宿主自己定 500 次/天），
+    # 且宿主的 agent 功能与本插件共用同一份池子。所以凡是实际走 agent 槽的调用（碎片
+    # 提取 + 我的日记成文合记一份）先过两道闸：当日预算与间隔地板。非 agent 槽一律放行
+    # ——用户自己配的付费服务商不该被我们按免费档的稀缺性限死。
+    def _agent_tier_budget(self) -> int:
+        """[agent_tier].daily_budget，钳在 5~150；非法值回落出厂默认（不静默放大）。"""
+        try:
+            raw = int(self._agent_tier_cfg.get("daily_budget"))
+        except (TypeError, ValueError):
+            return _AGENT_TIER_DEFAULT_BUDGET
+        if not _AGENT_TIER_MIN_BUDGET <= raw <= _AGENT_TIER_MAX_BUDGET:
+            return _AGENT_TIER_DEFAULT_BUDGET
+        return raw
+
+    def _agent_tier_gate(self, shard: _LanlanShard, slot: str, *, ignore_pace: bool = False) -> str:
+        """这一拍能不能发。"" = 可发；budget = 今日额度用完（灯据此休眠）；pace = 还在
+        间隔地板里（静默跳过这一拍，下一拍再来——它是限速不是故障，所以不占灯位，
+        面板用"今日已用 X 次"的读数说话）。
+
+        `ignore_pace=True` 给成文用：那条链路自带双门槛（50 轮 / 7 天）、在飞锁与
+        队列，本来就不可能被连点打出节拍；地板要防的是碎片那种"每 62 秒一拍"的自动
+        链路。预算两边都管——那是当天总账，谁来花都一样花。
+        """
+        if slot != _AGENT_TIER_SLOT:
+            return ""
+        if tier_budget_left(shard.cycle, str(self._today_str()), self._agent_tier_budget()) <= 0:
+            return _CHANNEL_BUDGET_REASON
+        if ignore_pace:
+            return ""
+        try:
+            last = float(shard.cycle.get(_CYCLE_AGENT_BUDGET_LAST_TS) or 0.0)
+        except (TypeError, ValueError):
+            last = 0.0
+        if time.time() - last < _AGENT_TIER_MIN_INTERVAL_SEC:
+            return "pace"
+        return ""
+
+    async def _agent_tier_spend(self, lanlan: str, shard: _LanlanShard, slot: str) -> None:
+        """记一次 agent 档消耗（发出请求即记，不论成败——服务端两次都算）。
+
+        水位落 cycle 盘而不是只放内存：插件子进程会因切角色卡/改设置/覆盖导入反复重启，
+        只放内存等于每次重启都能多发一发（1.3.2 的邀请节流水位就是实机钉出来的这个坑）。
+        """
+        if slot != _AGENT_TIER_SLOT:
+            return
+        tier_budget_spend(shard.cycle, str(self._today_str()))
+        shard.cycle[_CYCLE_AGENT_BUDGET_LAST_TS] = time.time()
+        await self._save_shard_cycle(lanlan, shard)
+
     # 超时与输出上限由调用点按通道给（碎片快、成文慢，见 state.py 的 _HOST_LLM_*），
     # 两条传输共用同一个数字：超时旋钮必须对用户说得出一个值，不能"看这次走哪条路"
     # ——README 与面板都按它承诺"点一下要让后台等多久"，两份数字必然漂移。
@@ -412,8 +515,28 @@ class SensesMixin:
                     slot, _slot_dormancy_hint(core_cfg, slot),
                 )
             return False
+        route = _channel_route(slot, resolved)
+        if self._channel_break_open(lanlan, "fragments", route):
+            # 熔断中：这一拍直接丢（marker 照推进，否则同一个 marker 每 10 秒空转一次）。
+            # 不发请求、不再补日志——熔断开闸时已经留过一行 warning
+            shard.last_fragment_marker = marker
+            shard.last_fragment_analysis_ts = now
+            return False
+        pace = self._agent_tier_gate(shard, slot)
+        if pace == _CHANNEL_BUDGET_REASON:
+            # 今日 agent 档额度用完 → 这一拍丢（与熔断/休眠同一处理：不推进水位就会
+            # 每 10 秒空转到明天）；面板灯报 budget，用户看得见为什么安静了
+            shard.last_fragment_marker = marker
+            shard.last_fragment_analysis_ts = now
+            return False
+        if pace == "pace":
+            # 还在 300 秒地板里：**素材留着**，只把分析节流推后一拍再回来（丢 marker
+            # 等于把限速当成故障，那条碎片就永远记不上了）
+            shard.last_fragment_analysis_ts = now
+            return False
         shard.last_fragment_marker = marker
         shard.last_fragment_analysis_ts = now
+        await self._agent_tier_spend(lanlan, shard, slot)
         raw = await self._channel_chat(
             resolved,
             build_fragment_prompt(user_text, her_text),
@@ -421,6 +544,7 @@ class SensesMixin:
             max_completion_tokens=_HOST_LLM_MAX_TOKENS_FRAGMENT,
             call_type="plugin_fragment_capture",
         )
+        self._channel_break_note(lanlan, "fragments", route, ok=raw is not None)
         parsed = parse_fragment_response(raw or "")
         if parsed is None or not parsed.get("capture"):
             return False
@@ -606,9 +730,20 @@ class SensesMixin:
         passed, reason, resolved = await self._review_write_gate(shard, force=force)
         if not passed or resolved is None:
             return False, reason or "gate_rejected"
+        slot = str(self._review_cfg.get("slot") or "").strip() or _REVIEW_DEFAULT_SLOT
+        route = _channel_route(slot, resolved)
+        if self._channel_break_open(lanlan, "review", route):
+            # 熔断中不再发请求。原因沿用 slot_unresolved：面板那侧本来就按这个码
+            # 去问状态灯，灯现在会回 rejected——一份判据两处用，不再新增原因码
+            return False, "slot_unresolved"
+        if self._agent_tier_gate(shard, slot, ignore_pace=True) == _CHANNEL_BUDGET_REASON:
+            # 今日 agent 档额度用完：同上，让灯去说具体是哪一档（ignore_pace 的理由见
+            # _agent_tier_gate 注释——成文自带双门槛与在飞锁，不需要再被限速一次）
+            return False, "slot_unresolved"
         # 成文素材：累计统计 + 最近几轮对话摘样（一次性拉取宿主 recent 窗口）
         sample_turns = await self._collect_review_sample_turns(shard, lanlan)
         prompt = build_review_prompt(shard.review_stats, sample_turns=sample_turns)
+        await self._agent_tier_spend(lanlan, shard, slot)
         raw = await self._channel_chat(
             resolved,
             prompt,
@@ -616,6 +751,7 @@ class SensesMixin:
             max_completion_tokens=_HOST_LLM_MAX_TOKENS_REVIEW,
             call_type="plugin_review_compose",
         )
+        self._channel_break_note(lanlan, "review", route, ok=raw is not None)
         text = parse_review_response(raw or "")
         if not text:
             # 留痕分级（1.2.2 审查轮）：面板提示"稍后再试（详见插件日志）"，
@@ -625,7 +761,15 @@ class SensesMixin:
             # 预览（head=）——那是基于对话成文的模型回复，可能回显相处内容；
             # 改记形态分类（JSON/HTML/围栏/纯文本），"判断话风问题"仍然够用
             if raw is None:
-                detail = "request failed (see 'tone direct chat completion' warning above)"
+                # 指路要指对：host 传输的失败行由 host_llm 打（"host pipeline chat
+                # failed"），直连那条才是 "tone direct chat completion failed"——
+                # 1.3.3 实机就是这句把用户指向了一行根本不存在的 warning
+                hint = (
+                    "host pipeline chat failed"
+                    if resolved.get("transport") == _CHANNEL_TRANSPORT_HOST
+                    else "tone direct chat completion"
+                )
+                detail = f"request failed (see '{hint}' warning above)"
             else:
                 head = str(raw).lstrip()[:1]
                 shape = {

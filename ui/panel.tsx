@@ -93,8 +93,23 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     setForm((prev) => ({ ...prev, ...patch }))
   }
 
+  // 已落盘基线（1.3.3 修订轮）：保存时只提交与它不同的字段。旧做法是把整张表单回写
+  // `update_settings`，于是用户从没碰过的下拉也会进 Store 覆盖层——而覆盖层优先于
+  // plugin.toml（mixins/shards.py 的"面板保存过的全局字段优先于 toml 默认"），此后
+  // 插件再怎么改出厂默认都追不到这份存档上。2026-09-22 实机就卡在这：碎片出厂默认
+  // 从 host 改成 custom，老存档里躺着的那份 host 把它压了一整天。
+  const formBaseline = useRef<FormValues>(settingsToForm({}))
+
+  // 表单与服务端快照同步的唯一入口：回填表单的同时把基线挪到同一份值上，
+  // 两者任何时候都同源，"改没改过"才算得出真话
+  function syncForm(next: Settings) {
+    const values = settingsToForm(next)
+    formBaseline.current = values
+    setForm(values)
+  }
+
   useEffect(() => {
-    setForm(settingsToForm(settings))
+    syncForm(settings)
   }, [
     settings.auto_derive,
     settings.cycle_length,
@@ -120,6 +135,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     settings.review_mode,
     settings.review_turns_threshold,
     settings.review_days_threshold,
+    settings.agent_daily_budget,
     (settings as Record<string, any>).anniversary_inject,
   ])
 
@@ -294,13 +310,25 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     if (!DATE_RE.test(String(state.anchor_date || ""))) {
       throw new Error(t("panel.errors.setAnchorFirst", { defaultValue: "请先设置潮汐首日锚点，再开启模拟" }))
     }
-    const result = await props.api.call("update_settings", { ...form })
+    const base = formBaseline.current as Record<string, any>
+    const current = form as Record<string, any>
+    const dirty: Record<string, any> = {}
+    for (const key of Object.keys(current)) {
+      const now = current[key]
+      const was = base[key]
+      // 数组/对象按序列化比（phase_openers 这类是列表），标量按值比
+      const same = now === was || (typeof now === "object" && JSON.stringify(now) === JSON.stringify(was))
+      if (!same) dirty[key] = now
+    }
+    // 一个都没改：不发这一趟，更不写存档（写了就等于替用户把出厂默认钉死）
+    if (Object.keys(dirty).length === 0) return
+    const result = await props.api.call("update_settings", dirty)
     // 用入口返回的最新快照立即回填表单，不依赖 context 重取
     const snap = (result && typeof result === "object" && (result as Record<string, any>).enabled !== undefined)
       ? (result as Partial<Settings>)
       : null
     if (snap) {
-      setForm(settingsToForm({ ...settings, ...snap }))
+      syncForm({ ...settings, ...snap })
     }
   }
 
@@ -547,10 +575,14 @@ export default function Panel(props: PluginSurfaceProps<State>) {
           min_turns: String(r.min_turns ?? 10),
         }))
       } else if (r.reason === "slot_unresolved") {
-        // 休眠原因复用新手向导通道卡的既有文案（零新增 key，1.md 既定）
-        toast.info(r.dormant_reason === "free_route"
+        // 休眠原因复用新手向导通道卡的既有文案（零新增 key，1.md 既定）；熔断这一档
+        // 必须自己占一个分支——落到"槽位没配模型"上就把"被服务端拒了"说成了"你没配"
+        const why = r.dormant_reason === "free_route"
           ? t("onboarding.channels.freeRoute", { defaultValue: "休眠 · 直连撞上免费路由" })
-          : t("onboarding.channels.noModel", { defaultValue: "休眠 · 槽位没配模型" }))
+          : r.dormant_reason === "rejected"
+            ? t("panel.channel.rejected", { defaultValue: "服务端拒了 · 已熔断" })
+            : t("onboarding.channels.noModel", { defaultValue: "休眠 · 槽位没配模型" })
+        toast.info(why)
       } else {
         toast.info(t("panel.review.writeFailed", { defaultValue: "这一篇还没写成，稍后再试" }))
       }
@@ -917,6 +949,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
                 updateForm={updateForm}
                 toneSlotOptions={state.tone_slot_options}
                 channelStatus={state.channel_status}
+                agentUsage={state.agent_tier_usage}
               />
               <SaveBar t={t} canSave={!!updateSettingsAction} onSave={saveSettings} />
             </div>

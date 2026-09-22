@@ -207,6 +207,8 @@ function channelStatusLabel(t: TFunc, ch: { enabled?: boolean; dormant_reason?: 
   if (!ch.enabled) return t("onboarding.channels.disabled", { defaultValue: "未开启" })
   if (ch.dormant_reason === "no_model") return t("onboarding.channels.noModel", { defaultValue: "休眠 · 槽位没配模型" })
   if (ch.dormant_reason === "free_route") return t("onboarding.channels.freeRoute", { defaultValue: "休眠 · 直连撞上免费路由" })
+  // 熔断态复用模型通道卡那条文案：两处说的是同一件事，两份文案必然漂移出两个答案
+  if (ch.dormant_reason === "rejected") return t("panel.channel.rejected", { defaultValue: "服务端拒了 · 已熔断" })
   return t("onboarding.channels.dormant", { defaultValue: "休眠中" })
 }
 

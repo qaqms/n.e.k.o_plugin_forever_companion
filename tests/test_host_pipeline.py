@@ -531,3 +531,307 @@ def test_host_slot_resolution_is_cached_per_slot(plugin_factory, tm, monkeypatch
     p._host_slot_cache["summary"] = (first, ts)
     run(p._resolve_host_slot("summary"))
     assert calls == ["summary", "conversation", "summary"]
+
+
+# ---------------------------------------------------------------------------
+# 通道熔断（1.3.3 修订轮）
+#
+# 立项理由是实机数字：免费路由的文字档从插件调用 15 次全被服务端拒（400 "STOP
+# ABUSE"），碎片那条约每 62 秒撞一次，而面板一路绿灯。所以这一层的契约有两条：
+# **不再发请求**（第一条）与**灯要说真话**（第二条）。两条都配了反向对照——
+# 把桩换成"肯定成功"的回复后如果调用真发了出去，说明熔断根本没生效，测试必红。
+# ---------------------------------------------------------------------------
+
+
+def _fuse_setup(p, *, reply):
+    """碎片通道的宿主管线桩：每次调用返回 reply（None = 请求层面失败）。"""
+    shard = p._current_shard()
+    calls: list[str] = []
+    attempts = [0]
+
+    async def fake_poll(shard_, *, lanlan="", peek=False, advance=True):
+        # 水位按"尝试次数"推进而不是按"实际发出次数"：被闸挡下的那些拍也算见过新内容，
+        # 否则反向对照（抬高预算后再试一次）会因为"marker 没变"被当成没有新素材挡掉
+        attempts[0] += 1
+        shard_.last_recent_marker = f"{attempts[0] + 1}:m"
+        return ("我最喜欢你做的饭", "真的吗嘿嘿")
+
+    async def fake_host_slot(slot):
+        return HOST_RESOLVED
+
+    async def fake_chat(resolved, prompt, **kw):
+        calls.append(prompt)
+        return reply() if callable(reply) else reply
+
+    p._poll_recent_turns = fake_poll
+    p._resolve_host_slot = fake_host_slot
+    p._chat_via_host = fake_chat
+    p._load_core_config = lambda: dict(FREE_ROUTE_CFG)
+    p._fragments_cfg["mode"] = "host"
+    # 熔断要看的是"连着几次"，所以拆掉 60 秒最小间隔这道闸（否则第二次根本进不来）
+    p._fragments_cfg["min_interval_sec"] = 0
+    shard.last_fragment_marker = "1:old"
+    return shard, calls
+
+
+def test_fragment_channel_fuses_after_two_rejections(plugin_factory) -> None:
+    p = plugin_factory()
+    shard, calls = _fuse_setup(p, reply=None)
+    assert run(p._maybe_capture_fragments("default", shard)) is False
+    assert run(p._maybe_capture_fragments("default", shard)) is False
+    assert len(calls) == 2
+
+    async def would_succeed(resolved, prompt, **kw):
+        calls.append(prompt)
+        return '{"capture": true, "kind": "like", "quote": "q", "confidence": 0.9}'
+
+    p._chat_via_host = would_succeed
+    assert run(p._maybe_capture_fragments("default", shard)) is False
+    assert run(p._maybe_capture_fragments("default", shard)) is False
+    assert len(calls) == 2  # 反向对照：熔断开着，一次都不许多发
+    assert shard.diary == []
+
+
+def test_fuse_releases_when_the_route_changes(plugin_factory) -> None:
+    """改槽位/改通道 = 换了一条路：旧账必须作废，否则用户改对了也永远翻不了身。"""
+    p = plugin_factory()
+    shard, calls = _fuse_setup(p, reply=None)
+    run(p._maybe_capture_fragments("default", shard))
+    run(p._maybe_capture_fragments("default", shard))
+    assert len(calls) == 2
+    p._fragments_cfg["slot"] = "agent"
+    assert run(p._maybe_capture_fragments("default", shard)) is False
+    assert len(calls) == 3
+
+
+def test_success_clears_the_failure_streak(plugin_factory) -> None:
+    """熔断数的是"连续"被拒：中间成一次就该归零，不能被历史账误伤。
+
+    成败交替四拍：拒→成→拒→成。若把累计失败当判据，第四拍就不会再发请求，
+    那一次成功白捡的碎片也永远记不上。
+    """
+    good = '{"capture": true, "kind": "like", "quote": "最喜欢你做的饭", "confidence": 0.9}'
+    p = plugin_factory()
+    replies = iter([None, good, None, good])
+    shard, calls = _fuse_setup(p, reply=lambda: next(replies))
+    assert run(p._maybe_capture_fragments("default", shard)) is False
+    assert run(p._maybe_capture_fragments("default", shard)) is True
+    assert run(p._maybe_capture_fragments("default", shard)) is False
+    assert run(p._maybe_capture_fragments("default", shard)) is True
+    assert len(calls) == 4
+    assert [item["quote"] for item in shard.diary] == ["最喜欢你做的饭", "最喜欢你做的饭"]
+
+
+def test_dashboard_light_reports_rejected(plugin_factory, tm) -> None:
+    """灯与熔断同源：解析得到端点只证明"知道往哪发"，被连着拒就不该再报正常。"""
+    p = plugin_factory()
+    shard, _calls = _fuse_setup(p, reply=None)
+    run(p._maybe_capture_fragments("default", shard))
+    run(p._maybe_capture_fragments("default", shard))
+    p._review_cfg["mode"] = "host"
+    cs = run(p.dashboard())["channel_status"]
+    assert cs["fragments"]["dormant_reason"] == tm._CHANNEL_BREAK_REASON
+    assert cs["fragments"]["transport"] == tm._CHANNEL_TRANSPORT_HOST
+    # 没熔断的那条不受牵连——熔断是按"角色 + 通道"分别记的
+    assert cs["review"]["dormant_reason"] == ""
+
+
+def test_review_compose_stops_calling_once_fused(plugin_factory, tm) -> None:
+    """成文同理，且回执沿用 slot_unresolved：面板据此问灯，灯答 rejected。"""
+    p = plugin_factory()
+    shard = p._current_shard()
+    calls: list[str] = []
+
+    async def gate(shard_, *, force=False):
+        return True, "", HOST_RESOLVED
+
+    async def collect(shard_, lanlan):
+        return []
+
+    async def chat(resolved, prompt, **kw):
+        calls.append(prompt)
+        return None
+
+    p._review_write_gate = gate
+    p._collect_review_sample_turns = collect
+    p._chat_via_host = chat
+    p._review_cfg["mode"] = "host"
+    assert run(p._maybe_write_review("default", shard, force=True)) == (False, "compose_failed")
+    assert run(p._maybe_write_review("default", shard, force=True))[0] is False
+    assert len(calls) == 2
+    assert run(p._maybe_write_review("default", shard, force=True)) == (False, "slot_unresolved")
+    assert len(calls) == 2
+
+
+def test_default_slots_stay_deliberately_asymmetric(plugin_factory, tm) -> None:
+    """出厂形态钉死：碎片 = summary + custom（免费路由下拼不出端点→零请求休眠）；
+    成文 = agent + host（实测唯一零配置可通的一档）。
+
+    两边都是量出来的取舍，不是"忘了统一"：统一成 agent 档，碎片那条会把宿主 agent
+    的当日额度吃光（它约每 62 秒一拍）；统一成 summary/host，成文回到必然被拒的那一档、
+    碎片则每天撞 15 次被拒请求——零配置主张与风控代价同时回来。
+    """
+    import tomllib
+    from pathlib import Path
+
+    assert tm._REVIEW_DEFAULT_SLOT == "agent"
+    assert tm._FRAGMENT_DEFAULT_SLOT == "summary"
+    toml_path = Path(tm.__file__).with_name("plugin.toml")
+    shipped = tomllib.loads(toml_path.read_text(encoding="utf-8"))
+    assert (shipped["fragments"]["slot"], shipped["fragments"]["mode"]) == ("summary", "custom")
+    assert (shipped["review"]["slot"], shipped["review"]["mode"]) == ("agent", "host")
+
+
+# ---------------------------------------------------------------------------
+# agent 档每日预算与间隔地板（1.3.3 修订轮）
+#
+# 立项理由：免费路由上只有 agent 档放行，而那一档带服务端日配额（宿主自己定 500 次/天，
+# quota 注释明写"并非只在本地实施"），且宿主自己的 agent 功能花的是同一个池子。碎片
+# 约每 62 秒一拍，一旦切到 agent 档就是拿宿主正经功能在跑。
+# ---------------------------------------------------------------------------
+
+GOOD_FRAGMENT_REPLY = '{"capture": true, "kind": "like", "quote": "最喜欢你做的饭", "confidence": 0.9}'
+
+
+def _agent_setup(p, *, budget: int = 20, reply=GOOD_FRAGMENT_REPLY, slot: str = "agent"):
+    """让碎片通道实际走 agent 档（其余桩沿用 _fuse_setup）。"""
+    shard, calls = _fuse_setup(p, reply=reply)
+    p._fragments_cfg["slot"] = slot
+    p._agent_tier_cfg["daily_budget"] = budget
+    return shard, calls
+
+
+def _free_the_floor(shard) -> None:
+    """把间隔地板的水位挪到过去——只测预算时不想被地板挡。"""
+    shard.cycle["agent_budget_last_ts"] = 0.0
+
+
+def _prime_budget(p, shard, used: int) -> None:
+    """把当日计数摆到指定格。预算下限是 5（配 1、2 会被取值口拒掉），所以"快用完/
+    已用完"靠预置计数造，不用生产环境不可能出现的值。"""
+    shard.cycle["agent_budget_date"] = str(p._today_str())
+    shard.cycle["agent_budget_used"] = used
+    shard.cycle["agent_budget_last_ts"] = 0.0
+
+
+def test_agent_tier_budget_stops_sending_when_spent(plugin_factory) -> None:
+    p = plugin_factory()
+    shard, calls = _agent_setup(p, budget=5)
+    _prime_budget(p, shard, 3)
+    assert run(p._maybe_capture_fragments("default", shard)) is True  # 第 4 次
+    _free_the_floor(shard)
+    assert run(p._maybe_capture_fragments("default", shard)) is True  # 第 5 次＝用满
+    assert len(calls) == 2 and len(shard.diary) == 2
+    _free_the_floor(shard)
+    # 预算用完：桩给的是"肯定成功"的回复，照发就说明预算闸形同虚设
+    assert run(p._maybe_capture_fragments("default", shard)) is False
+    assert len(calls) == 2
+    # 反向对照：用户把预算抬高一格，立刻恢复发送（不是熔断那种要改路才复活）
+    p._agent_tier_cfg["daily_budget"] = 6
+    _free_the_floor(shard)
+    assert run(p._maybe_capture_fragments("default", shard)) is True
+    assert len(calls) == 3
+
+
+def test_agent_tier_floor_spaces_calls_but_keeps_material(plugin_factory) -> None:
+    """地板只限速、不丢素材：被挡下的那一拍不推进水位，稍后回来还能记上。"""
+    p = plugin_factory()
+    shard, calls = _agent_setup(p, budget=20)
+    assert run(p._maybe_capture_fragments("default", shard)) is True
+    marker = shard.last_fragment_marker
+    shard.last_fragment_analysis_ts = 0.0  # 绕开碎片自己的间隔闸，专测 agent 地板
+    assert run(p._maybe_capture_fragments("default", shard)) is False
+    assert len(calls) == 1
+    assert shard.last_fragment_marker == marker
+    _free_the_floor(shard)
+    assert run(p._maybe_capture_fragments("default", shard)) is True
+    assert len(calls) == 2
+
+
+def test_non_agent_slots_are_not_budgeted(plugin_factory) -> None:
+    """预算只管 agent 档：用户自己配的付费服务商不该按免费档的稀缺性限死。"""
+    p = plugin_factory()
+    shard, calls = _agent_setup(p, budget=1, slot="summary")
+    for _ in range(3):
+        assert run(p._maybe_capture_fragments("default", shard)) is True
+    assert len(calls) == 3
+    assert "agent_budget_used" not in shard.cycle
+
+
+def test_review_ignores_the_floor_but_not_the_budget(plugin_factory) -> None:
+    """成文自带双门槛与在飞锁，不再被地板限一次；当日总账照样管它。"""
+    p = plugin_factory()
+    shard = p._current_shard()
+    calls: list[str] = []
+
+    async def gate(shard_, *, force=False):
+        return True, "", HOST_RESOLVED
+
+    async def collect(shard_, lanlan):
+        return []
+
+    async def chat(resolved, prompt, **kw):
+        calls.append(prompt)
+        return "这一期你们聊得很好。"
+
+    p._review_write_gate = gate
+    p._collect_review_sample_turns = collect
+    p._chat_via_host = chat
+    p._review_cfg["mode"] = "host"
+    p._review_cfg["slot"] = "agent"
+    p._agent_tier_cfg["daily_budget"] = 5
+    _prime_budget(p, shard, 2)
+    # 连着两拍都发得出去 = 地板没管成文（第二拍距第一拍不到 300 秒）
+    assert run(p._maybe_write_review("default", shard, force=True))[0] is True
+    assert run(p._maybe_write_review("default", shard, force=True))[0] is True
+    assert len(calls) == 2
+    # 再发一拍就用满 5 次；下一拍预算闸落下：成文一样安静，且回执让面板去问灯
+    assert run(p._maybe_write_review("default", shard, force=True))[0] is True
+    assert len(calls) == 3
+    assert run(p._maybe_write_review("default", shard, force=True)) == (False, "slot_unresolved")
+    assert len(calls) == 3
+
+
+def test_budget_counters_persist_and_panel_says_so(plugin_factory, tm) -> None:
+    """计数落 cycle 盘（重启仍认），面板读数与灯都说真话。"""
+    p = plugin_factory()
+    shard, _calls = _agent_setup(p, budget=5)
+    _prime_budget(p, shard, 4)
+    assert run(p._maybe_capture_fragments("default", shard)) is True  # 用满 5
+    stored = p.store.data["cycle@default"]
+    assert stored["agent_budget_used"] == 5
+    assert stored["agent_budget_date"] == str(p._today_str())
+    payload = run(p.dashboard())
+    assert payload["channel_status"]["fragments"]["dormant_reason"] == tm._CHANNEL_BUDGET_REASON
+    assert payload["agent_tier_usage"] == {"used": 5, "budget": 5}
+    # 预算记的是"这个角色在 agent 档上的总账"，不按通道分账——成文默认也走 agent 槽，
+    # 所以它一起安静下来。这正是与宿主 agent 共池的语义：池子空了谁都不能再舀
+    assert payload["channel_status"]["review"]["dormant_reason"] == tm._CHANNEL_BUDGET_REASON
+
+
+def test_budget_math_rolls_over_by_day(tm) -> None:
+    cycle: dict = {}
+    assert tm.tier_budget_left(cycle, "2026-09-22", 3) == 3
+    tm.tier_budget_spend(cycle, "2026-09-22")
+    tm.tier_budget_spend(cycle, "2026-09-22")
+    assert tm.tier_budget_used(cycle, "2026-09-22") == 2
+    assert tm.tier_budget_left(cycle, "2026-09-22", 3) == 1
+    assert tm.tier_budget_used(cycle, "2026-09-23") == 0  # 次日归零，不需要谁去清
+    assert tm.tier_budget_left(cycle, "2026-09-23", 3) == 3
+
+
+def test_update_settings_validates_agent_budget(plugin_factory, tm) -> None:
+    """越界是拒收而不是钳制：一次笔误不该换掉一整天的公共额度。"""
+    p = plugin_factory()
+    ok = run(p.update_settings(agent_daily_budget=150))
+    assert isinstance(ok, tm.Ok)
+    assert p._settings_snapshot()["agent_daily_budget"] == 150
+    snap = run(p.dashboard())["settings"]
+    assert snap["agent_daily_budget"] == 150
+    for bad in (0, 4, 151, 9999):
+        res = run(p.update_settings(agent_daily_budget=bad))
+        assert isinstance(res, tm.Err) and "invalid_agent_budget" in str(res.error), bad
+    res = run(p.update_settings(agent_daily_budget="很多"))
+    assert isinstance(res, tm.Err) and "invalid_agent_budget" in str(res.error), res
+    # 拒收之后原值不变
+    assert run(p.dashboard())["settings"]["agent_daily_budget"] == 150

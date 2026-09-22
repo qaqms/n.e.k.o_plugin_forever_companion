@@ -51,8 +51,13 @@ export type Settings = {
   review_mode?: string
   review_turns_threshold?: number
   review_days_threshold?: number
+  agent_daily_budget?: number
   debug_mode?: boolean
 }
+
+// agent 档当日消耗读数（dashboard agent_tier_usage，1.3.3 修订轮）：预算是全局配置、
+// 消耗按角色记；面板只给读数，限速策略（300 秒地板）不在这里说话
+export type AgentTierUsage = { used?: number; budget?: number }
 
 // 时光日记时间线条目：source=self 为她手写的（mood/entry），source=auto 为自动碎片
 //（kind/quote/note）；旧数据（0.6.x）缺 source 按 self 处理
@@ -287,6 +292,7 @@ export type State = {
   tone_slot_options?: ToneSlotOption[]
   review_brief?: ReviewBrief
   channel_status?: ChannelStatus
+  agent_tier_usage?: AgentTierUsage
   week_activity?: number
   stats_summary?: StatsState
   // 新手引导 + 就绪清单（1.2.6）
@@ -362,6 +368,7 @@ export type FormValues = {
   review_mode: string
   review_turns_threshold: number
   review_days_threshold: number
+  agent_daily_budget: number
   anniversary_inject: boolean
   debug_mode: boolean
 }

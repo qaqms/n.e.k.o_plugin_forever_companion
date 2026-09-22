@@ -254,7 +254,25 @@ from .core.state import (
     _AFFECT_VALENCE_TAU_SEC as _AFFECT_VALENCE_TAU_SEC,
 )
 from .core.state import (
+    _AGENT_TIER_MAX_BUDGET as _AGENT_TIER_MAX_BUDGET,
+)
+from .core.state import (
+    _AGENT_TIER_MIN_BUDGET as _AGENT_TIER_MIN_BUDGET,
+)
+from .core.state import (
+    _AGENT_TIER_MIN_INTERVAL_SEC as _AGENT_TIER_MIN_INTERVAL_SEC,
+)
+from .core.state import (
     _ASSIST_KEY_FIELDS as _ASSIST_KEY_FIELDS,
+)
+from .core.state import (
+    _CHANNEL_BREAK_FAILURES as _CHANNEL_BREAK_FAILURES,
+)
+from .core.state import (
+    _CHANNEL_BREAK_REASON as _CHANNEL_BREAK_REASON,
+)
+from .core.state import (
+    _CHANNEL_BUDGET_REASON as _CHANNEL_BUDGET_REASON,
 )
 from .core.state import (
     _CHANNEL_MODE_CUSTOM as _CHANNEL_MODE_CUSTOM,
@@ -473,6 +491,15 @@ from .core.state import (
 from .core.state import (
     _weekly_key as _weekly_key,
 )
+from .core.state import (
+    tier_budget_left as tier_budget_left,
+)
+from .core.state import (
+    tier_budget_spend as tier_budget_spend,
+)
+from .core.state import (
+    tier_budget_used as tier_budget_used,
+)
 from .core.stats import (
     anniversary_due,
     mark_anniversary_pushed,
@@ -571,6 +598,8 @@ class ForeverCompanionPlugin(
         self._fragments_cfg: JsonObject = {}
         self._journal_cfg: JsonObject = {}
         self._review_cfg: JsonObject = {}
+        # agent 档节流配置（[agent_tier]，1.3.3 修订轮）：日预算的读取口，见 tier_budget_left
+        self._agent_tier_cfg: JsonObject = {}
         self._stats_cfg: JsonObject = {}
         self._emotion_sense_cfg: JsonObject = {}
         # 语气感知运行态缓存（_csrf_token / _last_tone_error_logged / _core_config_cache）
@@ -624,6 +653,11 @@ class ForeverCompanionPlugin(
         # 问同一个槽；TTL 与 _load_core_config 同用 _CORE_CONFIG_CACHE_TTL。
         # 缺键 = 未取过（与"取到但无端点"的 None 值区分开）；config_change 时整体作废
         self._host_slot_cache: dict[str, tuple[JsonObject | None, float]] = {}
+        # 模型通道熔断（1.3.3 修订轮）：key = "<角色>|<通道>"，值 = {route, fails}。
+        # 同一条路上连续失败到 _CHANNEL_BREAK_FAILURES 次就不再对它发请求（面板灯
+        # 改报 rejected）。纯内存态：进程重启、槽位/通道被改（路变了）、宿主配置变更
+        # 都会复位，让用户"改点东西就能再试一次"，不需要专门的复位入口
+        self._channel_break: dict[str, JsonObject] = {}
         # 面板潮汐日历缓存：key = (角色, 当天日期, 周期参数指纹)；
         # 参数/锚点/快进/跨天/切角色都会改变 key，自然失效，无需显式清理
         self._calendar_cache: tuple[tuple, list[JsonObject] | None] = ((), None)
@@ -893,6 +927,9 @@ class ForeverCompanionPlugin(
         self._proactive_api_base_cache = None
         self._tone_slot_options_cache = (None, -1000.0)
         self._host_slot_cache = {}
+        # 熔断一并复位：用户在宿主里新配了服务商（免费路由→付费）正是最常见的
+        # "我刚改好了，再试一次"，不该被上一轮的连拒继续挡着
+        self._channel_break = {}
         self._sync_debug_entries()
         # 锚点/周期参数变了，重新校验一次并报告（针对当前角色 shard）
         try:
