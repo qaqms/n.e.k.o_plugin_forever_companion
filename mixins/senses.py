@@ -41,10 +41,17 @@ from ..core.review import (
 )
 from ..core.review import new_stats as review_new_stats
 from ..core.state import (
+    _CHANNEL_MODE_CUSTOM,
+    _CHANNEL_TRANSPORT_HOST,
+    _CORE_CONFIG_CACHE_TTL,
     _FRAGMENT_DEFAULT_CONFIDENCE,
     _FRAGMENT_DEFAULT_MIN_INTERVAL_SEC,
     _FRAGMENT_DEFAULT_NUDGE_GAP_MIN,
     _FRAGMENT_DEFAULT_SLOT,
+    _HOST_LLM_MAX_TOKENS_FRAGMENT,
+    _HOST_LLM_MAX_TOKENS_REVIEW,
+    _HOST_LLM_TIMEOUT_FRAGMENT_SEC,
+    _HOST_LLM_TIMEOUT_REVIEW_SEC,
     _PROACTIVE_PAUSE_ACTIONS,
     _REVIEW_DEFAULT_DAYS,
     _REVIEW_DEFAULT_SLOT,
@@ -53,7 +60,9 @@ from ..core.state import (
     _now_utc,
 )
 from ..core.stats import record_milestone
+from ..services import host_llm as _host_llm
 from ..services.tone_slot import (
+    _channel_mode,
     _parse_tone_result,
     _post_chat_completion,
     _resolve_tone_slot,
@@ -166,9 +175,13 @@ class SensesMixin:
         """把槽位选择解析成 {"model", "api_key", "base_url"}（解析链逻辑在 tone_slot.py）。"""
         return _resolve_tone_slot(core_cfg, slot, _seen)
 
-    def _post_chat_completion(self, base_url: str, api_key: str, model: str, prompt: str) -> str | None:
+    def _post_chat_completion(
+        self, base_url: str, api_key: str, model: str, prompt: str, *, timeout_sec: float = 15.0
+    ) -> str | None:
         """同步直连 OpenAI 兼容 /chat/completions（逻辑在 tone_slot.py）；任何失败 → None。"""
-        return _post_chat_completion(base_url, api_key, model, prompt, logger=self.logger)
+        return _post_chat_completion(
+            base_url, api_key, model, prompt, timeout_sec=timeout_sec, logger=self.logger
+        )
 
     def _parse_tone_result(self, raw: str) -> tuple[str, float] | None:
         """解析直连模型的五分类 JSON 回复（容错与归一化逻辑在 tone_slot.py）。"""
@@ -177,6 +190,108 @@ class SensesMixin:
     async def _analyze_turn_tone_direct(self, text: str, slot: str) -> tuple[str, float] | None:
         """直连所选槽位的端点做五分类分析；解析不出可用端点/请求失败/回复坏 → None 静默降级。"""
         return await self._emotion_sense._analyze_turn_tone_direct(text, slot)
+
+    # ==========================================
+    # 模型通道传输层（1.3.2）：碎片提取 / 我的日记成文共用的"怎么发这次 prompt"
+    #
+    # 每个通道两个正交旋钮：slot = 用宿主哪个槽的模型，mode = 由谁去调它。
+    # - mode=host（默认，开箱即用）：进程内复用宿主自己的配置解析与 LLM 客户端
+    #   （services/host_llm.py），槽位三元组、地域改写、免费路由端点与宿主客户端
+    #   身份全在宿主侧，用户不用配任何东西。
+    # - mode=custom：插件读宿主 core_config.json 拼端点自己直连（1.3.1 的唯一通路），
+    #   留给要接本地模型、独立服务商的用户。
+    # 两条传输都不进宿主用量面板（记账补丁只装在宿主服务进程，见 state.py 的 mode 注释），
+    # 所以 mode 的取舍只看"端点由谁解析"，不看"这次调用看不看得见"。
+    # host 解析不到端点时自动回落 custom 那条路，所以默认通道不可能比 1.3.1 更差；
+    # 宿主模块不可用（独立跑测试/宿主改版挪走内部模块）就是靠这条回落继续工作。
+    # 依赖宿主内部模块，无任何版本承诺：见 README「模型通道」的边界说明。
+    # ==========================================
+
+    async def _resolve_host_slot(self, slot: str) -> JsonObject | None:
+        """薄委托：host_llm.resolve_host_slot，带 5 秒缓存（宿主模块不可用 → None）。
+
+        委托本体只负责"可被打桩 + 缓存"两件事：真解析在 host_llm（调用它时经模块
+        对象现取，与 emotion_sense 的延迟解析回调同一纪律——测试桩打在服务模块上
+        也生效，构造期绑死函数名就会漏）。缓存不是优化而是必需：宿主侧的
+        `aget_model_api_config` 每次都重开 core_config.json 读一遍盘，而面板 5 秒
+        轮询一次就要问两个通道（碎片 + 成文），tick 链路还要再问——不缓存的话
+        "改用宿主管线"会把一次轻量配置读放大成每拍数次磁盘 IO。TTL 与
+        `_load_core_config` 同一把尺子（5 秒），用户在宿主里改配置的生效速度与旧
+        行为一致；None 照缓存，理由同 `_load_core_config` 对"读不到"的处理。
+        """
+        now_mono = time.monotonic()
+        hit = self._host_slot_cache.get(slot)
+        if hit is not None and now_mono - hit[1] < _CORE_CONFIG_CACHE_TTL:
+            return hit[0]
+        resolved = await _host_llm.resolve_host_slot(slot, logger=self.logger)
+        self._host_slot_cache[slot] = (resolved, now_mono)
+        return resolved
+
+    async def _chat_via_host(
+        self,
+        resolved: JsonObject,
+        prompt: str,
+        *,
+        timeout_sec: float,
+        max_completion_tokens: int,
+        call_type: str = "",
+    ) -> str | None:
+        """薄委托：host_llm.chat_via_host（用宿主客户端跑一次单轮补全）。"""
+        return await _host_llm.chat_via_host(
+            resolved,
+            prompt,
+            timeout_sec=timeout_sec,
+            max_completion_tokens=max_completion_tokens,
+            call_type=call_type,
+            logger=self.logger,
+        )
+
+    async def _resolve_channel_endpoint(
+        self, cfg: JsonObject, *, default_slot: str
+    ) -> tuple[JsonObject | None, str, JsonObject]:
+        """按通道的 mode 解析出可调用端点：(端点或 None, 槽位名, 宿主存盘配置快照)。
+
+        端点 dict 的 transport 标签缺省按 direct 处理——1.3.1 之前它只有
+        {model, api_key, base_url} 三键，tests 打桩 _resolve_tone_slot 也照这个形状
+        返回，不把 transport 变成必填项才能保住既有锚点。
+        返回 None 时 core_cfg 必然已读到（只有走到直连那一步才会失败），休眠诊断
+        因此总能拿到真实配置；host 成功时快照是空 dict，调用方此时也用不上它。
+        """
+        slot = str(cfg.get("slot") or "").strip() or default_slot
+        if _channel_mode(cfg) != _CHANNEL_MODE_CUSTOM:
+            resolved = await self._resolve_host_slot(slot)
+            if resolved is not None:
+                return resolved, slot, {}
+        core_cfg = await self._aload_core_config()
+        return self._resolve_tone_slot(core_cfg, slot), slot, core_cfg
+
+    # 超时与输出上限由调用点按通道给（碎片快、成文慢，见 state.py 的 _HOST_LLM_*），
+    # 两条传输共用同一个数字：超时旋钮必须对用户说得出一个值，不能"看这次走哪条路"
+    # ——README 与面板都按它承诺"点一下要让后台等多久"，两份数字必然漂移。
+    # 直连侧原来把 15 秒写死在 urlopen 里，现在同样收这个参数（值不再写死两处）。
+    async def _channel_chat(
+        self,
+        resolved: JsonObject,
+        prompt: str,
+        *,
+        timeout_sec: float,
+        max_completion_tokens: int,
+        call_type: str,
+    ) -> str | None:
+        """发一次单轮补全并按 transport 分派；失败 → None（调用方按降级处理）。"""
+        if resolved.get("transport") == _CHANNEL_TRANSPORT_HOST:
+            return await self._chat_via_host(
+                resolved,
+                prompt,
+                timeout_sec=timeout_sec,
+                max_completion_tokens=max_completion_tokens,
+                call_type=call_type,
+            )
+        return await asyncio.to_thread(
+            self._post_chat_completion,
+            resolved["base_url"], resolved["api_key"], resolved["model"], prompt,
+            timeout_sec=timeout_sec,
+        )
 
     # 已迁入 emotion_sense.py（A5 服务化第 1 批），同名薄委托
     def _effective_tone_threshold(self, shard: _LanlanShard) -> float:
@@ -254,9 +369,10 @@ class SensesMixin:
         """碎片捕获主入口（tick 驱动，只对当前角色 shard）。
 
         门控链：开关 → 最小间隔 → 独立水位（新轮判定，复用同趟 recent 数据）→
-        直连槽位提取 → 置信度门槛 → 落盘时间线 → 吵架轻语判定。
+        通道提取（默认宿主管线，见 _resolve_channel_endpoint）→ 置信度门槛 →
+        落盘时间线 → 吵架轻语判定。
         首趟只建基线不分析历史（与语气感知同款：插件启动不补记旧对话）。
-        模型槽位在宿主 core_config.json 解析不出 key 时功能休眠（节流 warning），
+        模型通道解析不出可调用端点时功能休眠（节流 warning），
         其余功能不受影响；捕获失败静默降级，绝不拖垮 tick。
         """
         if not self._fragments_enabled(shard):
@@ -282,9 +398,9 @@ class SensesMixin:
         if not user_text:
             shard.last_fragment_marker = marker
             return False
-        slot = str(self._fragments_cfg.get("slot") or "").strip() or _FRAGMENT_DEFAULT_SLOT
-        core_cfg = await self._aload_core_config()
-        resolved = self._resolve_tone_slot(core_cfg, slot)
+        resolved, slot, core_cfg = await self._resolve_channel_endpoint(
+            self._fragments_cfg, default_slot=_FRAGMENT_DEFAULT_SLOT
+        )
         if resolved is None:
             shard.last_fragment_marker = marker
             shard.last_fragment_analysis_ts = now
@@ -292,16 +408,18 @@ class SensesMixin:
             if now_mono - self._last_fragment_dormant_logged > 300:
                 self._last_fragment_dormant_logged = now_mono
                 self.logger.warning(
-                    "fragment capture dormant: slot {} unresolved in host core_config ({}), (throttled 5min)",
+                    "fragment capture dormant: slot {} unresolved ({}), (throttled 5min)",
                     slot, _slot_dormancy_hint(core_cfg, slot),
                 )
             return False
         shard.last_fragment_marker = marker
         shard.last_fragment_analysis_ts = now
-        raw = await asyncio.to_thread(
-            self._post_chat_completion,
-            resolved["base_url"], resolved["api_key"], resolved["model"],
+        raw = await self._channel_chat(
+            resolved,
             build_fragment_prompt(user_text, her_text),
+            timeout_sec=_HOST_LLM_TIMEOUT_FRAGMENT_SEC,
+            max_completion_tokens=_HOST_LLM_MAX_TOKENS_FRAGMENT,
+            call_type="plugin_fragment_capture",
         )
         parsed = parse_fragment_response(raw or "")
         if parsed is None or not parsed.get("capture"):
@@ -371,7 +489,7 @@ class SensesMixin:
     # 任何她可调用的 LLM 工具（隔离等级比个人日记更严——她连知道这本日记
     # 存在的渠道都没有）。素材纯本地累计（轮数/语气分布/心情采样/情绪动作
     # 事件/碎片原话），平时零模型开销；双门槛先到先写（满 N 轮或满 N 天
-    # 且期间有聊天），成文时一次小模型调用（碎片同款直连槽位），中性观察者
+    # 且期间有聊天），成文时一次小模型调用（与碎片同款通道），中性观察者
     # 口吻、纯文字无评分、负面行为如实记录不粉饰。
     # ==========================================
 
@@ -426,7 +544,7 @@ class SensesMixin:
         shard.review_stats = record_fragment(shard.review_stats, str(record.get("kind") or ""), str(record.get("quote") or ""))
 
     async def _review_write_gate(self, shard: _LanlanShard, *, force: bool) -> tuple[bool, str, Any]:
-        """成文前置门控（零模型开销；槽位解析读宿主配置走 async 对偶版）：开关 → 门槛 → 直连槽位解析。
+        """成文前置门控（零模型开销；通道解析经宿主管线或读宿主配置，都是 async 版）：开关 → 门槛 → 通道解析。
 
         面板「立即写一篇」受理预检与 _review_compose 共用本函数——口径唯一，
         不会两处漂移。返回 (是否放行, 原因, 槽位解析结果)：原因沿用历史词表
@@ -448,15 +566,15 @@ class SensesMixin:
             )
             if not due:
                 return False, reason, None
-        slot = str(self._review_cfg.get("slot") or "").strip() or _REVIEW_DEFAULT_SLOT
-        core_cfg = await self._aload_core_config()
-        resolved = self._resolve_tone_slot(core_cfg, slot)
+        resolved, slot, core_cfg = await self._resolve_channel_endpoint(
+            self._review_cfg, default_slot=_REVIEW_DEFAULT_SLOT
+        )
         if resolved is None:
             now_mono = time.monotonic()
             if now_mono - self._last_review_dormant_logged > 300:
                 self._last_review_dormant_logged = now_mono
                 self.logger.warning(
-                    "review compose dormant: slot {} unresolved in host core_config ({}), (throttled 5min)",
+                    "review compose dormant: slot {} unresolved ({}), (throttled 5min)",
                     slot, _slot_dormancy_hint(core_cfg, slot),
                 )
             return False, "slot_unresolved", None
@@ -481,9 +599,9 @@ class SensesMixin:
     async def _review_compose(self, lanlan: str, shard: _LanlanShard, *, force: bool = False) -> tuple[bool, str]:
         """成文主体（调用方一律先经 _maybe_write_review 拿在飞锁，勿直接进）。
 
-        门控链：_review_write_gate（开关/门槛/槽位）→ 摘样 + prompt →
-        直连成文 → 解析截断 → 篇目追加 + stats 原子清零落盘。槽位解析不出 key
-        时功能休眠（节流 warning），失败静默降级绝不拖垮 tick。返回 (是否写了, 原因)。
+        门控链：_review_write_gate（开关/门槛/通道）→ 摘样 + prompt →
+        通道成文 → 解析截断 → 篇目追加 + stats 原子清零落盘。通道解析不出可调用
+        端点时功能休眠（节流 warning），失败静默降级绝不拖垮 tick。返回 (是否写了, 原因)。
         """
         passed, reason, resolved = await self._review_write_gate(shard, force=force)
         if not passed or resolved is None:
@@ -491,9 +609,12 @@ class SensesMixin:
         # 成文素材：累计统计 + 最近几轮对话摘样（一次性拉取宿主 recent 窗口）
         sample_turns = await self._collect_review_sample_turns(shard, lanlan)
         prompt = build_review_prompt(shard.review_stats, sample_turns=sample_turns)
-        raw = await asyncio.to_thread(
-            self._post_chat_completion,
-            resolved["base_url"], resolved["api_key"], resolved["model"], prompt,
+        raw = await self._channel_chat(
+            resolved,
+            prompt,
+            timeout_sec=_HOST_LLM_TIMEOUT_REVIEW_SEC,
+            max_completion_tokens=_HOST_LLM_MAX_TOKENS_REVIEW,
+            call_type="plugin_review_compose",
         )
         text = parse_review_response(raw or "")
         if not text:

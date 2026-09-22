@@ -239,7 +239,7 @@ _FRAGMENT_KINDS = frozenset({"like", "dislike", "important", "overstep"})
 # 重度负面情绪生效期间值得轻语提醒她"你记得吗"的碎片类型
 _FRAGMENT_NUDGE_KINDS = frozenset({"overstep", "dislike"})
 # 碎片提取的默认模型槽位与置信度门槛：summary 槽与宿主记忆抽取同层级，
-# 适合"理解用户话语含义"；槽位在宿主 core_config.json 无 key 时功能自动休眠
+# 适合"理解用户话语含义"；默认经宿主管线调用（[fragments].mode），零配置即用
 _FRAGMENT_DEFAULT_SLOT = "summary"
 _FRAGMENT_DEFAULT_CONFIDENCE = 0.6
 # 碎片捕获的最小间隔（秒，[fragments].min_interval_sec）：与语气感知共用"每轮至多分析一次"的节奏
@@ -289,8 +289,8 @@ _JOURNAL_INVITE_THROTTLE_SEC = 24 * 3600
 _JOURNAL_RESPOND_COOLDOWN_SEC = 10 * 60
 
 # ---- 我的日记（0.8.0）：关于主人的互动评价 ----
-# 成文模板槽位：与碎片提取同款"可自定义 prompt 的直连通道"，summary 槽与宿主
-# 记忆抽取同层级；槽位无模型时功能休眠（节流 warning），其余功能不受影响
+# 成文模板槽位：与碎片提取同款"可自定义 prompt 的通道"，summary 槽与宿主
+# 记忆抽取同层级；默认经宿主管线调用（[review].mode），零配置即用
 _REVIEW_DEFAULT_SLOT = "summary"
 # 双门槛默认值：攒满 N 轮 或 距上篇满 N 天（且期间有新聊天）先到先写
 _REVIEW_DEFAULT_TURNS = 50
@@ -359,6 +359,36 @@ _TONE_SLOT_PREFIXES = {
     "vision": "vision",
     "agent": "agent",
 }
+# ---- 模型通道传输方式（1.3.2：开箱即用）----
+# host（默认）= 复用宿主 LLM 管线：槽位解析、地域改写、免费路由端点/模型名/key、
+#   宿主客户端身份全在宿主侧完成，用户什么都不用配（services/host_llm.py）。
+# custom = 插件自己直连：读宿主 core_config.json 里该槽的自定义端点配三元组（旧行为，
+#   tone_slot.py）。留给要接本地模型、独立端点或自带 key 的用户。
+# host 模式解析不到端点时自动回落 custom 那条路，所以本层永远不会比 1.3.1 更差。
+# mode 不是"要不要被宿主记到"的开关：宿主的用量记账挂在 openai 客户端的猴子补丁上，
+# 而 install_hooks() 只在宿主三个服务进程里执行，插件子进程从不安装，所以两条传输的
+# 消耗都不进宿主用量面板、也不占宿主 agent 日配额。想控量只有通道开关与 min_interval_sec。
+_CHANNEL_MODE_HOST = "host"
+_CHANNEL_MODE_CUSTOM = "custom"
+_CHANNEL_MODES = frozenset({_CHANNEL_MODE_HOST, _CHANNEL_MODE_CUSTOM})
+_FRAGMENT_DEFAULT_MODE = _CHANNEL_MODE_HOST
+_REVIEW_DEFAULT_MODE = _CHANNEL_MODE_HOST
+# 通道解析结果（resolved dict）的传输标签。缺省按 direct 处理——1.3.1 之前
+# resolved 只有 {model, api_key, base_url} 三个键，tests 打桩 _resolve_tone_slot
+# 也照这个形状返回，不新增必填键才能保住既有锚点。
+_CHANNEL_TRANSPORT_HOST = "host"
+_CHANNEL_TRANSPORT_DIRECT = "direct"
+# 单次补全的超时（秒）与输出上限（token）。超时两条传输共用同一组数字：这个旋钮必须
+# 对用户说得出一个值，不能"看这次走哪条路"——README 与面板都按它承诺"点一下要让后台
+# 等多久"。输出上限目前只有宿主管线用得上（插件那份 urllib 请求体没带
+# max_completion_tokens，直连侧沿用服务商默认）；要收紧直连得连请求体一起改，别只改这里。
+# 上限不是等待时长，直连侧原来是 urlopen 里写死的 15 秒；成文按文档实测 5~20 秒，
+# 15 秒会掐掉正常一篇，给到 25 秒。再往上不给：成文是 await 在后台轮询里的，
+# 超时会顺延同拍的用户消息注入/语气感知/碎片捕获（README「为什么慢操作排队」）。
+_HOST_LLM_TIMEOUT_FRAGMENT_SEC = 15.0
+_HOST_LLM_TIMEOUT_REVIEW_SEC = 25.0
+_HOST_LLM_MAX_TOKENS_FRAGMENT = 400
+_HOST_LLM_MAX_TOKENS_REVIEW = 1200
 # 宿主 assist 管理簿：provider key → core_config 里的明文 key 字段名
 _ASSIST_KEY_FIELDS = {
     "qwen": "assistApiKeyQwen",

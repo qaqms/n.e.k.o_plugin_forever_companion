@@ -100,9 +100,12 @@
   + 第三人称短注（note）+ 置信度
 - **提取通道**：挂进语气感知同一趟 recent 轮询（不增加 HTTP 次数），但**水位独立**
   （`last_fragment_marker`）——语气感知的 check_rate 抽样跳过的轮次仍会进碎片分析，
-  碎片不吃概率抽样；提取必须走可自定义 prompt 的**直连槽位**（宿主 /api/emotion/analysis
-  只做五分类，不适用），默认 summary 槽（宿主记忆抽取同层级），槽位无模型时功能
-  自动休眠（节流 warning），其余不受影响
+  碎片不吃概率抽样；提取必须走可自定义 prompt 的通道（宿主 /api/emotion/analysis
+  只做五分类，不适用）。1.3.2 起这条通道有两种走法：`mode=host`（默认）把请求交回
+  **宿主自己的模型管线**（`aget_model_api_config` + `create_chat_llm_async`，与宿主
+  内置插件同一条路，零配置即用、免费路由下也可用），`mode=custom` 才由插件读
+  `core_config.json` 拼端点直连；host 解析不出端点时自动回落直连。默认 summary 槽
+  （宿主记忆抽取同层级），两条路都给不出端点时功能自动休眠（节流 warning），其余不受影响
 - **宁漏勿错**：capture 缺省按 false、kind 不在类型表/缺 quote 即丢弃、置信度门槛
   （默认 0.6）、60s 最小间隔；全部面板可见、可单条删除（`delete_diary_item`）、可清空
 - **呈现（决定权在她）**：检索工具 `mood_recall_fragments`（按 kind/关键词过滤，
@@ -161,7 +164,7 @@
 第三本日记，**只给用户看**的客观评价（隔离等级比个人日记更严：不注入她的
 上下文、不进宿主记忆管线、**不注册任何她可调用的 LLM 工具**——她连知道这本
 日记存在的渠道都没有）。纯逻辑在 `review.py`（素材统计累加/双门槛判定/
-成文 prompt 组装/回复解析截断/篇目追加淘汰），模型直连与落盘由主类完成：
+成文 prompt 组装/回复解析截断/篇目追加淘汰），模型调用与落盘由主类完成：
 
 - **素材纯本地累计**（平时零模型开销，随写随存进 `review@<角色>` 的 stats
   字段，成文后原子清零）：互动轮数+valence 采样（`_handle_new_user_message`
@@ -169,8 +172,8 @@
   低权重传导不计）、情绪动作事件（`_apply_mood_action` origin=user/self 区分
   命令演示与自主反应）、碎片原话（`_maybe_capture_fragments` 落盘时喂入）
 - **双门槛先到先写**：攒满 `turns_threshold`（默认 50）轮或距统计起点满
-  `days_threshold`（默认 7）天且期间有互动；挂机不写空篇。成文时一次直连
-  槽位调用（碎片同款通道，默认 summary 槽）+ recent 窗口摘样作语境
+  `days_threshold`（默认 7）天且期间有互动；挂机不写空篇。成文时一次模型调用
+  （碎片同款通道：默认 summary 槽 + `mode=host` 走宿主管线）+ recent 窗口摘样作语境
 - **成文口吻**：中性观察者（第三人称"他/她"），纯文字成段、无评分无徽标；
   prompt 明确要求如实记录负面行为不粉饰、不虚构素材外的事实
 - **素材快照进卷宗（1.3.0 完善）**：成文时把本次用过的语气分布/心情均值/
@@ -261,12 +264,19 @@ UI context 三处被宿主解析，**动作返回值不在解析链里**（`call
 用户输入的密钥或私有 payload 写进日志或进程输出；诊断优先记**脱敏后的长度、
 ID 和错误类型**。本插件的落地形态：
 
-- **凭据面**：`core_config.json` 的 key 只在内存解析链里流动（`_resolve_tone_slot`
-  → `_post_chat_completion` 形参），永不写日志、永不进面板回显（debug 入口只显
-  `scheme://netloc/…`，key 永不回传）；
-- **异常面**：直连失败留痕只准 `_exc_shape(exc)`（类型名 + 若有 `.code` 则状态码）。
-  裸 `exc` 禁入 logger：urllib 家族异常 message 可能携带完整 URL，自定义端点的
-  `?api-key=` 查询参数/userinfo 凭据不在宿主 logging_config REDACT 正则的覆盖面里；
+- **凭据面**：两种 `mode` 下明文 key 都会在插件进程内存里过一遍，区别只在来源——
+  `host` 由宿主的 `aget_model_api_config` 现算后交回 `resolve_host_slot` 的返回 dict
+  （再进 `_host_slot_cache` 存 5 秒），`custom` 由 `_resolve_tone_slot` 从
+  `core_config.json` 拼出。`host` 这一侧插件不读配置文件、不推端点、不做地域改写，
+  但这不等于"不碰 key"：客户端仍由插件调 `create_chat_llm_async` 构造并由插件发出
+  请求，所以**别把它写成凭据隔离**。真要插件不经手凭据，只有语气感知默认槽位那条
+  宿主回环端点（prompt 交进去、模型由宿主调）。两条路共守的不变量：key 永不写
+  日志、永不进面板回显（debug 入口只显 `scheme://netloc/…` 与 model 名）、永不发给
+  该 key 所属服务商以外的任何地址；
+- **异常面**：直连与宿主管线两条路的失败留痕都只准 `_exc_shape(exc)`（类型名 +
+  若有 `.code` 则状态码）。裸 `exc` 禁入 logger：urllib 家族异常 message 可能携带
+  完整 URL，自定义端点的 `?api-key=` 查询参数/userinfo 凭据不在宿主 logging_config
+  REDACT 正则的覆盖面里；宿主客户端的异常同样按这条走，不因为它"出身干净"就放宽；
 - **响应面**：非 OpenAI 形态留痕只准 `_payload_shape`（顶层键名/条数/字节长度）；
   响应值可能被上游回显成对话内容，零值输出；
 - **内容面**：碎片捕获记 `quote_len=` 不记原话；我的日记成文失败记 `shape=`

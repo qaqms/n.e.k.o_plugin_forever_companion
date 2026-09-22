@@ -45,8 +45,10 @@ export type Settings = {
   tone_slot?: string
   fragments_enabled?: boolean
   fragments_slot?: string
+  fragments_mode?: string
   review_enabled?: boolean
   review_slot?: string
+  review_mode?: string
   review_turns_threshold?: number
   review_days_threshold?: number
   debug_mode?: boolean
@@ -190,9 +192,11 @@ export type ReviewBrief = {
   last_result?: { ts?: number; written?: boolean; reason?: string } | null
 }
 
-// 模型通道状态灯（dashboard channel_status）：dormant_reason ∈
-// ""(ok) / free_route / no_model / disabled
-export type ChannelStatusItem = { enabled?: boolean; dormant_reason?: string }
+// 模型通道状态灯（dashboard channel_status）：dormant_reason ∈ ""(正常) /
+// free_route / no_model / disabled（"正常"的下发值是空串，没有 "ok" 这个字面量）；
+// transport = 这次实际走的那条路（host=复用宿主 LLM 管线，direct=插件直连该槽端点）。
+// 缺 transport（后端未下发）不参与回落判定：见 settings_tone.tsx 的 channelLight
+export type ChannelStatusItem = { enabled?: boolean; dormant_reason?: string; transport?: string }
 export type ChannelStatus = { tone?: ChannelStatusItem; fragments?: ChannelStatusItem; review?: ChannelStatusItem }
 
 // ---- 相处统计（1.1.0）----
@@ -352,8 +356,10 @@ export type FormValues = {
   tone_slot: string
   fragments_enabled: boolean
   fragments_slot: string
+  fragments_mode: string
   review_enabled: boolean
   review_slot: string
+  review_mode: string
   review_turns_threshold: number
   review_days_threshold: number
   anniversary_inject: boolean

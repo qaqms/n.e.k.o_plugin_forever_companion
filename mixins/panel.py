@@ -56,6 +56,11 @@ from ..core.review import (
     review_due,
 )
 from ..core.state import (
+    _CHANNEL_MODE_CUSTOM,
+    _CHANNEL_MODE_HOST,
+    _CHANNEL_MODES,
+    _CHANNEL_TRANSPORT_DIRECT,
+    _CHANNEL_TRANSPORT_HOST,
     _FRAGMENT_DEFAULT_SLOT,
     _GALLERY_THUMB_MAX_CHARS,
     _REVIEW_DEFAULT_SLOT,
@@ -91,7 +96,7 @@ from ..core.stats import (
     month_view,
     summary_payload,
 )
-from ..services.tone_slot import diagnose_slot_dormancy
+from ..services.tone_slot import _channel_mode, diagnose_slot_dormancy
 
 JsonObject = dict[str, Any]
 
@@ -235,20 +240,27 @@ class PanelEntriesMixin:
 
         auto_count = sum(1 for item in shard.diary if str(item.get("source") or "self") == "auto")
         # 模型通道状态灯（情绪页"模型通道"卡 + 总览共用）：三个小模型通道各自
-        # 能否工作 + 休眠原因。语气走宿主情感端点（enabled 判定），碎片/成文走
-        # 直连槽位（复用槽位诊断：free_route / no_model / ok）
+        # 能否工作 + 休眠原因 + 实际走的那条路（transport）。语气走宿主情感端点
+        # （enabled 判定），碎片/成文按各自 mode 走宿主管线或自定义直连
+        tone_slot = str(self._emotion_sense_cfg.get("slot") or "").strip()
         channel_status = {
             "tone": {
                 "enabled": self._emotion_sense_enabled(shard),
                 "dormant_reason": "",
+                # 语气没有 mode 旋钮：槽位留空/emotion = 经宿主端点，选了别的槽才是直连
+                "transport": (
+                    _CHANNEL_TRANSPORT_DIRECT
+                    if tone_slot and tone_slot != "emotion"
+                    else _CHANNEL_TRANSPORT_HOST
+                ),
             },
             "fragments": await self._channel_dormancy(
-                self._fragments_enabled(shard),
-                str(self._fragments_cfg.get("slot") or "").strip() or _FRAGMENT_DEFAULT_SLOT,
+                self._fragments_enabled(shard), self._fragments_cfg,
+                default_slot=_FRAGMENT_DEFAULT_SLOT,
             ),
             "review": await self._channel_dormancy(
-                self._review_enabled(shard),
-                str(self._review_cfg.get("slot") or "").strip() or _REVIEW_DEFAULT_SLOT,
+                self._review_enabled(shard), self._review_cfg,
+                default_slot=_REVIEW_DEFAULT_SLOT,
             ),
         }
         # 近 7 天互动轮数（总览"相处信号"卡）：从时光日记/手记时间戳聚合太粗，
@@ -297,7 +309,7 @@ class PanelEntriesMixin:
             # 档案室（1.3.0）：旧卷宗合档概览（极轻量：卷数 + 时段）——面板据此
             # 决定画不画档案架末尾那只档案盒；全量翻阅走 get_review(scope=archive)
             "review_archive_brief": review_archive_brief(shard.review_archive),
-            # 模型通道状态灯（情绪页"模型通道"卡）：ok / free_route / no_model / disabled
+            # 模型通道状态灯（情绪页"模型通道"卡）：""(正常) / free_route / no_model / disabled
             "channel_status": channel_status,
             # 能力中心总览（1.2.7）：功能页数据源随 5s 轮询下发（纯内存小载荷）。
             # 与总开关/设置页/后台变化同帧一致——"按需拉一次就定格"的窗口不存在；
@@ -360,18 +372,31 @@ class PanelEntriesMixin:
             self.logger.debug("stats summary view failed: {}", exc)
             return {"summary": {}, "badges": []}
 
-    async def _channel_dormancy(self, enabled: bool, slot: str) -> JsonObject:
-        """直连通道状态灯：{enabled, dormant_reason}。reason ∈ ok/free_route/no_model/disabled。
+    async def _channel_dormancy(
+        self, enabled: bool, cfg: JsonObject, *, default_slot: str
+    ) -> JsonObject:
+        """模型通道状态灯：{enabled, dormant_reason, transport}。
 
-        诊断复用 diagnose_slot_dormancy（tone_slot.py）；free_route = 宿主免费路由
-        服务端拒第三方直连（不可配置绕过），no_model = 槽位没配模型（去宿主设置配）。
+        dormant_reason 的下发值是 ""(正常) / free_route / no_model / disabled 四个，
+        "正常"用空串表示（没有 "ok" 这个字面量，面板灯按空串走正常分支）；disabled 这
+        个分支根本没发请求，也就没有"实际走了哪条路"可言，故它不带 transport 键。
+        判据与运行时完全同源（_resolve_channel_endpoint 的镜像）：mode=host 先问
+        宿主管线能不能给出该槽端点，能就绿灯；宿主模块不可用才回落直连诊断——
+        所以灯报的永远是"这条路实际会怎么走"，不是配置字面。mode=custom 直接按
+        直连诊断（free_route = 免费路由的端点/模型名不在存盘配置里，直连拼不出；
+        no_model = 槽位没配模型）。
         """
         if not enabled:
             return {"enabled": False, "dormant_reason": "disabled"}
+        slot = str(cfg.get("slot") or "").strip() or default_slot
+        if _channel_mode(cfg) != _CHANNEL_MODE_CUSTOM and await self._resolve_host_slot(slot) is not None:
+            return {
+                "enabled": True,
+                "dormant_reason": "",
+                "transport": _CHANNEL_TRANSPORT_HOST,
+            }
         reason = diagnose_slot_dormancy(await self._aload_core_config(), slot)
-        # reason 为 "free_route"/"no_model" 时通道休眠；解析成功与否最终由
-        # _resolve_tone_slot 决定，这里给面板的灯做的是"为什么不行"的归类
-        return {"enabled": True, "dormant_reason": reason}
+        return {"enabled": True, "dormant_reason": reason, "transport": _CHANNEL_TRANSPORT_DIRECT}
 
     def _week_activity_count(self, shard: _LanlanShard) -> int:
         """近 7 天相处活跃度：时光日记时间线（手记+碎片）里 7 天内的条目数。
@@ -395,8 +420,9 @@ class PanelEntriesMixin:
         "emotion_sense_enabled", "tone_check_rate",
         "tone_phase_sensitivity_enabled", "tone_phase_sensitivity",
         "tone_slot",
-        "fragments_enabled", "fragments_slot",
-        "review_enabled", "review_slot", "review_turns_threshold", "review_days_threshold",
+        "fragments_enabled", "fragments_slot", "fragments_mode",
+        "review_enabled", "review_slot", "review_mode",
+        "review_turns_threshold", "review_days_threshold",
         "anniversary_inject",
         "birthday_enabled", "birthday_keep_diary", "birthday_date",
     )
@@ -438,8 +464,10 @@ class PanelEntriesMixin:
             "tone_slot": str(self._emotion_sense_cfg.get("slot") or ""),
             "fragments_enabled": bool(self._fragments_cfg.get("enabled", True)),
             "fragments_slot": str(self._fragments_cfg.get("slot") or _FRAGMENT_DEFAULT_SLOT),
+            "fragments_mode": _channel_mode(self._fragments_cfg),
             "review_enabled": bool(self._review_cfg.get("enabled", True)),
             "review_slot": str(self._review_cfg.get("slot") or _REVIEW_DEFAULT_SLOT),
+            "review_mode": _channel_mode(self._review_cfg),
             "review_turns_threshold": self._review_turns_threshold(),
             "review_days_threshold": self._review_days_threshold(),
             # 相处统计：纪念日注入开关（[stats].anniversary_inject，纯统计本身无开关）
@@ -496,11 +524,13 @@ class PanelEntriesMixin:
                     "type": "string",
                     "enum": ["summary", "conversation", "correction", "vision", "agent"],
                 },
+                "fragments_mode": {"type": "string", "enum": [_CHANNEL_MODE_HOST, _CHANNEL_MODE_CUSTOM]},
                 "review_enabled": {"type": "boolean"},
                 "review_slot": {
                     "type": "string",
                     "enum": ["summary", "conversation", "correction", "vision", "agent"],
                 },
+                "review_mode": {"type": "string", "enum": [_CHANNEL_MODE_HOST, _CHANNEL_MODE_CUSTOM]},
                 "review_turns_threshold": {"type": "integer", "minimum": 10, "maximum": 500},
                 "review_days_threshold": {"type": "integer", "minimum": 1, "maximum": 90},
                 "anniversary_inject": {"type": "boolean"},
@@ -616,6 +646,12 @@ class PanelEntriesMixin:
                     self.logger.warning("invalid fragments_slot: {}", slot)
                     return Err(SdkError("invalid_fragments_slot"))
                 frag_patch["slot"] = slot
+            if "fragments_mode" in updates:
+                mode = str(updates["fragments_mode"]).strip() or _CHANNEL_MODE_HOST
+                if mode not in _CHANNEL_MODES:
+                    self.logger.warning("invalid fragments_mode: {}", mode)
+                    return Err(SdkError("invalid_fragments_mode"))
+                frag_patch["mode"] = mode
             # ---- 我的日记（[review]），全局 ----
             if "review_enabled" in updates:
                 review_patch["enabled"] = bool(updates["review_enabled"])
@@ -627,6 +663,12 @@ class PanelEntriesMixin:
                     self.logger.warning("invalid review_slot: {}", slot)
                     return Err(SdkError("invalid_review_slot"))
                 review_patch["slot"] = slot
+            if "review_mode" in updates:
+                mode = str(updates["review_mode"]).strip() or _CHANNEL_MODE_HOST
+                if mode not in _CHANNEL_MODES:
+                    self.logger.warning("invalid review_mode: {}", mode)
+                    return Err(SdkError("invalid_review_mode"))
+                review_patch["mode"] = mode
             if "review_turns_threshold" in updates:
                 review_patch["turns_threshold"] = max(10, min(500, int(updates["review_turns_threshold"])))
             if "review_days_threshold" in updates:
@@ -1580,10 +1622,12 @@ class PanelEntriesMixin:
                 payload["turns"] = int(shard.review_stats.get("turns") or 0)
                 payload["min_turns"] = _REVIEW_MIN_TURNS_FORCED
             elif reason == "slot_unresolved":
-                cfg = await self._aload_core_config()
-                payload["dormant_reason"] = diagnose_slot_dormancy(
-                    cfg, str(self._review_cfg.get("slot") or "").strip() or _REVIEW_DEFAULT_SLOT,
-                ) or "no_model"
+                # 判据只留一份：状态灯怎么算，这里的 toast 就怎么报（1.3.2 起灯是
+                # mode 感知的，自己再复刻一遍必然和面板漂移出两个答案）
+                status = await self._channel_dormancy(
+                    True, self._review_cfg, default_slot=_REVIEW_DEFAULT_SLOT
+                )
+                payload["dormant_reason"] = status.get("dormant_reason") or "no_model"
             return Ok(payload)
         if shard.pending_review_write or lanlan in self._review_writing:
             # 队列槽位只有一个：上一篇还在写/还在队里，重复点击不再叠加

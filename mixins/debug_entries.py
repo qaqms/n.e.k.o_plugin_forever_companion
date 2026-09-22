@@ -11,7 +11,6 @@ ForeverCompanionPlugin——SDK 的 entry 发现遍历 type(self)，与定义文
 
 from __future__ import annotations
 
-import asyncio
 import time
 from typing import Any
 
@@ -26,8 +25,11 @@ from ..core.journal import (
 )
 from ..core.review import fabricate_demo_reviews, review_due
 from ..core.state import (
+    _CHANNEL_TRANSPORT_DIRECT,
     _FRAGMENT_DEFAULT_CONFIDENCE,
     _FRAGMENT_DEFAULT_SLOT,
+    _HOST_LLM_MAX_TOKENS_FRAGMENT,
+    _HOST_LLM_TIMEOUT_FRAGMENT_SEC,
     _JOURNAL_DEFAULT_INTERVAL_DAYS,
     _JOURNAL_MAX_PAGES,
     _TIMED_ACTIONS,
@@ -539,10 +541,11 @@ class DebugEntriesMixin:
         if turn is None:
             return Ok({"captured": False, "lanlan": name, "note": "recent.json 里没有可分析的轮次。"})
         user_text, her_text = turn
-        slot = str(self._fragments_cfg.get("slot") or "").strip() or _FRAGMENT_DEFAULT_SLOT
-        # 一趟只取一次：过去这里连读两遍宿主配置（None 分支又读一遍）
-        core_cfg = await self._aload_core_config()
-        resolved = self._resolve_tone_slot(core_cfg, slot)
+        # 与运行时同一条路：按 [fragments].mode 先问宿主管线、拿不到再回落直连。
+        # 调试入口若自己另走一份直连解析，用户在这里看到的结论就和真实 tick 不符
+        resolved, slot, core_cfg = await self._resolve_channel_endpoint(
+            self._fragments_cfg, default_slot=_FRAGMENT_DEFAULT_SLOT
+        )
         if resolved is None:
             return Ok({
                 "captured": False,
@@ -550,15 +553,19 @@ class DebugEntriesMixin:
                 "slot": slot,
                 "note": _slot_dormancy_hint(core_cfg, slot),
             })
-        raw = await asyncio.to_thread(
-            self._post_chat_completion,
-            resolved["base_url"], resolved["api_key"], resolved["model"],
+        raw = await self._channel_chat(
+            resolved,
             build_fragment_prompt(user_text, her_text),
+            timeout_sec=_HOST_LLM_TIMEOUT_FRAGMENT_SEC,
+            max_completion_tokens=_HOST_LLM_MAX_TOKENS_FRAGMENT,
+            call_type="plugin_fragment_capture_debug",
         )
         parsed = parse_fragment_response(raw or "")
         payload: JsonObject = {
             "lanlan": name,
             "slot": slot,
+            "transport": str(resolved.get("transport") or _CHANNEL_TRANSPORT_DIRECT),
+            "model": str(resolved.get("model") or ""),
             "user_text": user_text[:200],
             "raw": (raw or "")[:400],
             "parsed": parsed,

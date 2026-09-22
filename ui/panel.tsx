@@ -114,8 +114,10 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     settings.tone_slot,
     settings.fragments_enabled,
     settings.fragments_slot,
+    settings.fragments_mode,
     settings.review_enabled,
     settings.review_slot,
+    settings.review_mode,
     settings.review_turns_threshold,
     settings.review_days_threshold,
     (settings as Record<string, any>).anniversary_inject,
@@ -547,7 +549,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       } else if (r.reason === "slot_unresolved") {
         // 休眠原因复用新手向导通道卡的既有文案（零新增 key，1.md 既定）
         toast.info(r.dormant_reason === "free_route"
-          ? t("onboarding.channels.freeRoute", { defaultValue: "休眠 · 宿主免费端点限制" })
+          ? t("onboarding.channels.freeRoute", { defaultValue: "休眠 · 直连撞上免费路由" })
           : t("onboarding.channels.noModel", { defaultValue: "休眠 · 槽位没配模型" }))
       } else {
         toast.info(t("panel.review.writeFailed", { defaultValue: "这一篇还没写成，稍后再试" }))

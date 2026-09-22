@@ -1686,3 +1686,118 @@ read 邀请流进她的上下文。
   sha256 `d4bfd4562a002922635d5bbbb4c983e55dde5fe903cb8494de38abbdef77e544`）。
 - **市场**：本仓 `release.yml` 走的宿主 reusable workflow 只做 `check -r --market-release`
   + evidence 工件 + 建 GitHub Release，不向市场发任何请求；市场通知与收录由主人自行处理。
+
+---
+
+### 1.3.3：碎片提取与我的日记成文默认走宿主管线（开箱即用）+ 接手审计
+
+**版本号归位说明**：这轮工作最初按 1.3.2 书写，但 `v1.3.2` 已于 2026-09-21 发版
+（tag + `dist/forever_companion_1.3.2.neko-plugin`，sha `d4bfd456…`，内容是"保存面
+收口 + 内部提示不上屏 + 邀请节流水位落盘"）。本轮与它无关且叠在其后，故按 1.3.3 归位。
+
+**用户报告的问题**：面板「模型通道」卡上，碎片提取与我的日记成文两盏灯长期亮着
+「免费路由 · 不可用」，而语气分析什么都不配就能用。要修的东西被表述成"为什么这两个
+要自定义模型、能不能也用宿主的"。
+
+**调研结论（三件事，都不是"用户少配了东西"）**：
+
+1. 语气能开箱即用不是因为它配了模型，而是因为它**根本没解析模型**——
+   `[emotion_sense].slot` 为空时短路到宿主 `/api/emotion/analysis`，LLM 调用由宿主在
+   它自己的进程里做（含免费路由的客户端身份）。碎片/成文要发自定义 prompt，而宿主
+   那个端点的 prompt 是硬编码五分类（`max_completion_tokens=40`），也确实不能复用。
+2. 于是插件走了一条自己拼端点的路，而**这条路有三处硬伤**：
+   `resolvedProviderUrls` 按嵌套 `{scope:{provider:url}}` 读，宿主写的是**扁平**
+   `"{scope}:{provider}"`（`main_routers/config_router/connectivity.py:685,776`），
+   于是该函数恒返回空串，`follow_core`/`follow_assist` 两条链**即便用户配了付费
+   服务商也一律休眠**；免费路由的端点/模型名/key 来自宿主 profile 默认值
+   （`config/api_profiles.py:94-107`：`free-model` + `lanlan.tech/text/v1` +
+   `free-access`），**不落 core_config.json 的存盘字段**，读盘注定看不见；
+   面板与日志把原因写成"该端点只接受 N.E.K.O 客户端调用"——这个前提是错的，
+   宿主自己的 CI 用裸 curl + `free-access` 就能调通（`.github/workflows/health-check.yml:19-24`）。
+3. 宿主**没有**给插件任何 LLM/completion 的 SDK 入口（`plugin/_types/protocols.py` 的
+   ctx 面里一个都没有），插件也不能注册宿主路由（`plugin/server/http_app.py` 路由表
+   硬编码）。所以"用宿主的能力"不可能是官方 API，只能是宿主内置插件那条路：
+   `aget_model_api_config(slot)` + `create_chat_llm_async`（`plugin/plugins/qq_auto_reply/
+   reply_generation_service.py:31-50` 就是这段）。插件子进程的 sys.path 含宿主仓库根
+   （宿主 `plugin/core/host.py:117-119` 注入），因此可 import。
+
+**修法**：新增 `services/host_llm.py`（两个入口：`resolve_host_slot` / `chat_via_host`），
+并给碎片与成文各加一个与 slot 正交的旋钮 `mode`（`host` 默认 / `custom`）。槽位
+仍决定"用宿主哪个槽的模型"，mode 决定"由谁去发这次请求"：host 把 prompt 交回宿主
+管线（端点、地域改写、免费路由、`neko/<版本>` UA、provider 协议判定全在宿主侧，
+插件不读配置文件、不自己推端点），custom 保留原来的读盘直连。用户的操作空间没被
+收走：本地模型/独立服务商仍走 custom，而 host 解析不到端点时**自动回落** custom，
+所以默认通道不可能比 1.3.1 更差。
+
+**回落这条路的真实覆盖面（本轮被 CI 钉出来，措辞按实修正）**：`1.3.2 追加轮` 时代写过
+"独立跑测试宿主模块不可 import、全绿即回落的活体证明"——它只在**独立仓库 venv**里成立。
+官方市场 CI 会把本仓挂进宿主包树跑 `check -r`（`conftest._pre_register_parent_packages`
+就是为这个场景写的），那里 `utils.*` 可导入：`resolve_host_slot("summary")` 直接返回
+真表 `free-model` + `lanlan.tech/text/v1`，于是 host 分支在**打在直连层桩之前**就命中，
+17 项碎片/成文/持久化测试被绕开而失败。本轮把"通道传输层"与"业务逻辑"在测试里解耦
+（见「测试」段），并撤掉对宿主环境敏感的"活体证明"说法。
+
+**接手审计修正（对照宿主真实行为逐条核实后，五处）**：
+
+- `ui/types.ts` 重复 `export type ChannelStatusItem`：新增带 `transport` 的版本时旧行没删，
+  是确定的 TS 报错。它能溜过本地是因为唯一做类型检查的 hosted-tsx 门当时判为"跑不了"。
+- 通道灯误报：`channelLight` 只看 `transport === "direct"` 不看 mode，于是"用户主动选的
+  custom"与"语气分析选非默认槽"两种正常配置被报成「宿主管线未生效 · 已回落直连」。
+  改为带 mode 判据（只有选了宿主却落到 direct 才说回落），语气分析不参与该判定。
+- 隐私文字不实：README/DESIGN 原写"host 模式插件不接触凭据"。实际两种 mode 明文 key
+  都会过插件内存（host 侧宿主把三元组交给插件、由插件调客户端工厂，解析结果还缓存
+  5 秒），差别只在来源。已改写为准确表述并写明"这不是凭据隔离"。
+- token 记账不实：原写"插件调用计入宿主 token 统计"。宿主记账挂在 openai 客户端的
+  猴子补丁上，而 `install_hooks()` 只在宿主三个服务进程执行，插件子进程从不安装——
+  两条传输的消耗都不进宿主用量面板、也不占 agent 日配额。`set_call_type` 按内置插件
+  写法保留（宿主哪天装进子进程或给官方 completion API 时这里已是对的），注释与断言改准。
+- 一处 `defaultValue` 与 zh-CN 漂移（`panel.channel.freeRoute`）按本仓"逐字对齐"约定补齐。
+
+**顺带修正**：`resolvedProviderUrls` 扁平键（custom 模式在付费服务商下因此从"永远
+休眠"变回可用）；`_post_chat_completion` 的 15 秒超时提到通道层
+（`_HOST_LLM_TIMEOUT_*`，成文 25 秒——它实测 5~20 秒，15 秒会掐掉正常一篇；再高
+会顺延同拍注入，取舍写进常量注释与 README）；调试入口 `_debug_capture_fragment`
+原本自己复刻一份直连解析、与运行时不同路，改走同一个 `_resolve_channel_endpoint`；
+状态灯与 `write_review_now` 的失败提示不再各算一遍判据。
+
+**真实宿主联调（改前/改后同一台机器）**：本机宿主配置正是这次问题的形态——
+`assistApi='free'`、`coreApi` 未设、`resolvedProviderUrls` 空表。在宿主自己的运行时里
+`aget_model_api_config('summary')` 给出 `{model: free-model,
+base_url: https://www.lanlan.tech/text/v1, provider_type: openai_compatible,
+api_key: <11 字符>}`——插件判据（model 与 base_url 都非空）为**可用**；而 1.3.1 的读盘
+拼端点在同一份配置上只能拼出空串，这正是那盏红灯的全部成因。顺带实测到冷启动子进程
+`[GeoIP] Both sources indeterminate` 那条路径确实会走区域等待，`host_llm` 的注释按
+"最多 join 1.5 秒、5 秒槽位缓存压频率"如实写明，没写成零成本。
+
+**契约变更**：`channel_status[*]` 新增 `transport`（`host`/`direct`），面板只在
+"配置的是宿主、实际走的却是直连"时报「宿主管线未生效 · 已回落直连」——静默替用户换路
+是这个插件不接受的，但把用户自己选的走法报成故障同样不接受。`resolved` dict 的
+`transport` 键**可选**，缺省按 direct 处理，`tests` 打桩 `_resolve_tone_slot` 的二十多处
+锚点因此零改动。设置面新增 `fragments_mode` / `review_mode` 两键（enum `host`/`custom`，
+缺省与非法值都归 host），随 1.3.2 那枚「保存设置」吸底条一并落盘。`free_route` 这个
+reason 语义收窄为"直连这条路拼不出端点"，休眠文案与 `freeRouteWarn` 随之改口径
+（不再声称服务端拒插件，改说"值不在存盘配置里"）。
+
+**i18n**：新增 7 键 ×8 语（`panel.settings.channelModeHost/Custom`、
+`channelHintHost/Custom`、`panel.channel.fellBackDirect`、
+`panel.errors.invalidFragmentsMode/ReviewMode`），改 3 键
+（`panel.settings.freeRouteWarn`、`panel.channel.freeRoute`、
+`onboarding.channels.freeRoute`），删 2 个死键（`channelFragmentsHint`/`channelReviewHint`，
+被 mode 感知的 `channelHint*` 取代）；每语 **787→792**（基数是被 rebase 进来的
+1.3.2 保存面收口八语 790→787）。本轮新增键与 1.3.2 那三枚提交零键碰撞。
+
+**测试**：**450→471**。新增 `test_host_pipeline.py`（20 项：槽位解析交回宿主、宿主模块
+缺席时返回 None、客户端 ainvoke/aclose 与 token 归集、失败留痕脱敏、mode 归一化、
+host 命中时不读盘、回落直连、`_channel_chat` 按 transport 分派、超时参数落到 urllib、
+槽位解析按槽缓存（含"桩打在服务模块上也生效"的晚绑定回归）、免费路由下碎片端到端
+可写、custom 模式仍休眠、面板灯 transport 与回落状态、`update_settings` 收发 mode、
+`resolvedProviderUrls` 扁平键），并同步两处编码了旧误区的钉桩：`_CORE_CFG` 的
+`resolvedProviderUrls` 改扁平（旧桩把插件的同一处误读一起钉成了绿）、
+`test_slot_dormancy_hint_actionable` 改断言真因真解。
+`test_design_numbers_sync.py` 新增一道门把 README 承诺的成文超时绑到常量。
+**与宿主环境解耦（治那 17 项）**：`conftest.make_plugin` 默认注入
+`fragments.mode = review.mode = "custom"`——碎片/成文/持久化这些用例测的是业务逻辑本身，
+传输层由 `test_host_pipeline.py` 用假宿主模块显式专测；"宿主模块缺席→降级"那条不再
+依赖运行环境，改为显式把 `utils.config_manager` 置成不可导入。
+
+验证：本地五门 + 在宿主环境里跑一遍 `check -r`（等价于 CI 第 9 步）全绿。

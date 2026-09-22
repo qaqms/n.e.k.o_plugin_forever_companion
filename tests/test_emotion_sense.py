@@ -495,9 +495,13 @@ _CORE_CFG = {
     "coreApiKey": "sk-core",
     "assistApi": "qwen",
     "assistApiKeyQwen": "sk-assist-qwen",
+    # 宿主这张表是扁平的，键为 "scope:provider"（main_routers/config_router/
+    # connectivity.py:685,776 写盘）。旧桩曾写成嵌套 {scope: {provider: url}}，
+    # 与宿主真实形态不符，于是把插件的同一处误读一起钉成了绿（1.3.2 修）
     "resolvedProviderUrls": {
-        "core": {"qwen": "https://core.example.com/v1"},
-        "assist": {"qwen": "https://assist.example.com/v1", "deepseek": "https://ds.example.com/v1"},
+        "core:qwen": "https://core.example.com/v1",
+        "assist:qwen": "https://assist.example.com/v1",
+        "assist:deepseek": "https://ds.example.com/v1",
     },
     "conversationModelProvider": "follow_assist",
     "conversationModelId": "qwen-conv",

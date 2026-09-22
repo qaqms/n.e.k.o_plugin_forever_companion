@@ -177,7 +177,7 @@ def test_maybe_write_review_full_flow(plugin_factory) -> None:
     p = _with_turns(plugin_factory(), 60)
     prompts = []
 
-    def fake_post(base_url, api_key, model, prompt, logger=None):
+    def fake_post(base_url, api_key, model, prompt, **kw):
         prompts.append(prompt)
         return "他最近对她很温柔，几乎每天都会主动来聊天。"
 
@@ -537,10 +537,16 @@ def test_slot_dormancy_diagnosis_free_route_vs_no_model(tm) -> None:
 
 
 def test_slot_dormancy_hint_actionable(plugin_factory, tm) -> None:
-    """面板/日志提示：免费路由给出"配自己的 API"指引，不再是含糊的"未配模型"。"""
+    """面板/日志提示：免费路由下说清"直连拼不出端点"并指向切回宿主模式，不是含糊的"未配模型"。
+
+    1.3.2 前这条文案断言的是"插件无法直连 + 去配自己的 API"——前半句把原因归给了
+    服务端身份校验（宿主 CI 用裸 curl + free-access 就能调通该端点，故不成立），后半句
+    在默认通道已走宿主管线后也不再是唯一解。改钉"拼不出端点 + 切回宿主"这两个真因真解。
+    """
     hint_free = tm._slot_dormancy_hint({"coreApi": "free", "assistApi": "free"}, "summary")
     assert "免费路由" in hint_free
-    assert "无法直连" in hint_free
+    assert "拼不出可用端点" in hint_free
+    assert "改回「宿主」" in hint_free
     hint_no_model = tm._slot_dormancy_hint({"coreApi": "qwen", "assistApi": "qwen"}, "summary")
     assert "未配置模型" in hint_no_model
 

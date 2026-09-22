@@ -18,6 +18,8 @@ PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 ENTRY_PATH = PLUGIN_ROOT / "__init__.py"
 DESIGN_PATH = PLUGIN_ROOT / "DESIGN.md"
 PANEL_TSX = PLUGIN_ROOT / "ui" / "panel.tsx"
+STATE_PATH = PLUGIN_ROOT / "core" / "state.py"
+README_PATH = PLUGIN_ROOT / "README.md"
 
 
 def _timer_seconds() -> dict[str, int]:
@@ -90,3 +92,32 @@ def test_panel_poll_interval_matches_design():
         f"DESIGN.md 声明了 {sorted(claims)}s 轮询，但 ui/panel.tsx 实际轮询是 "
         f"{sorted(polls)}ms（={sorted(seconds)}s）；不匹配项：{unbacked}"
     )
+
+
+def _state_number(name: str) -> float:
+    """core/state.py 里某个模块级数值字面量（AST 取，不 import：纯文档比对不该执行插件代码）。"""
+    tree = ast.parse(STATE_PATH.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
+            continue
+        value = node.value
+        if isinstance(value, ast.Constant) and isinstance(value.value, (int, float)):
+            return float(value.value)
+    raise AssertionError(f"core/state.py 没找到数值常量 {name}")
+
+
+def test_readme_review_timeout_matches_constant():
+    """README 承诺的"成文最长等多久"必须等于 _HOST_LLM_TIMEOUT_REVIEW_SEC。
+
+    1.3.2 把超时从 urllib 里写死的 15 秒提成按通道的常量（成文 25 秒），README 那句
+    "模型调用最长 N 秒"是用户判断"点这一篇要让后台停多久"的依据。改了常量不改文案
+    就是显示层说谎——与 timer 秒数同一类，进同一道门。
+    """
+    timeout = _state_number("_HOST_LLM_TIMEOUT_REVIEW_SEC")
+    text = README_PATH.read_text(encoding="utf-8")
+    claims = {float(n) for n in re.findall(r"模型调用最长\s*(\d+(?:\.\d+)?)\s*秒", text)}
+    assert claims, "README 里找不到「模型调用最长 N 秒」的承诺句（措辞变了要同步本门）"
+    assert claims == {timeout}, f"README 写 {sorted(claims)} 秒，常量 _HOST_LLM_TIMEOUT_REVIEW_SEC 是 {timeout} 秒"
+

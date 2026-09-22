@@ -257,6 +257,21 @@ from .core.state import (
     _ASSIST_KEY_FIELDS as _ASSIST_KEY_FIELDS,
 )
 from .core.state import (
+    _CHANNEL_MODE_CUSTOM as _CHANNEL_MODE_CUSTOM,
+)
+from .core.state import (
+    _CHANNEL_MODE_HOST as _CHANNEL_MODE_HOST,
+)
+from .core.state import (
+    _CHANNEL_MODES as _CHANNEL_MODES,
+)
+from .core.state import (
+    _CHANNEL_TRANSPORT_DIRECT as _CHANNEL_TRANSPORT_DIRECT,
+)
+from .core.state import (
+    _CHANNEL_TRANSPORT_HOST as _CHANNEL_TRANSPORT_HOST,
+)
+from .core.state import (
     _COLD_ACTIONS as _COLD_ACTIONS,
 )
 from .core.state import (
@@ -501,6 +516,9 @@ from .mixins.shards import ShardsMixin
 from .mixins.whisper import WhisperMixin
 from .services.emotion_sense import EmotionSenseService
 from .services.tone_slot import (
+    _channel_mode as _channel_mode,
+)
+from .services.tone_slot import (
     _parse_tone_result as _parse_tone_result,
 )
 from .services.tone_slot import (
@@ -601,6 +619,11 @@ class ForeverCompanionPlugin(
         # 面板"语气分析模型槽位"下拉选项缓存（60s TTL，面板 5s 轮询不必每次拉宿主）；
         # None = 未拉取过；失败不缓存（与 _fetch_known_catgirls 同例）
         self._tone_slot_options_cache: tuple[list[JsonObject] | None, float] = (None, -1000.0)
+        # 宿主管线槽位解析缓存（1.3.2）：slot → (解析结果或 None, 取到时刻)。宿主侧
+        # aget_model_api_config 每次都重开 core_config.json，而面板 5s 轮询 + tick 都会
+        # 问同一个槽；TTL 与 _load_core_config 同用 _CORE_CONFIG_CACHE_TTL。
+        # 缺键 = 未取过（与"取到但无端点"的 None 值区分开）；config_change 时整体作废
+        self._host_slot_cache: dict[str, tuple[JsonObject | None, float]] = {}
         # 面板潮汐日历缓存：key = (角色, 当天日期, 周期参数指纹)；
         # 参数/锚点/快进/跨天/切角色都会改变 key，自然失效，无需显式清理
         self._calendar_cache: tuple[tuple, list[JsonObject] | None] = ((), None)
@@ -864,10 +887,12 @@ class ForeverCompanionPlugin(
         await self._refresh_config()
         # [capabilities] 段可能变了（含 hide_disabled_tools）：重同步工具显隐
         self._sync_tool_visibility()
-        # 按旧配置/旧端口解析出的缓存作废：宿主 API base、语气槽位下拉选项
-        # （日历缓存 key 含参数指纹与当天日期，自然失效，无需清理）
+        # 按旧配置/旧端口解析出的缓存作废：宿主 API base、语气槽位下拉选项、
+        # 宿主管线槽位解析（[fragments/review].mode 与宿主槽位配置都可能刚变；
+        # 日历缓存 key 含参数指纹与当天日期，自然失效，无需清理）
         self._proactive_api_base_cache = None
         self._tone_slot_options_cache = (None, -1000.0)
+        self._host_slot_cache = {}
         self._sync_debug_entries()
         # 锚点/周期参数变了，重新校验一次并报告（针对当前角色 shard）
         try:

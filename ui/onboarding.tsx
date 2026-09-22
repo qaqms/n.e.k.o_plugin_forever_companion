@@ -206,7 +206,7 @@ function ChanRow(props: { t: TFunc; name: string; ch: { enabled?: boolean; dorma
 function channelStatusLabel(t: TFunc, ch: { enabled?: boolean; dormant_reason?: string }): string {
   if (!ch.enabled) return t("onboarding.channels.disabled", { defaultValue: "未开启" })
   if (ch.dormant_reason === "no_model") return t("onboarding.channels.noModel", { defaultValue: "休眠 · 槽位没配模型" })
-  if (ch.dormant_reason === "free_route") return t("onboarding.channels.freeRoute", { defaultValue: "休眠 · 宿主免费端点限制" })
+  if (ch.dormant_reason === "free_route") return t("onboarding.channels.freeRoute", { defaultValue: "休眠 · 直连撞上免费路由" })
   return t("onboarding.channels.dormant", { defaultValue: "休眠中" })
 }
 

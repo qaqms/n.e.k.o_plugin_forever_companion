@@ -3,7 +3,7 @@ name = "永远的陪伴"
 description = "赋予 AI 更全面的陪伴能力：她有真实的身体节律（潮汐周期）、会起伏的情绪（十二个自主情绪工具）、属于自己的三本日记（时光日记/个人日记/我的日记），以及能看见你们相处痕迹的总览仪表盘。插件只递状态与工具，如何回应由她自己决定。"
 short_description = "Full companionship for your AI companion: body rhythm, self-directed moods, her own diaries, and a dashboard of your time together."
 keywords = ["陪伴", "companion", "companionship", "情绪", "mood", "emotion", "周期", "period", "身体", "body", "潮汐", "tide", "日历", "calendar", "日记", "diary", "journal", "记忆", "memory", "生日", "birthday"]
-version = "1.3.2"
+version = "1.3.3"
 id = "forever_companion"
 type = "plugin"
 entry = "plugin.plugins.forever_companion:ForeverCompanionPlugin"
@@ -138,10 +138,15 @@ extreme_invite_cooldown_minutes = 30
 # 碎片只存进插件自己的日记本，由她通过检索工具自主取用（吵架翻旧账/回忆喜好），
 # 不会主动改变她的行为；面板可见、可单条删除。
 enabled = true
-# 碎片提取模型槽位：走可自定义 prompt 的直连通道（宿主情感端点只做五分类，不适用），
-# 默认 summary 槽（与宿主记忆抽取同层级）。读取宿主本地 core_config.json 解析端点
-# （数据出域，介意可关闭）；槽位未配置模型时功能自动休眠，其余功能不受影响
+# 碎片提取模型槽位：默认 summary 槽（与宿主记忆抽取同层级），可换 conversation/
+# correction/vision/agent
 slot = "summary"
+# 碎片提取通道（1.3.2 开箱即用）：host = 复用宿主自己的模型管线（默认，与宿主内置
+# 插件同一条路）——不用配任何东西，宿主免费路由下也可用，宿主管线不可用时自动回落
+# custom 那条直连路径；custom = 插件读宿主本地 core_config.json 拼出该槽端点自己直连
+# （要接本地模型/独立服务商时用，数据出域；免费路由的端点与模型名不在存盘配置里，
+# 那条路拼不出可用端点，功能会休眠）
+mode = "host"
 # 相邻两次碎片分析的最小间隔（秒）：与语气感知共用"每轮至多分析一次"的节奏
 min_interval_sec = 60
 # 置信度门槛：低于此不记（宁漏勿错，玩笑/含糊的话会被挡掉）
@@ -165,9 +170,11 @@ interval_days = 7
 # 不注入她的上下文、不进宿主记忆管线、不注册任何她可调用的工具。
 # 评价客观：过激言行/冷淡期也会如实写，不粉饰。
 enabled = true
-# 成文模型槽位：与碎片提取同款直连通道（读宿主本地 core_config.json，
-# 数据出域，介意可关闭）；槽位未配置模型时功能自动休眠
+# 成文模型槽位：与碎片提取同款通道，默认 summary 槽
 slot = "summary"
+# 成文通道：host（默认，复用宿主管线、零配置即用）/ custom（插件读宿主本地配置直连）
+# 含义与取值同 [fragments].mode
+mode = "host"
 # 双门槛：攒满 N 轮 或 距统计起点满 N 天（且期间有聊天）先到先写
 turns_threshold = 50
 days_threshold = 7

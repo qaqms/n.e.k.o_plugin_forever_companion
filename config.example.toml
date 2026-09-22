@@ -55,7 +55,9 @@ extreme_invite_cooldown_minutes = 30  # 邀请冷却（分钟）
 # 时光日记·自动碎片（0.7.0）：小模型把用户的重要话语（喜好/厌恶/有分量的话/
 # 过激言行）记进时光日记，供她自主检索；只存插件本地，不改变她的行为
 enabled = true
-slot = "summary"                   # 提取模型槽位（直连宿主 core_config.json 该槽端点）；槽位无模型时自动休眠
+slot = "summary"                   # 提取模型槽位：summary（默认）/conversation/correction/vision/agent
+mode = "host"                      # 通道：host（默认）复用宿主模型管线，零配置即用、免费路由下也可用；
+                                   # custom = 插件读宿主本地 core_config.json 直连该槽端点（接本地模型/独立服务商时用）
 min_interval_sec = 60              # 相邻两次分析的最小间隔（秒）
 confidence_threshold = 0.6         # 置信度门槛：低于此不记（宁漏勿错）
 nudge_gap_minutes = 30             # 吵架轻语间隔（分钟）：重度负面情绪中记到过激/厌恶碎片时的提醒间隔
@@ -69,7 +71,8 @@ interval_days = 7                  # 邀请节奏（天）：距上一篇日记�
 # 我的日记（0.8.0）：关于主人的互动评价——素材纯本地累计，双门槛先到先写时
 # 由小模型以中性观察者口吻成文；只给用户看，不注入她的上下文、不进宿主记忆
 enabled = true
-slot = "summary"                   # 成文模型槽位（碎片同款直连通道）；槽位无模型时自动休眠
+slot = "summary"                   # 成文模型槽位（与碎片提取同款通道）
+mode = "host"                      # 通道：host（默认）复用宿主模型管线，零配置即用；custom = 插件直连该槽端点
 turns_threshold = 50               # 成文门槛：攒满 N 轮互动（与天数门槛先到先写）
 days_threshold = 7                 # 成文门槛：距统计起点满 N 天且期间有聊天（挂机不写空篇）
 

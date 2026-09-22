@@ -295,6 +295,10 @@ export const PANEL_STYLES = `
 .tm-light-dormant { background: rgba(245, 176, 77, 0.16); color: #b45309; }
 .tm-light-off { background: rgba(148, 163, 184, 0.16); color: var(--muted); }
 .tm-channel-divider { height: 1px; margin: 4px 0; background: rgba(148, 163, 184, 0.25); }
+/* 通道控件行：槽位与通道方式两个下拉并排分宽，窄窗下换行各占一行（1.3.2 前每行
+   只有一个下拉、无需排版规则，加 mode 旋钮后必须给，否则两个控件竖着堆成两条） */
+.tm-channel-control { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tm-channel-control > * { flex: 1 1 160px; min-width: 0; }
 .tm-channel-warn {
   margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-md);
   font-size: 12px; line-height: 1.6;
