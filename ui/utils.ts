@@ -185,12 +185,12 @@ export function lanlanPhaseLabel(t: TFunc, phase?: string): string {
 
 // ---- 面板外观（1.2.0）：参数归一 / 背景层样式 / 渲染变量 / 图片压缩 ----
 
-// 默认值复刻 1.1.x 观感（cover/center/glass16/dim0.3/无滤镜/底色与文字满格）；
+// 壁纸默认保持清晰，以遮罩保可读；已保存参数不被新默认覆盖。
 // 与后端 core/appearance.py 的 clamp_appearance 保持同一套域值，两边各归一一次
 export const APPEARANCE_DEFAULTS: AppearanceDefaults = {
   bg_id: "", fill: "cover", position: "center",
-  blur: 0, dim: 0.3, brightness: 100, saturate: 100, contrast: 100,
-  glass: 16, card_alpha: 100, text_weight: 100,
+  blur: 0, dim: 0.4, brightness: 100, saturate: 100, contrast: 100,
+  glass: 0, card_alpha: 0, text_weight: 100,
 }
 
 // 类型别名绕开校验器：export const 注解里不能带泛型尖括号的逗号
@@ -244,8 +244,8 @@ export function appearanceEquals(a: Appearance, b: Appearance): boolean {
   return true
 }
 
-// 背景层内联样式：填充/位置/滤镜全部按参数即时算（实时预览就靠它）。
-// 有模糊时把层向外扩 blur+6px，否则 filter 会把图像边缘拉出透明露底
+// 仅给壁纸图层使用；遮罩是未过滤的兄弟层，亮度/模糊不再改变遮罩。
+// 有模糊时外扩 blur+16px，避免滤镜边缘露出底色。
 export function bgLayerStyle(ap: Appearance, dataUrl: string): Record<string, string> {
   const size = ap.fill === "contain" ? "contain" : ap.fill === "repeat" ? "auto" : ap.fill === "stretch" ? "100% 100%" : "cover"
   const filters: string[] = []
@@ -260,26 +260,28 @@ export function bgLayerStyle(ap: Appearance, dataUrl: string): Record<string, st
     backgroundPosition: ap.position,
     filter: filters.length ? filters.join(" ") : "none",
     WebkitFilter: filters.length ? filters.join(" ") : "none",
-    inset: ap.blur > 0 ? `${-Math.round(ap.blur) - 6}px` : "0px",
+    inset: ap.blur > 0 ? `${-Math.round(ap.blur) - 16}px` : "0px",
   }
 }
 
 // 写到根包装 div 上的 CSS 自定义属性（display:contents 不改布局），
-// 供 styles.ts 里 var() 消费；glass 恒写，其余仅偏离默认时写
+// 参数为 0 时显式关闭滤镜；文字只在不透明颜色间微调，不降低整段内容透明度。
 export type CssVarMap = Record<string, string>
 
 export function appearanceVars(ap: Appearance): CssVarMap {
-  const vars: CssVarMap = { "--tm-glass": `${ap.glass}px` }
-  vars["--tm-card-k"] = String(Math.round(ap.card_alpha) / 100)
-  if (ap.text_weight < 100) {
-    const w = ap.text_weight
-    const conc = Math.round(55 + (w - 40) * 0.75)
-    vars["--tm-text-color"] = `color-mix(in srgb, var(--text) ${conc}%, transparent)`
-    if (w < 95) {
-      const radius = Math.round((100 - w) / 10) + 2
-      const alpha = (((100 - w) / 60) * 0.5 + 0.15).toFixed(2)
-      vars["--tm-text-shadow"] = `0 1px ${radius}px rgba(2, 6, 23, ${alpha})`
-    }
+  const normalized = normAppearance(ap)
+  const glass = normalized.glass
+  const concentration = Math.round(88 + (normalized.text_weight - 40) / 5)
+  const shadowAlpha = (0.24 + (100 - normalized.text_weight) / 600).toFixed(2)
+  const vars: CssVarMap = {
+    "--tm-glass": `${glass}px`,
+    "--tm-glass-filter": glass > 0 ? `blur(${glass}px) saturate(1.08)` : "none",
+    "--tm-sidebar-glass-filter": glass > 0 ? `blur(${glass}px) saturate(1.08)` : "none",
+    "--tm-card-k": String(Math.round(normalized.card_alpha) / 100),
+    "--tm-text-color": concentration < 100
+      ? `color-mix(in srgb, var(--text) ${concentration}%, var(--muted))`
+      : "var(--text)",
+    "--tm-text-shadow": `0 1px 3px rgba(0, 0, 0, ${shadowAlpha})`,
   }
   return vars
 }
@@ -365,8 +367,8 @@ export function settingsToForm(settings: Settings): FormValues {
     tone_phase_sensitivity: Number(settings.tone_phase_sensitivity ?? 0.15),
     tone_slot: String(settings.tone_slot || ""),
     fragments_enabled: settings.fragments_enabled !== false,
-    fragments_slot: String(settings.fragments_slot || "summary"),
-    fragments_mode: String(settings.fragments_mode || "custom"),
+    fragments_slot: String(settings.fragments_slot || "agent"),
+    fragments_mode: String(settings.fragments_mode || "host"),
     review_enabled: settings.review_enabled !== false,
     review_slot: String(settings.review_slot || "agent"),
     review_mode: String(settings.review_mode || "host"),

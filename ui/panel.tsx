@@ -17,6 +17,8 @@ import {
   settingsToForm,
 } from "./utils"
 import { PANEL_STYLES } from "./styles"
+import { DEFAULT_THEME_COLORS, readWallpaperTheme, themeColorVars } from "./theme"
+import type { ThemeColors } from "./theme"
 import { StatusBar } from "./statusbar"
 import { OverviewPane } from "./overview"
 import { CalendarPane } from "./calendar"
@@ -74,7 +76,9 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   const [savedAp, setSavedAp] = useState<Appearance>(normAppearance(null))
   const [draftAp, setDraftAp] = useState<Appearance>(normAppearance(null))
   const [imgCache, setImgCache] = useState<Record<string, string>>({})
-  const imgInflight = useRef<Record<string, boolean>>({})
+  const [readyBg, setReadyBg] = useState<{ id: string; dataUrl: string; theme: ThemeColors | null }>({ id: "", dataUrl: "", theme: null })
+  const themeCache = useRef<Record<string, { dataUrl: string; theme: ThemeColors }>>({})
+  const imgInflight = useRef<Record<string, object>>({})
   const thumbTried = useRef<Record<string, boolean>>({})
   const [apBusy, setApBusy] = useState(false)
   // 设置页那枚「保存设置」在飞标记：它一趟按两摊（设置 + 外观），连点会重复写盘
@@ -172,7 +176,10 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       .catch(() => {
         console.warn("[forever_companion] load panel gallery failed")
       })
-    return () => { alive = false }
+    return () => {
+      alive = false
+      imgInflight.current = {}
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -180,16 +187,20 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   function loadImage(id: string) {
     if (!id) return
     if (imgCache[id] || imgInflight.current[id]) return
-    imgInflight.current[id] = true
+    const request = {}
+    imgInflight.current[id] = request
     Promise.resolve(props.api.call("get_gallery_image", { item_id: id }))
       .then((payload) => {
+        if (imgInflight.current[id] !== request) return
         const r = (unwrapCallResult(payload) || {}) as Record<string, any>
         if (r && typeof r.data_url === "string" && r.data_url) {
           setImgCache((prev) => ({ ...prev, [id]: r.data_url }))
         }
       })
       .catch(() => { console.warn("[forever_companion] load gallery image failed") })
-      .finally(() => { imgInflight.current[id] = false })
+      .finally(() => {
+        if (imgInflight.current[id] === request) delete imgInflight.current[id]
+      })
   }
 
   // draft 指向的图若未缓存则补拉（切换/新加入库时）
@@ -197,6 +208,36 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     loadImage(draftAp.bg_id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftAp.bg_id])
+
+  // 新壁纸准备好才替换；切换期间保留旧图，取消/删除会使迟到的解码失效。
+  const requestedBgUrl = draftAp.bg_id ? (imgCache[draftAp.bg_id] || "") : ""
+  useEffect(() => {
+    if (!draftAp.bg_id) {
+      setReadyBg({ id: "", dataUrl: "", theme: null })
+      return
+    }
+    if (!requestedBgUrl) return
+    let alive = true
+    const image = new Image()
+    const ready = () => {
+      if (!alive) return
+      const cached = themeCache.current[draftAp.bg_id]
+      const theme = cached?.dataUrl === requestedBgUrl ? cached.theme : readWallpaperTheme(image)
+      themeCache.current[draftAp.bg_id] = { dataUrl: requestedBgUrl, theme }
+      // 壁纸和配色同帧切换，草稿还原和迟到解码共享同一个生命周期。
+      setReadyBg({ id: draftAp.bg_id, dataUrl: requestedBgUrl, theme })
+    }
+    image.onload = () => {
+      if (image.decode) image.decode().then(ready).catch(() => { console.warn("[forever_companion] decode panel background failed") })
+      else ready()
+    }
+    image.onerror = () => { console.warn("[forever_companion] decode panel background failed") }
+    image.src = requestedBgUrl
+    return () => {
+      alive = false
+      image.onload = image.onerror = null
+    }
+  }, [draftAp.bg_id, requestedBgUrl])
 
   // 缺缩略图的在用图（如旧版迁移来的 legacy）：拿到本体后本地画一张回填
   useEffect(() => {
@@ -277,9 +318,13 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       const ap = normAppearance(r.appearance)
       setSavedAp(ap)
       setDraftAp(ap)
-      const cache = { ...imgCache }
-      delete cache[id]
-      setImgCache(cache)
+      delete imgInflight.current[id]
+      setImgCache((prev) => {
+        const cache = { ...prev }
+        delete cache[id]
+        return cache
+      })
+      delete themeCache.current[id]
       toast.success(t("panel.diary.deleted", { defaultValue: "已删除" }))
     } catch (err) {
       toast.error(errorText(err, t))
@@ -839,10 +884,15 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     { id: "settings", label: t("panel.tab.settings", { defaultValue: "设置" }) },
   ]
 
-  // 实时预览语义：背景层按 draft 渲染（图未拉到时留空闪一次可接受）；
-  // 参数经 display:contents 包装层落成 CSS 变量供 styles.ts 的 var() 消费
-  const bgDataUrl = draftAp.bg_id ? (imgCache[draftAp.bg_id] || "") : ""
-  const rootStyle = Object.assign({ display: "contents" }, appearanceVars(draftAp)) as Record<string, string>
+  // 参数保持 draft 实时预览；图片准备期间只暂留仍在图库中的旧图。
+  const previousBgExists = galleryItems.some((item) => String(item.id || "") === readyBg.id)
+  const bgDataUrl = draftAp.bg_id && (readyBg.id === draftAp.bg_id || previousBgExists)
+    ? readyBg.dataUrl
+    : ""
+  const themeColors = bgDataUrl && readyBg.theme ? readyBg.theme : DEFAULT_THEME_COLORS
+  // 背景材质只在壁纸就绪时应用，无壁纸保持默认中性卡片。
+  const surfaceAppearance = bgDataUrl ? draftAp : { ...draftAp, glass: 0, card_alpha: 100 }
+  const rootStyle = Object.assign({ display: "contents" }, appearanceVars(surfaceAppearance), themeColorVars(themeColors)) as Record<string, string>
 
   return (
     <Page className={bgDataUrl ? "tm-has-bg" : ""}>
@@ -850,7 +900,8 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       <style key="styles">{PANEL_STYLES}</style>
 
       {bgDataUrl ? (
-        <div key="bg" className="tm-bg" style={bgLayerStyle(draftAp, bgDataUrl)}>
+        <div key="bg" className="tm-bg" aria-hidden="true">
+          <div className="tm-bg-image" style={bgLayerStyle(draftAp, bgDataUrl)} />
           <div className="tm-bg-dim" style={{ opacity: String(draftAp.dim) }} />
         </div>
       ) : null}
@@ -1035,6 +1086,8 @@ export default function Panel(props: PluginSurfaceProps<State>) {
                 items={galleryItems}
                 draft={draftAp}
                 saved={savedAp}
+                theme={themeColors}
+                themeFromWallpaper={!!bgDataUrl && readyBg.theme !== DEFAULT_THEME_COLORS}
                 uploading={apBusy}
                 onDraft={onDraftChange}
                 onRevert={() => { setDraftAp(savedAp) }}

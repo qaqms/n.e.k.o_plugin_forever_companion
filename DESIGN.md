@@ -362,10 +362,12 @@ CHANGELOG，契约性变化改本文件正文——两边各司其职，不再�
   `push_message`, `self.store`, `self.config`, `tr()`
 - UI surfaces: `[[plugin.ui.panel]]` hosted-tsx `ui/panel.tsx`（state:read, config:read, action:call）。
   面板为多文件模块结构：`panel.tsx` 入口组装 + `types.ts` / `utils.ts` / `styles.ts` 共享层
-  （styles.ts = 面板玻璃层），1.3.0 起另有 `styles_book.ts`（日记两本的"桌面物件层"：
+  （styles.ts = 面板材质层；1.3.4 起统一中性表面、细边框，1.3.5 起默认浅蓝强调色与壁纸主题色联动，壁纸模式的顶栏、
+  侧栏与保存条同源透明，不再叠加多层卡片底色），1.3.0 起另有 `styles_book.ts`（日记两本的"桌面物件层"：
   1.3.1c 起为**扁平绘本·白底彩点**——大面积一律近白（个人日记一丝米暖、
   我的日记同宿主冷白），颜色只留小件：书脊心情色阶/丝带/题签/落款印/进度条；
-  纸/墨/装订/架子的调色板与玻璃层互不相通，第二个 `<style>` 并列注入）；
+  纸/墨/装订/架子的调色板与面板材质层互不相通，第二个 `<style>` 并列注入；
+  1.3.4 起段落直接排在纸上，只以细线分隔，纸面高光与卷宗中段颜色均有独立明暗 token）；
   页签清单与内容在 panel.tsx（`tabs` 数组 + 就地渲染的 cycle/mood/settings 三页）：
   顶级入口组件 `overview.tsx` 总览 / `calendar.tsx` 日历 / `diary.tsx` 三本日记 /
   `moment.tsx` 时光 / `features.tsx`+`capintro.tsx` 功能与页内介绍 /
@@ -378,14 +380,23 @@ CHANGELOG，契约性变化改本文件正文——两边各司其职，不再�
   **日记书本层的三条长期约束（1.3.0，改 diary.tsx/styles_book.ts 前先读）**：
   ① 正文里的 `【这段时间】/【我在想】/【对他的感觉】/【想说的】` 分节**只在显示层解析**
   （`splitSections`），存储与注入文本不得改——该词表与 `core/journal.py` 的 prompt 共用；
-  ② 阅读视图的 sticky 页脚依赖 `.tm-content` 是唯一滚动容器，**纸页祖先链一律不得加
-  `overflow`/`contain`**（加了就退化成普通块），丝带/贴角等外扩一律 clip-path/负外边距自处理；
+  ② 阅读视图的 sticky 页脚依赖 `.tm-content` 是唯一滚动容器，**纸页祖先链不得新增
+  `overflow:hidden/auto/scroll/clip` 或 `contain`**（会退化成普通块）。
+  书本卡片必须在插件侧用 `overflow:visible` 覆盖宿主 Card 默认裁切；丝带等外扩一律
+  clip-path/负外边距自处理；
+  书页页脚消费 `--tm-save-clearance`，由 `SaveBar` 向最近 `.tm-content` 写入实测保存条高度
+  加底部内边距，窗口与控件尺寸变化时重测、卸载时清理，不得让两条 sticky 栏互相遮挡；
   ③ 书本物件（缝线/丝带/落款印/书脊皮）全用 CSS 画，不引入 SVG；
   受 hosted-tsx 约束：仅声明式单绑定导出、无循环依赖、`export const` 类型注解不能含顶层逗号
   （泛型用类型别名绕开），**不支持 SVG**（运行时 mount 用 createElement 而非 createElementNS，
-  图形一律用 CSS/div 实现，如 ring.tsx 的月相盘），提交前跑 `npm run check-hosted-tsx -- plugin/plugins/forever_companion`
-  （仓外开发：`node tools/check_hosted_link.mjs .` 需 `NEKO_HOSTED_SCANNER` 指向宿主 hostedTsxModule.mjs）。
-  **依赖预算硬顶 32 文件 / 512 KiB**：1.3.0 后为 25 文件 / 345 KiB，加 ui 文件前先算这笔账。
+  图形一律用 CSS/div 实现，如 ring.tsx 的月相盘）。
+  **独立仓开发只改插件，宿主与 Steam 安装目录只读**：提交前跑
+  `node tools/check_hosted_link.mjs .`（需宿主同源 scanner；并排布局会自动查找），
+  以及 `node tools/hosted_ui_harness.mjs --typecheck --typecheck-only`；
+  隔离工具只在系统临时目录复制校验所需 scaffold，不把 probe 或依赖写进宿主。
+  浏览器验收用真实 Hosted TSX runtime + sandbox iframe，运行方法与边界见 `tools/HOSTED_UI_QA.md`。
+  **依赖预算硬顶 32 文件 / 512 KiB**：正式 1.3.3（开发验收标记 1.3.7）实测为 25 个运行时依赖文件 /
+  370,416 字节（约 361.7 KiB，不含入口）；连同入口共链接 26 个模块，加 ui 文件前先算这笔账。
   另有一个校验门抓不到的链接器坑（0.6.2 修复）：JSX 闭合标签 `</...>` 的 `/` 会被运行时
   链接器误判为正则字面量起始（前一字符 `<` 在其正则启发式集合内），其后所有 `export` 声明被吞，
   面板整页空白——因此每个 ui 文件内 export 声明必须排在任何 JSX 闭合标签之前
@@ -401,6 +412,46 @@ CHANGELOG，契约性变化改本文件正文——两边各司其职，不再�
   plugin_runtime.auto_start=true 随宿主自动启动（切角色卡等操作会重启插件服务，
   不自动启动会静默消失），知情同意由 [tide].enabled=false fail-closed 保证
 - external integrations: 无外部服务
+
+## 壁纸主题色联动（正式 1.3.3，开发验收标记 1.3.5）
+
+- 1.3.6 的壁纸默认参数为 `blur=0`、`dim=0.4`、`brightness=saturate=contrast=100`、
+  `glass=0`、`card_alpha=0`、`text_weight=100`。前后端归一默认保持同源；
+  缺失参数回退新默认，有效的旧存储参数保持原样，不做强制迁移。
+  `panel.tsx` 只在可用壁纸实际显示时应用背景材质；无壁纸或等待首张图片时，
+  渲染侧使用 `glass=0`、`card_alpha=100` 保留普通卡片底色，不改写草稿或存储参数。
+- `ui/theme.ts` 独立实现像素取色，不引入图像依赖。已解码图片按最长边 160px 缩采样，
+  RGBA 采样有上限；过滤透明、极暗与极亮像素，通过 RGB 直方图与带权中位切分生成至多
+  12 个候选色，按面积、饱和度与亮度选主色，再选有色相区别的辅色或派生协调色。
+- 默认主色 `#409eff`、辅色 `#7ba7d1`；无背景、灰阶、无可用候选色、canvas 不可读时
+  保持默认浅蓝主题。原始主辅色和各自明暗可读变体共六个 CSS 变量，只挂
+  `.tm-appearance-root`，不覆盖宿主根节点，不新增配置字段、入口或 Store 键。
+- 原始主辅色用于外观卡的色块与色值；实际控件使用亮度修正后的变体，对白色与
+  `#28282c` 基准面的目标对比度为 7。主色控制导航、按钮、开关、滑杆与焦点，
+  辅色控制进度与热力图；阶段、心情、成功与警告等语义色不参与联动。
+  壁纸模式下着色的选中导航与主要按钮有独立不透明深底，避免遮罩与卡片透明度为 0 时
+  彩色标签消失在亮壁纸上；该保护也覆盖 hover 和键盘焦点。
+- `readyBg` 一次提交图片 ID、data URL 与配色。主题缓存以图片 ID 和 data URL 共同判定，
+  5 秒轮询和背景滤镜变化不重复取色；草稿预览、还原、无壁纸选项与图像解码共享生命周期。
+  解码失败沿用上张可用壁纸及其主题，取消或迟到解码不能反向覆盖当前选择。
+- 图库请求用独立身份对象标记在飞请求，删除图片及卸载时失效；旧请求的 finally 不能
+  清除同 ID 新请求，迟到图片不能把已删除或复用 ID 的缓存写回。删除同时清理图像与主题缓存。
+  这些约束由像素单测与隔离 Hosted TSX 浏览器竞态验收共同覆盖。
+
+## 无壁纸的柔和主题（正式 1.3.3，开发验收标记 1.3.7）
+
+- 无壁纸界面独立使用 `.neko-page:not(.tm-has-bg)` 配色，不复用壁纸的高对比度
+  修正色充当所有控件用色。原始默认主辅色和 `ui/theme.ts` 的取色算法不变，
+  六个壁纸色变量及其对比度门保持原样。
+- 正文、强调文字和控件填充分离：浅色正文 `#45515a`，强调字色 `#456f89`，
+  雾蓝控件填充 `#81b5d2`；主按钮与选中项使用 `#e8f2f7` 浅底，
+  hover 为 `#e0edf4`。边框、阴影和进度填充降低视觉重量，但文字、hover 和
+  键盘焦点仍分别验证至少 4.5 / 4.5 / 3 的对比度。
+- 深色背景为中性灰 `#272d30`，卡片 `48,54,57`，文字避免纯白硬对比；
+  按钮、选中态、开关与进度采用协调的淡蓝灰色。布局、字号、间距与书页纸面不变，
+  阶段、心情、成功和危险提示保持语义配色。
+- 无壁纸软色变量只在 CSS 命中该状态时生效，选择壁纸后自动退出，取色与材质继续
+  沿用壁纸逻辑；无新增 API、配置、存储或语言键，不覆盖用户已保存外观。
 
 ## Read Context Plan
 - 参考 `game_agent_minecraft`（push_message read 注入）、`memo_reminder`（store+timer）、

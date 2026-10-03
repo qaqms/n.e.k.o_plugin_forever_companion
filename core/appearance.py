@@ -25,9 +25,7 @@ from .state import (
 JsonObject = dict[str, Any]
 
 # ---- 外观参数：范围 / 枚举 / 默认 ----
-# 默认值刻意复刻 1.1.x 的观感：不带图库参数时面板与旧版完全一致
-# （fill=cover / position=center 即旧 CSS；glass=16px 即 .tm-has-bg 硬编码值；
-#  card_alpha / text_weight = 100 表示不改动宿主原色；dim 默认沿用 0.3）
+# 壁纸默认保持清晰，以遮罩保可读；已保存参数不被新默认覆盖。
 APPEARANCE_FILLS = ("cover", "contain", "repeat", "stretch")
 APPEARANCE_POSITIONS = (
     "left top", "center top", "right top",
@@ -43,8 +41,8 @@ _APPEARANCE_RANGES: dict[str, tuple[float, float, float]] = {
     "brightness": (30.0, 150.0, 100.0),
     "saturate": (0.0, 200.0, 100.0),
     "contrast": (50.0, 200.0, 100.0),
-    "glass": (0.0, 40.0, 16.0),
-    "card_alpha": (0.0, 100.0, 100.0),
+    "glass": (0.0, 40.0, 0.0),
+    "card_alpha": (0.0, 100.0, 0.0),
     "text_weight": (40.0, 100.0, 100.0),
 }
 

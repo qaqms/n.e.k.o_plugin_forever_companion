@@ -19,19 +19,30 @@ export function AppearanceCard(props: {
   items: GalleryItem[]
   draft: Appearance
   saved: Appearance
+  theme?: { primary: string; secondary: string }
+  themeFromWallpaper?: boolean
   uploading: boolean
   onDraft: (patch: Record<string, string | number>) => void
   onRevert: () => void
   onAdd: (dataUrl: string, thumb: string, name: string) => void
   onAskRemove: (item: GalleryItem) => void
 }) {
-  const { t, items, draft, saved, uploading, onDraft, onRevert, onAdd, onAskRemove } = props
+  const { t, items, draft, saved, theme, themeFromWallpaper, uploading, onDraft, onRevert, onAdd, onAskRemove } = props
   // 压缩档只影响"怎么入册"，不是面板状态，留在卡内；上传错误本地化同前
   const [quality, setQuality] = useState<string>("auto")
   const [uploadError, setUploadError] = useState<string | null>(null)
   const dirty = !appearanceEquals(draft, saved)
   const hasBg = draft.bg_id !== ""
   const noImage = items.length === 0
+  const noWallpaperLabel = t("panel.appearance.noWallpaper", { defaultValue: "不用壁纸" })
+  const appliedLabel = t("panel.appearance.inUse", { defaultValue: "已应用" })
+  const previewingLabel = t("panel.appearance.previewing", { defaultValue: "预览中" })
+  const deleteLabel = t("panel.appearance.deleteTile", { defaultValue: "从图库删除" })
+  const noneApplied = saved.bg_id === ""
+  const noneClass = "tm-gallery-tile tm-gallery-none"
+    + (!hasBg ? " tm-gallery-active" : "")
+    + (noneApplied ? " tm-gallery-applied" : "")
+    + (!hasBg && !noneApplied ? " tm-gallery-preview" : "")
 
   function fillOptions() {
     return [
@@ -85,35 +96,57 @@ export function AppearanceCard(props: {
         <Field label={t("panel.appearance.gallery", { defaultValue: "图片图库" })}>
           <div className="tm-gallery">
             <div
-              className={hasBg ? "tm-gallery-tile tm-gallery-none" : "tm-gallery-tile tm-gallery-none tm-gallery-active"}
-              title={t("panel.appearance.noWallpaper", { defaultValue: "不用壁纸" })}
-              onClick={() => { onDraft({ bg_id: "" }) }}
+              className={noneClass}
             >
-              <span className="tm-gallery-none-mark">×</span>
+              <button
+                type="button"
+                className="tm-gallery-pick"
+                title={noWallpaperLabel}
+                aria-label={noWallpaperLabel}
+                aria-pressed={!hasBg ? "true" : "false"}
+                onClick={() => { onDraft({ bg_id: "" }) }}
+              >
+                <span className="tm-gallery-none-mark" aria-hidden="true">×</span>
+                <span className="tm-gallery-name">{noWallpaperLabel}</span>
+                {!hasBg && !noneApplied ? <span className="tm-gallery-use">{previewingLabel}</span> : noneApplied ? <span className="tm-gallery-use">{appliedLabel}</span> : null}
+              </button>
             </div>
             {items.map((item) => {
               const id = String(item.id || "")
               const active = id !== "" && id === draft.bg_id
+              const applied = id !== "" && id === saved.bg_id
+              const previewing = active && !applied
               const thumb = String(item.thumb || "")
-              const tileClass = active ? "tm-gallery-tile tm-gallery-active" : "tm-gallery-tile"
+              const tileClass = "tm-gallery-tile"
+                + (active ? " tm-gallery-active" : "")
+                + (applied ? " tm-gallery-applied" : "")
+                + (previewing ? " tm-gallery-preview" : "")
               const label = String(item.name || "") || t("panel.appearance.legacyName", { defaultValue: "旧的背景图" })
+              const deleteTitle = `${deleteLabel}: ${label}`
               return (
                 <div
                   key={id}
                   className={thumb ? tileClass : `${tileClass} tm-gallery-thumbless`}
-                  style={thumb ? { backgroundImage: `url("${thumb}")` } : undefined}
-                  title={label}
-                  onClick={() => { onDraft({ bg_id: id }) }}
                 >
-                  {active ? <span className="tm-gallery-use">{t("panel.appearance.inUse", { defaultValue: "使用中" })}</span> : null}
-                  <span
+                  <button
+                    type="button"
+                    className="tm-gallery-pick"
+                    style={thumb ? { backgroundImage: `url("${thumb}")` } : undefined}
+                    title={label}
+                    aria-label={label}
+                    aria-pressed={active ? "true" : "false"}
+                    onClick={() => { onDraft({ bg_id: id }) }}
+                  >
+                    <span className="tm-gallery-name">{label}</span>
+                    {previewing ? <span className="tm-gallery-use">{previewingLabel}</span> : applied ? <span className="tm-gallery-use">{appliedLabel}</span> : null}
+                  </button>
+                  <button
+                    type="button"
                     className="tm-gallery-del"
-                    title={t("panel.appearance.deleteTile", { defaultValue: "从图库删除" })}
-                    onClick={(event: any) => {
-                      if (event && event.stopPropagation) event.stopPropagation()
-                      onAskRemove(item)
-                    }}
-                  >×</span>
+                    title={deleteTitle}
+                    aria-label={deleteTitle}
+                    onClick={() => { onAskRemove(item) }}
+                  ><span aria-hidden="true">×</span></button>
                 </div>
               )
             })}
@@ -151,6 +184,26 @@ export function AppearanceCard(props: {
           <div className="tm-derived">{t("panel.appearance.adding", { defaultValue: "处理图片中…" })}</div>
         ) : null}
 
+        {theme ? (
+          <Field label={t("panel.appearance.themeColors", { defaultValue: "主题色联动" })}>
+            <div className="tm-theme-colors" data-source={themeFromWallpaper ? "wallpaper" : "default"}>
+              <span className="tm-theme-source">{themeFromWallpaper
+                ? t("panel.appearance.themeWallpaper", { defaultValue: "壁纸配色" })
+                : t("panel.appearance.themeDefault", { defaultValue: "默认浅蓝" })}</span>
+              <span className="tm-theme-color">
+                <span className="tm-theme-swatch" style={{ backgroundColor: theme.primary }} aria-hidden="true" />
+                <span>{t("panel.appearance.themePrimary", { defaultValue: "主色" })}</span>
+                <code>{theme.primary}</code>
+              </span>
+              <span className="tm-theme-color">
+                <span className="tm-theme-swatch" style={{ backgroundColor: theme.secondary }} aria-hidden="true" />
+                <span>{t("panel.appearance.themeSecondary", { defaultValue: "辅色" })}</span>
+                <code>{theme.secondary}</code>
+              </span>
+            </div>
+          </Field>
+        ) : null}
+
         {/* —— 背景调节：全部作用于当前壁纸，实时预览、保存生效 —— */}
         <Field label={t("panel.appearance.adjustSection", { defaultValue: "背景调节" })}>
           {!hasBg ? (
@@ -174,6 +227,8 @@ export function AppearanceCard(props: {
                       type="button"
                       className={cellClass}
                       title={posLabel(value)}
+                      aria-label={posLabel(value)}
+                      aria-pressed={value === draft.position ? "true" : "false"}
                       onClick={() => { onDraft({ position: value }) }}
                     >
                       <span className="tm-pos-dot" style={posCellStyle(value)} />
@@ -203,7 +258,7 @@ export function AppearanceCard(props: {
             <Field label={t("panel.appearance.cardAlphaLabel", { defaultValue: "卡片底色强度" })} help={t("panel.appearance.cardAlphaHelp", { defaultValue: "卡片自身底色的不透明度（%），调低更透" })}>
               <Slider value={draft.card_alpha} min={0} max={100} step={5} showValue disabled={!hasBg} onChange={(v: any) => { onDraft({ card_alpha: Number(v) }) }} />
             </Field>
-            <Field label={t("panel.appearance.textWeightLabel", { defaultValue: "整体字体显示强度" })} help={t("panel.appearance.textWeightHelp", { defaultValue: "正文文字的浓淡；调低变淡并自动加描边保证可读" })}>
+            <Field label={t("panel.appearance.textWeightLabel", { defaultValue: "整体字体显示强度" })} help={t("panel.appearance.textWeightHelp", { defaultValue: "正文文字的深浅；调高更清晰，低值仍保留可读性" })}>
               <Slider value={draft.text_weight} min={40} max={100} step={5} showValue disabled={!hasBg} onChange={(v: any) => { onDraft({ text_weight: Number(v) }) }} />
             </Field>
           </div>

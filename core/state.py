@@ -52,8 +52,8 @@ _GALLERY_MAX_ITEMS = 24
 _PANEL_BG_MIMES = frozenset({
     "image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml",
 })
-# 遮罩强度默认值：压暗背景保证磨砂卡片上的文字可读（0=不压暗，上限 0.85）
-_PANEL_BG_DEFAULT_DIM = 0.3
+# 遮罩强度默认值：压暗背景保证文字可读（0=不压暗，上限 0.85）
+_PANEL_BG_DEFAULT_DIM = 0.4
 # 旧版单图迁移进图库时使用的固定条目 id（缩略图由面板生成后经入口回填）
 _LEGACY_BG_ID = "legacy"
 
@@ -238,11 +238,21 @@ _DIARY_MAX_ENTRIES = 120
 _FRAGMENT_KINDS = frozenset({"like", "dislike", "important", "overstep"})
 # 重度负面情绪生效期间值得轻语提醒她"你记得吗"的碎片类型
 _FRAGMENT_NUDGE_KINDS = frozenset({"overstep", "dislike"})
-# 碎片提取的默认模型槽位与置信度门槛：summary 槽与宿主记忆抽取同层级，
-# 适合"理解用户话语含义"。注意：免费路由下该档（`free-model`）被服务端拒，
-# 这条通道因此默认休眠（连拒两次即熔断，见 _CHANNEL_BREAK_FAILURES）；
-# 有意不上 agent 档——它高频，会抢宿主 agent 功能的日配额（理由见 _REVIEW_DEFAULT_SLOT）
-_FRAGMENT_DEFAULT_SLOT = "summary"
+# 碎片提取的默认模型槽位与置信度门槛：**agent 槽**（与成文同档，1.3.3 修订轮定）。
+# 为什么不是语义上更贴的 summary（与宿主记忆抽取同层级）：免费路由只放行 agent 档，
+# summary/conversation/correction 都落在 `free-model`，从插件调用一律被服务端拒——
+# 那条等于"新用户必休眠"。代价是 agent 档带服务端日配额（宿主自己定 500 次/天），
+# 而碎片节拍约 62 秒一次，所以它**必须**配着 agent 档的日预算与间隔地板一起用
+# （见下面 _AGENT_TIER_* 与 tier_budget_left）：出厂 20 次/角色/天 + 300 秒地板，
+# 用满即休眠到次日，两条通道合记一本账。
+_FRAGMENT_DEFAULT_SLOT = "agent"
+# 碎片这条自己的每日上限（与 [agent_tier] 的角色总账分开记，见 day_counter_used）：
+# 主人给的口径是"每天 10 次左右"。为什么不用 min_interval_sec 表达——那是"隔多久"，
+# 聊得密的日子里同样能把一天摊满；日限才是"每天最多几次"的直接说法。取不到/非法一律
+# 回落出厂值，越界钳到边界（这是只进配置文件的旋钮，面板上只给读数，所以没有拒收码）
+_FRAGMENT_DEFAULT_DAILY_LIMIT = 10
+_FRAGMENT_MIN_DAILY_LIMIT = 0          # 0 = 这条今天一次都不发（等价关闭）
+_FRAGMENT_MAX_DAILY_LIMIT = 500        # 与宿主 agent 日配额同量级，再高就是自己刷自己
 _FRAGMENT_DEFAULT_CONFIDENCE = 0.6
 # 碎片捕获的最小间隔（秒，[fragments].min_interval_sec）：与语气感知共用"每轮至多分析一次"的节奏
 _FRAGMENT_DEFAULT_MIN_INTERVAL_SEC = 60
@@ -375,17 +385,18 @@ _TONE_SLOT_PREFIXES = {
 # host 模式解析不到端点时自动回落 custom 那条路，所以本层永远不会比 1.3.1 更差。
 # mode 不是"要不要被宿主记到"的开关：宿主的用量记账挂在 openai 客户端的猴子补丁上，
 # 而 install_hooks() 只在宿主三个服务进程里执行，插件子进程从不安装，所以两条传输的
-# 消耗都不进宿主用量面板、也不占宿主 agent 日配额。想控量只有通道开关与 min_interval_sec。
+# 消耗都不进宿主用量面板、也不被宿主那份本地 agent 日配额计数（install_hooks 不装进子进程）。
+# 但**服务端那一档的日限额是真共用**的——宿主的 agent 功能与插件的调用打的是同一个入口，
+# 所以本文件下面自己记一本 [agent_tier].daily_budget 的账，别指望宿主那套计数替我们刹车。
 _CHANNEL_MODE_HOST = "host"
 _CHANNEL_MODE_CUSTOM = "custom"
 _CHANNEL_MODES = frozenset({_CHANNEL_MODE_HOST, _CHANNEL_MODE_CUSTOM})
-# 碎片提取默认走 **custom**：它落在 summary 档（`free-model`），而免费路由对这一档是
-# "解析得到端点、发过去必被拒"——host 只是晚一步失败、还要先撞两次。custom 在免费路由
-# 下连端点都拼不出来，于是开局就安静休眠、一个请求都不发，灯直接说"直连不可用"。
-# 想真跑起来有两条路（面板上都说得清）：把这条的槽位换成 agent（占宿主 agent 当日额度），
-# 或在宿主里配自己的服务商（配了之后 custom 直连立刻可用；不想让插件读盘就手动切 host）。
-# 成文相反：它默认 host + agent 档，那是实测唯一零配置可通的一档。
-_FRAGMENT_DEFAULT_MODE = _CHANNEL_MODE_CUSTOM
+# 碎片与成文**都默认 host + agent 档**（1.3.3 修订轮定，两条形同一路）：host 只决定
+# "用谁的配置和客户端"，端点/模型名/身份都由宿主给出，插件不读盘；而免费路由只放行 agent
+# 档，所以 custom 或 summary 档对新用户都等于必休眠。开不了口的前提是"量被管住"——
+# 见下面 _AGENT_TIER_* 的日预算与间隔地板。留在 custom 的那条路仍然完整保留：用户在宿主
+# 配了自己的服务商，切 custom 就走本地配置直连（接本地模型/独立服务商时用）。
+_FRAGMENT_DEFAULT_MODE = _CHANNEL_MODE_HOST
 _REVIEW_DEFAULT_MODE = _CHANNEL_MODE_HOST
 # 通道解析结果（resolved dict）的传输标签。缺省按 direct 处理——1.3.1 之前
 # resolved 只有 {model, api_key, base_url} 三个键，tests 打桩 _resolve_tone_slot
@@ -430,30 +441,66 @@ _CYCLE_AGENT_BUDGET_USED = "agent_budget_used"
 # 插件子进程会因切角色卡/改设置/覆盖导入反复重启（1.3.2 的邀请水位就是被这个坑过），
 # 只放内存的地板等于每次启动都能重来一发
 _CYCLE_AGENT_BUDGET_LAST_TS = "agent_budget_last_ts"
+# 碎片每日上限的计数（同样落 cycle@<角色>，零新键零迁移）
+_CYCLE_FRAG_DAY = "frag_limit_date"
+_CYCLE_FRAG_COUNT = "frag_limit_used"
 
 
-def tier_budget_used(cycle: JsonObject, day: str) -> int:
-    """当天（本地 ISO 日期）已消耗的 agent 档次数；日期不是今天就视为 0（自动归零）。"""
-    if str(cycle.get(_CYCLE_AGENT_BUDGET_DATE) or "") != day:
+def day_counter_used(cycle: JsonObject, day: str, day_key: str, count_key: str) -> int:
+    """按本地 ISO 日期计一次数；存的日期不是今天就当 0（跨日自动归零，不需要谁去清）。
+
+    同一份实现服务两本账：`[agent_tier].daily_budget`（角色在 agent 档上的总消耗）与
+    `[fragments].daily_limit`（碎片这一条自己的上限）。都落在 cycle@<角色> 这块里，
+    零新键、零迁移。
+    """
+    if str(cycle.get(day_key) or "") != day:
         return 0
     try:
-        return max(0, int(cycle.get(_CYCLE_AGENT_BUDGET_USED) or 0))
+        return max(0, int(cycle.get(count_key) or 0))
     except (TypeError, ValueError):
         return 0
 
 
+def day_counter_spend(cycle: JsonObject, day: str, day_key: str, count_key: str) -> int:
+    """记一次消耗（调用方负责随后把 cycle 落盘）；返回记完之后的当日计数。"""
+    used = day_counter_used(cycle, day, day_key, count_key) + 1
+    cycle[day_key] = day
+    cycle[count_key] = used
+    return used
+
+
+def day_counter_left(cycle: JsonObject, day: str, limit: int, day_key: str, count_key: str) -> int:
+    """今天还剩几次（≥0）。"""
+    return max(0, int(limit) - day_counter_used(cycle, day, day_key, count_key))
+
+
+def tier_budget_used(cycle: JsonObject, day: str) -> int:
+    """当天（本地 ISO 日期）已消耗的 agent 档次数；日期不是今天就视为 0（自动归零）。"""
+    return day_counter_used(cycle, day, _CYCLE_AGENT_BUDGET_DATE, _CYCLE_AGENT_BUDGET_USED)
+
+
 def tier_budget_spend(cycle: JsonObject, day: str) -> int:
     """记一次消耗（调用方负责随后把 cycle 落盘）；返回记完之后的当日计数。"""
-    used = tier_budget_used(cycle, day) + 1
-    cycle[_CYCLE_AGENT_BUDGET_DATE] = day
-    cycle[_CYCLE_AGENT_BUDGET_USED] = used
-    return used
+    return day_counter_spend(cycle, day, _CYCLE_AGENT_BUDGET_DATE, _CYCLE_AGENT_BUDGET_USED)
 
 
 def tier_budget_left(cycle: JsonObject, day: str, budget: int) -> int:
     """今天还剩多少次 agent 档额度（≥0）。预算配到 0 或非法也按"一次都不给"算，
     但取值口 [agent_tier].daily_budget 已经把下限钳在 _AGENT_TIER_MIN_BUDGET。"""
-    return max(0, int(budget) - tier_budget_used(cycle, day))
+    return day_counter_left(cycle, day, budget, _CYCLE_AGENT_BUDGET_DATE, _CYCLE_AGENT_BUDGET_USED)
+
+
+def fragment_capture_used(cycle: JsonObject, day: str) -> int:
+    """碎片这一条今天已经分析过几次（与档位的总账分开记，见 day_counter_used）。"""
+    return day_counter_used(cycle, day, _CYCLE_FRAG_DAY, _CYCLE_FRAG_COUNT)
+
+
+def fragment_capture_spend(cycle: JsonObject, day: str) -> int:
+    return day_counter_spend(cycle, day, _CYCLE_FRAG_DAY, _CYCLE_FRAG_COUNT)
+
+
+def fragment_capture_left(cycle: JsonObject, day: str, limit: int) -> int:
+    return day_counter_left(cycle, day, limit, _CYCLE_FRAG_DAY, _CYCLE_FRAG_COUNT)
 
 
 def _channel_route(slot: str, resolved: JsonObject | None) -> str:

@@ -308,6 +308,9 @@ from .core.state import (
     _FRAGMENT_DEFAULT_MIN_INTERVAL_SEC as _FRAGMENT_DEFAULT_MIN_INTERVAL_SEC,
 )
 from .core.state import (
+    _FRAGMENT_DEFAULT_MODE as _FRAGMENT_DEFAULT_MODE,
+)
+from .core.state import (
     _FRAGMENT_DEFAULT_NUDGE_GAP_MIN as _FRAGMENT_DEFAULT_NUDGE_GAP_MIN,
 )
 from .core.state import (
@@ -366,6 +369,9 @@ from .core.state import (
 )
 from .core.state import (
     _REVIEW_DEFAULT_DAYS as _REVIEW_DEFAULT_DAYS,
+)
+from .core.state import (
+    _REVIEW_DEFAULT_MODE as _REVIEW_DEFAULT_MODE,
 )
 from .core.state import (
     _REVIEW_DEFAULT_SLOT as _REVIEW_DEFAULT_SLOT,

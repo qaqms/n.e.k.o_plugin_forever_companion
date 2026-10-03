@@ -568,6 +568,9 @@ def _fuse_setup(p, *, reply):
     p._chat_via_host = fake_chat
     p._load_core_config = lambda: dict(FREE_ROUTE_CFG)
     p._fragments_cfg["mode"] = "host"
+    # 熔断专测走 summary 档：出厂默认现在是 agent，那条路上还压着日预算与 300 秒地板
+    # （由本文件下半截的 test_agent_tier_* 专测），留着会让"连着两次"这一步被地板挡掉
+    p._fragments_cfg["slot"] = "summary"
     # 熔断要看的是"连着几次"，所以拆掉 60 秒最小间隔这道闸（否则第二次根本进不来）
     p._fragments_cfg["min_interval_sec"] = 0
     shard.last_fragment_marker = "1:old"
@@ -663,23 +666,26 @@ def test_review_compose_stops_calling_once_fused(plugin_factory, tm) -> None:
     assert len(calls) == 2
 
 
-def test_default_slots_stay_deliberately_asymmetric(plugin_factory, tm) -> None:
-    """出厂形态钉死：碎片 = summary + custom（免费路由下拼不出端点→零请求休眠）；
-    成文 = agent + host（实测唯一零配置可通的一档）。
+def test_shipped_channel_defaults_are_agent_and_host(plugin_factory, tm) -> None:
+    """出厂形态钉死：碎片与成文**两条都** = agent 槽 + host 通道，且必须配着日预算。
 
-    两边都是量出来的取舍，不是"忘了统一"：统一成 agent 档，碎片那条会把宿主 agent
-    的当日额度吃光（它约每 62 秒一拍）；统一成 summary/host，成文回到必然被拒的那一档、
-    碎片则每天撞 15 次被拒请求——零配置主张与风控代价同时回来。
+    为什么"两条都 agent"可以接受而早先不行：免费路由只放行 agent 档，留在 summary 的那条
+    对新用户等于永久休眠（实机 15 次 400 全在切档之前）；而 agent 档带服务端日配额、与宿主
+    agent 功能共用一份池子——所以这个默认成立的前提是 `[agent_tier].daily_budget` 与 300 秒
+    地板在场。把预算删掉或配成 0 就等于放开了限，这条门同时盯住这两件事。
     """
     import tomllib
     from pathlib import Path
 
-    assert tm._REVIEW_DEFAULT_SLOT == "agent"
-    assert tm._FRAGMENT_DEFAULT_SLOT == "summary"
+    assert (tm._FRAGMENT_DEFAULT_SLOT, tm._REVIEW_DEFAULT_SLOT) == ("agent", "agent")
+    assert (tm._FRAGMENT_DEFAULT_MODE, tm._REVIEW_DEFAULT_MODE) == ("host", "host")
     toml_path = Path(tm.__file__).with_name("plugin.toml")
     shipped = tomllib.loads(toml_path.read_text(encoding="utf-8"))
-    assert (shipped["fragments"]["slot"], shipped["fragments"]["mode"]) == ("summary", "custom")
+    assert (shipped["fragments"]["slot"], shipped["fragments"]["mode"]) == ("agent", "host")
     assert (shipped["review"]["slot"], shipped["review"]["mode"]) == ("agent", "host")
+    # 预算在场且落在推荐带内（出厂 20）；地板也得真在
+    assert tm._AGENT_TIER_MIN_BUDGET <= shipped["agent_tier"]["daily_budget"] <= tm._AGENT_TIER_MAX_BUDGET
+    assert tm._AGENT_TIER_MIN_INTERVAL_SEC >= 60.0
 
 
 # ---------------------------------------------------------------------------

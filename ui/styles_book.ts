@@ -17,6 +17,7 @@
 //     向灰玫（H345）/雾紫（H268）两端插值，摆幅近 77°，相邻本冷暖交错时架上
 //     读作"乱"不读作"梯度"——收进封皮同族粉（H≈340），心情只驱动浓淡（色相
 //     零漂移）。诊断口径：统一感来自色相锁死，不来自降低饱和度。
+//   面板优化：段落回归纸上排版，仅以细线分隔，不再叠贴角纸片；书本骨架保留。
 //
 // 为什么不塞进 styles.ts：styles.ts（89KB）是"面板公共玻璃层"，这一坨是"桌面物件层"——
 // 纸/墨/装订/架子的调色板互不相通，混在一起后面谁也不敢删。单独一个模块 + 第二个
@@ -30,6 +31,7 @@
 //      实色渐变 + 不画圆角（页脚即页面收口），只保留毛玻璃模糊这一处
 //   4. 颜色写死在本文件（含暗色孪生块），不走面板 --tm-* 外观变量：面板「背景调节」
 //      管的是玻璃卡片，不该把手写的纸也一起调淡
+//      唯一共享的是布局量 --tm-save-clearance，页脚用它避让设置保存条。
 export const BOOK_STYLES = `
 
 /* ============================================================
@@ -37,6 +39,7 @@ export const BOOK_STYLES = `
    —— 白底彩点：大面近白（暖白/冷白分书），饱和色只留给小件
    ============================================================ */
 .tmb-book, .tmb-shelf {
+  letter-spacing: 0;
   --tmb-kai: "KaiTi", "STKaiti", "Kaiti SC", "BiauKai", "DFKai-SB", "Noto Serif SC", "Songti SC", "SimSun", serif;
   --tmb-round: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Yu Gothic", "Noto Sans SC", "Segoe UI", sans-serif;
   --tmb-mono: ui-monospace, "Cascadia Mono", "Menlo", Consolas, "Courier New", monospace;
@@ -44,6 +47,7 @@ export const BOOK_STYLES = `
   --tmb-paper-hi: #fffefc;
   --tmb-paper-mid: #fdfaf6;
   --tmb-paper-lo: #faf5ef;
+  --tmb-paper-highlight: rgba(255, 255, 255, 0.75);
   --tmb-paper-edge: rgba(212, 199, 189, 0.48);
   --tmb-ink: #4d4448;
   --tmb-ink-soft: rgba(125, 108, 115, 0.9);
@@ -51,11 +55,11 @@ export const BOOK_STYLES = `
   /* 封皮：灰粉/灰紫粉（大面彩点里唯一的"面"，饱和度也让给书脊心情色去表达） */
   --tmb-cloth: #e9d5da;
   --tmb-ribbon: #e3b7c6;
-  --tmb-tape-a: rgba(245, 236, 239, 0.92);
-  --tmb-tape-b: rgba(255, 255, 255, 0.95);
-  /* 观测手账纸：冷白两档（向宿主 #f7f9fc 看齐） */
+  /* 观测手账纸：冷白三档（向宿主 #f7f9fc 看齐） */
   --tmb-file-paper-hi: #fdfeff;
+  --tmb-file-paper-mid: #f8fafc;
   --tmb-file-paper-lo: #f3f5f9;
+  --tmb-file-paper-highlight: rgba(255, 255, 255, 0.8);
   --tmb-file-edge: rgba(196, 205, 222, 0.45);
   --tmb-file-ink: #4a5266;
   --tmb-file-rule: rgba(150, 162, 186, 0.28);
@@ -113,7 +117,7 @@ export const BOOK_STYLES = `
    1.3.1e 架上精简：页码方块/书根段数/spacer 随 JSX 退场（信息进悬停 tooltip） */
 .tmb-spine-date {
   writing-mode: vertical-rl; text-orientation: mixed;
-  margin-top: 9px; font-size: 11px; line-height: 1.1; letter-spacing: 0.04em;
+  margin-top: 9px; font-size: 11px; line-height: 1.1; letter-spacing: 0;
   font-family: var(--tmb-round);
   color: rgba(72, 55, 63, 0.92);
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
@@ -124,7 +128,7 @@ export const BOOK_STYLES = `
   position: absolute; top: 44%; left: 2px; right: 2px;
   padding: 1px 0; border-radius: 4px; text-align: center;
   background: rgba(240, 226, 205, 0.95); color: #7d6748;
-  font-size: 8.5px; line-height: 1.5; letter-spacing: 0.06em;
+  font-size: 8.5px; line-height: 1.5; letter-spacing: 0;
   box-shadow: 0 1px 2px rgba(160, 140, 110, 0.22);
 }
 
@@ -138,7 +142,7 @@ export const BOOK_STYLES = `
 }
 .tmb-spine--file:hover { box-shadow: 0 14px 22px rgba(160, 170, 190, 0.24), inset 0 0 0 1px rgba(255, 255, 255, 0.28); }
 .tmb-spine--file .tmb-spine-top { background: linear-gradient(180deg, #ffffff, rgba(246, 248, 251, 0.9)); box-shadow: 0 1px 0 rgba(150, 160, 180, 0.18); }
-.tmb-spine--file .tmb-spine-date { font-family: var(--tmb-mono); font-size: 11px; letter-spacing: -0.02em; color: rgba(58, 68, 96, 0.92); text-shadow: 0 1px 0 rgba(255, 255, 255, 0.4); }
+.tmb-spine--file .tmb-spine-date { font-family: var(--tmb-mono); font-size: 11px; letter-spacing: 0; color: rgba(58, 68, 96, 0.92); text-shadow: 0 1px 0 rgba(255, 255, 255, 0.4); }
 
 /* 书架空态/加载中的一句小字由现有 .tm-derived 承担，不另立样式 */
 
@@ -159,6 +163,8 @@ export const BOOK_STYLES = `
    竖版下限。列宽变量挂在 .tmb-card（Card 元素）上：工具条与书都是它的后代
    → 同宽居中，「请她写一篇」不再飞到屏幕最右缘与书脱节 */
 .tmb-card { --tmb-col: 640px; }
+/* 宿主 Card 默认裁切会截断 sticky 的滚动祖先链；书本外壳必须透出纸页页脚。 */
+.neko-card.tmb-card { overflow: visible; }
 .tmb-card .tm-journal-toolbar { max-width: var(--tmb-col); margin-inline: auto; }
 /* 书脊列：扁平绘本封（纯色 + 一处受光 + 大圆角）+ 一条缝线 + 圆角贴纸题签 */
 .tmb-book-strip {
@@ -179,7 +185,7 @@ export const BOOK_STYLES = `
   writing-mode: vertical-rl; text-orientation: mixed;
   background: rgba(255, 253, 250, 0.97);
   box-shadow: inset 0 0 0 1px rgba(208, 182, 190, 0.45), 0 2px 5px rgba(185, 160, 168, 0.18);
-  font-family: var(--tmb-kai); font-size: 11.5px; line-height: 1.2; letter-spacing: 0.06em;
+  font-family: var(--tmb-kai); font-size: 11.5px; line-height: 1.2; letter-spacing: 0;
   color: #8c6b76; text-align: center;
   transform: rotate(1.2deg);
 }
@@ -197,7 +203,7 @@ export const BOOK_STYLES = `
   top: 30px; left: 2px; right: 3px; max-height: 96px;
   background: rgba(254, 255, 255, 0.98); color: #5f6c8e;
   box-shadow: inset 0 0 0 1px rgba(170, 182, 208, 0.45), 0 2px 5px rgba(160, 172, 195, 0.18);
-  font-family: var(--tmb-round); font-size: 11px; letter-spacing: 0.08em;
+  font-family: var(--tmb-round); font-size: 11px; letter-spacing: 0;
   transform: rotate(-1.2deg);
 }
 
@@ -216,7 +222,7 @@ export const BOOK_STYLES = `
   /* 1.3.1c：点纹纸纹撤除——大面只留"顶部一线受光 + 基色微暖渐变"，
      干净得像面板那张白玻璃卡，只是形状还是一本书 */
   background-image:
-    radial-gradient(70% 45% at 12% 4%, rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0) 60%),
+    radial-gradient(70% 45% at 12% 4%, var(--tmb-paper-highlight), transparent 60%),
     linear-gradient(168deg, var(--tmb-paper-hi) 0%, var(--tmb-paper-mid) 55%, var(--tmb-paper-lo) 100%);
   box-shadow:
     inset 12px 0 14px -12px rgba(190, 170, 178, 0.16),
@@ -225,54 +231,41 @@ export const BOOK_STYLES = `
     0 10px 24px rgba(185, 168, 174, 0.12),
     0 2px 0 rgba(212, 199, 189, 0.3);
 }
-/* 页眉：一条浅界栏压底，字距拉开（和正文彻底分层） */
+/* 页眉：一条浅界栏压底，用字号与墨色和正文分层 */
 .tmb-head {
   display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
   padding: 0 12px 7px 0; margin-bottom: 11px;
   border-bottom: 1px solid var(--tmb-rule);
 }
 .tmb-head-kicker {
-  font-family: var(--tmb-kai); font-size: 12px; letter-spacing: 0.22em;
+  font-family: var(--tmb-kai); font-size: 12px; letter-spacing: 0;
   color: var(--tmb-ink-soft); text-transform: none;
 }
-.tmb-head-no { font-family: var(--tmb-round); font-size: 14px; font-weight: 700; color: var(--tmb-ink); letter-spacing: 0.02em; }
+.tmb-head-no { font-family: var(--tmb-round); font-size: 14px; font-weight: 700; color: var(--tmb-ink); letter-spacing: 0; }
 .tmb-head-meta { font-size: 12.5px; color: var(--tmb-ink-soft); font-variant-numeric: tabular-nums; font-family: var(--tmb-round); }
 .tmb-head-spacer { margin-left: auto; }
 .tmb-head-trend { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--tmb-ink-soft); }
 .tmb-head-trend .tm-mood-dot { width: 8px; height: 8px; box-shadow: 0 0 0 1px rgba(190, 170, 178, 0.24); }
 
-/* 段落＝一张贴进手账的纸：自己的边、自己的影、极轻微歪斜（手贴的效果）。
-   ⚠这里**不加** overflow:hidden：它是 .tmb-page 的直接子块，
-   .tmb-page 才是 sticky 页脚的滚动上下文，别在这儿添堵 */
+/* 段落直接落在纸上，只有续写之间的细界栏。
+   不加 overflow/contain，sticky 页脚始终跟随 .tm-content 滚动。 */
 .tmb-entry {
-  position: relative; margin-top: 14px; padding: 13px 12px 13px 14px;
-  border: 1px solid rgba(212, 199, 189, 0.5); border-radius: 10px;
-  background-image:
-    linear-gradient(172deg, rgba(255, 255, 254, 0.85) 0%, rgba(253, 250, 246, 0.55) 100%);
-  box-shadow: 0 2px 6px rgba(185, 170, 175, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  position: relative; margin-top: 20px; padding: 16px 0 0;
+  border: 0; border-top: 1px solid var(--tmb-rule); border-radius: 0;
+  background: none; box-shadow: none;
 }
-.tmb-entry:nth-child(even) { transform: rotate(-0.18deg); }
-.tmb-entry:nth-child(odd) { transform: rotate(0.16deg); }
-/* 四角贴纸（素色半透明小胶带，1.3.1c 撤掉条纹——形状保留、颜色退场） */
-.tmb-entry::before, .tmb-entry::after {
-  content: ""; position: absolute; width: 11px; height: 26px; border-radius: 2px;
-  background: linear-gradient(180deg, var(--tmb-tape-a), var(--tmb-tape-b));
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6), 0 1px 2px rgba(175, 160, 165, 0.14);
-}
-.tmb-entry::before { left: -6px; top: 5px; transform: rotate(-34deg); }
-.tmb-entry::after { right: -6px; bottom: 5px; transform: rotate(-34deg); }
-.tmb-entry:first-child { margin-top: 0; }
+.tmb-entry:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
 /* 落笔时间：楷体小字，像她在页角写的日期 */
 .tmb-entry-when {
-  font-family: var(--tmb-kai); font-size: 12.5px; letter-spacing: 0.08em;
+  font-family: var(--tmb-kai); font-size: 12.5px; letter-spacing: 0;
   color: var(--tmb-ink-soft); margin-bottom: 6px;
 }
-/* 分节小标题：界栏 + 字距拉开（"这段时间 / 我在想 / 对他的感觉 / 想说的"） */
+/* 分节小标题：墨色 + 界栏（"这段时间 / 我在想 / 对他的感觉 / 想说的"） */
 .tmb-sec { margin-top: 11px; }
 .tmb-sec:first-child { margin-top: 0; }
 .tmb-sec-title {
   display: flex; align-items: center; gap: 8px; margin-bottom: 3px;
-  font-family: var(--tmb-kai); font-size: 12.5px; letter-spacing: 0.16em;
+  font-family: var(--tmb-kai); font-size: 12.5px; letter-spacing: 0;
   color: var(--tmb-ink-soft);
 }
 .tmb-sec-title::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--tmb-rule); }
@@ -312,11 +305,11 @@ export const BOOK_STYLES = `
 /* 页脚：常驻下缘（连续卷轴 + 分页视觉的落点）——实色底 + 上界栏 + 模糊，
    不画圆角（页脚即页面的收口），见文件头约束 3 */
 .tmb-foot {
-  position: sticky; bottom: 0; z-index: 4;
+  position: sticky; bottom: var(--tm-save-clearance, 0px); z-index: 4;
   /* 页脚左右顶到纸边（含丝带车道），但不向下顶：纸页已是 flex 列且 padding-bottom=0，
      再给负 bottom 会在页脚下面留一条纸底白缝 */
   margin: 14px -62px 0 -22px; padding: 9px 18px 11px;
-  display: flex; align-items: center; gap: 10px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; min-width: 0;
   background-image: linear-gradient(180deg, rgba(255, 253, 251, 0.97) 0%, rgba(250, 245, 240, 0.99) 100%);
   border-top: 1px solid rgba(212, 196, 202, 0.45);
   /* 页脚负外边距顶到纸边，右下角跟随纸页圆角（否则直角会在圆纸上露一尖） */
@@ -324,11 +317,15 @@ export const BOOK_STYLES = `
   box-shadow: 0 -5px 12px rgba(185, 170, 175, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.9);
   -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
 }
-.tmb-foot-mid { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.tmb-foot-mid {
+  margin-left: auto; flex: 0 1 auto; min-width: 0; max-width: 100%;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px;
+}
 .tmb-btn {
   border: 1px solid rgba(205, 185, 192, 0.5); border-radius: 999px;
   padding: 5px 13px; background: rgba(255, 254, 253, 0.92);
-  color: #7d666e; font-family: var(--tmb-round); font-size: 12.5px; letter-spacing: 0.04em;
+  color: #7d666e; font-family: var(--tmb-round); font-size: 12.5px; letter-spacing: 0;
+  min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere;
   cursor: pointer;
   transition: background 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
 }
@@ -337,7 +334,7 @@ export const BOOK_STYLES = `
 .tmb-btn:disabled { opacity: 0.4; cursor: default; }
 .tmb-btn:focus-visible { outline: 2px solid rgba(190, 140, 160, 0.7); outline-offset: 2px; }
 .tmb-ind {
-  min-width: 54px; text-align: center; font-size: 12.5px; letter-spacing: 0.06em;
+  min-width: 54px; text-align: center; font-size: 12.5px; letter-spacing: 0;
   color: rgba(125, 102, 110, 0.88); font-variant-numeric: tabular-nums;
   font-family: var(--tmb-round);
 }
@@ -356,8 +353,8 @@ export const BOOK_STYLES = `
   background-color: var(--tmb-file-paper-lo);
   /* 1.3.1c：格线撤除——冷白净面，与宿主白玻璃卡同族，只比她的那本冷一档 */
   background-image:
-    radial-gradient(66% 50% at 8% 2%, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0) 60%),
-    linear-gradient(168deg, var(--tmb-file-paper-hi) 0%, #f8fafc 54%, var(--tmb-file-paper-lo) 100%);
+    radial-gradient(66% 50% at 8% 2%, var(--tmb-file-paper-highlight), transparent 60%),
+    linear-gradient(168deg, var(--tmb-file-paper-hi) 0%, var(--tmb-file-paper-mid) 54%, var(--tmb-file-paper-lo) 100%);
   box-shadow:
     inset 14px 0 16px -14px rgba(160, 172, 195, 0.2),
     inset 0 1px 0 rgba(255, 255, 255, 0.95),
@@ -380,9 +377,9 @@ export const BOOK_STYLES = `
 }
 .tmb-file-date {
   font-family: var(--tmb-mono); font-size: 17px; font-weight: 700; color: #4f5a78;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
 }
-.tmb-file-kicker { font-size: 12px; letter-spacing: 0.14em; color: rgba(90, 102, 130, 0.8); margin-bottom: 10px; }
+.tmb-file-kicker { font-size: 12px; letter-spacing: 0; color: rgba(90, 102, 130, 0.8); margin-bottom: 10px; }
 .tmb-file-rows { display: grid; gap: 5px; margin-bottom: 12px; }
 .tmb-file-row {
   display: flex; justify-content: space-between; align-items: baseline; gap: 6px;
@@ -399,14 +396,14 @@ export const BOOK_STYLES = `
 }
 .tmb-file-aside .tmb-evidence-line { flex-direction: column; align-items: flex-start; gap: 1px; line-height: 1.55; }
 .tmb-file-aside .tmb-quote { flex-wrap: wrap; line-height: 1.6; }
-/* 落款印：住在左栏尾端（不再 float 压正文首段）；双线方框、楷体竖排、
+/* 落款印：住在左栏尾端（不再 float 压正文首段）；双线方框、楷体文字、
    轻旋转的"盖章感"保留，雾靛——还是"一枚盖上去的章"（小件，允许浓度） */
 .tmb-file-sign { margin-top: 12px; }
 .tmb-file-sign .tmb-seal { float: none; clear: none; margin: 0; }
-/* 标题居于一栏顶（"这一段时间的记录"）：圆体宽字距 */
+/* 标题居于一栏顶（"这一段时间的记录"）：圆体加重 */
 .tmb-file-title {
   margin: 2px 0 12px; text-align: center;
-  font-family: var(--tmb-round); font-size: 14px; font-weight: 700; letter-spacing: 0.3em;
+  font-family: var(--tmb-round); font-size: 14px; font-weight: 700; letter-spacing: 0;
   color: #4f5a78;
 }
 /* 正文与个人日记那本完全同档（1.3.0 统一字号反馈："整体小了一点"）：
@@ -415,18 +412,10 @@ export const BOOK_STYLES = `
   color: var(--tmb-file-ink);
 }
 .tmb-page--file .tmb-entry {
-  border-color: rgba(196, 205, 222, 0.5);
-  background-image:
-    linear-gradient(172deg, rgba(255, 255, 255, 0.75) 0%, rgba(250, 252, 254, 0.5) 100%);
-  box-shadow: 0 2px 6px rgba(160, 172, 195, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  border-top-color: var(--tmb-file-rule);
 }
-.tmb-page--file .tmb-entry::before, .tmb-page--file .tmb-entry::after {
-  background: linear-gradient(180deg, rgba(244, 246, 250, 0.92), rgba(255, 255, 255, 0.95));
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6), 0 1px 2px rgba(160, 172, 195, 0.14);
-}
-.tmb-page--file .tmb-entry:nth-child(even), .tmb-page--file .tmb-entry:nth-child(odd) { transform: none; }
 /* 观测手账不贴角、不歪斜：那是她手边的东西，这本是整理好的记录 */
-/* 落款印本体：方框双线 + 楷体竖排 + 轻旋转（盖章必不正的仪式感保留），
+/* 落款印本体：方框双线 + 多语种换行文字 + 轻旋转（盖章必不正的仪式感保留），
    雾靛——位置由 .tmb-file-sign 接管（1.3.0 起不再 float 进正文） */
 .tmb-seal {
   float: right; clear: both; margin: 16px 2px 0 18px;
@@ -436,8 +425,8 @@ export const BOOK_STYLES = `
   color: var(--tmb-seal);
   background-image: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0) 62%);
   box-shadow: inset 0 0 0 1px var(--tmb-seal);
-  writing-mode: vertical-rl; text-orientation: upright;
-  font-family: var(--tmb-kai); font-size: 12.5px; letter-spacing: 0.04em; line-height: 1.05;
+  writing-mode: horizontal-tb; text-align: center; overflow-wrap: anywhere;
+  font-family: "Segoe UI", var(--tmb-round); font-size: 11px; letter-spacing: 0; line-height: 1.2;
   transform: rotate(-5.5deg);
 }
 .tmb-page--file .tmb-foot {
@@ -452,14 +441,14 @@ export const BOOK_STYLES = `
 .tmb-page--file .tmb-ind, .tmb-page--file .tmb-leaf-ind { font-family: var(--tmb-mono); color: rgba(90, 102, 130, 0.92); }
 /* 素材进度：细灰轨 + 雾蓝填充（小件彩点），向面板那根进度条的观感看齐 */
 .tmb-meter { display: grid; gap: 5px; margin: 0 0 12px; }
-.tmb-meter-row { display: flex; align-items: baseline; gap: 8px; font-family: var(--tmb-mono); font-size: 12.5px; color: rgba(90, 102, 130, 0.92); letter-spacing: 0.01em; }
+.tmb-meter-row { display: flex; align-items: baseline; gap: 8px; font-family: var(--tmb-mono); font-size: 12.5px; color: rgba(90, 102, 130, 0.92); letter-spacing: 0; }
 .tmb-meter-track { height: 5px; border-radius: 999px; background: rgba(196, 205, 222, 0.3); box-shadow: inset 0 1px 1px rgba(150, 162, 186, 0.1); overflow: hidden; }
 .tmb-meter-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #b6c3e4, #9dadd9); }
 /* 双门槛副行（1.3.0）：天数维度比轮数低一级字号与透明度，主次不互摸 */
 .tmb-meter-row--sub { font-size: 11.5px; opacity: 0.78; }
 /* 到期徽标：灰玫小胶囊——"到时候了"是事实陈述不是庆祝，不给动效 */
 .tmb-meter-due {
-  font-size: 11.5px; letter-spacing: 0.04em; padding: 0 6px; border-radius: 999px;
+  font-size: 11.5px; letter-spacing: 0; padding: 0 6px; border-radius: 999px;
   color: #a2707f; border: 1px solid rgba(190, 148, 165, 0.45); background: rgba(250, 243, 246, 0.85);
 }
 /* 本卷依据（1.3.0）：成文时固化的素材快照——附页的口吻，
@@ -472,15 +461,15 @@ export const BOOK_STYLES = `
   display: grid; gap: 4px;
 }
 .tmb-evidence-title {
-  font-family: var(--tmb-round); font-size: 13px; letter-spacing: 0.1em; color: rgba(90, 102, 130, 0.9);
+  font-family: var(--tmb-round); font-size: 13px; letter-spacing: 0; color: rgba(90, 102, 130, 0.9);
 }
 .tmb-evidence-line { display: flex; align-items: baseline; gap: 8px; font-family: var(--tmb-mono); font-size: 12.5px; color: rgba(74, 86, 110, 0.95); }
-.tmb-evidence-label { flex: 0 0 auto; opacity: 0.72; letter-spacing: 0.02em; }
+.tmb-evidence-label { flex: 0 0 auto; opacity: 0.72; letter-spacing: 0; }
 .tmb-evidence-value { min-width: 0; overflow-wrap: anywhere; }
 /* 原话摘录：语录贴条：kind 小圆角标签 + 引文，不抢正文视觉 */
 .tmb-quote { display: flex; align-items: baseline; gap: 6px; font-size: 12.5px; font-family: var(--tmb-mono); color: rgba(74, 86, 110, 0.92); overflow-wrap: anywhere; }
 .tmb-quote-kind {
-  flex: 0 0 auto; font-family: var(--tmb-round); font-size: 11.5px; letter-spacing: 0.04em;
+  flex: 0 0 auto; font-family: var(--tmb-round); font-size: 11.5px; letter-spacing: 0;
   padding: 0 5px; border: 1px solid rgba(178, 188, 210, 0.5); border-radius: 4px; color: rgba(90, 102, 130, 0.9);
 }
 
@@ -564,16 +553,17 @@ export const BOOK_STYLES = `
     --tmb-paper-hi: #2b2724;
     --tmb-paper-mid: #262220;
     --tmb-paper-lo: #211d1c;
+    --tmb-paper-highlight: rgba(255, 246, 226, 0.04);
     --tmb-paper-edge: rgba(168, 152, 146, 0.32);
     --tmb-ink: #e8e0da;
     --tmb-ink-soft: rgba(198, 180, 182, 0.9);
     --tmb-rule: rgba(178, 156, 160, 0.26);
     --tmb-cloth: #6b5c63;
     --tmb-ribbon: #9c7484;
-    --tmb-tape-a: rgba(72, 62, 64, 0.85);
-    --tmb-tape-b: rgba(58, 50, 52, 0.9);
     --tmb-file-paper-hi: #262a33;
+    --tmb-file-paper-mid: #22252e;
     --tmb-file-paper-lo: #1c1f27;
+    --tmb-file-paper-highlight: rgba(255, 255, 255, 0.035);
     --tmb-file-edge: rgba(148, 158, 178, 0.26);
     --tmb-file-ink: #d5dae4;
     --tmb-file-rule: rgba(148, 158, 178, 0.22);
@@ -611,10 +601,6 @@ export const BOOK_STYLES = `
   .tmb-file-row { color: rgba(202, 208, 224, 0.94); }
   .tmb-file-aside .tmb-evidence { border-top-color: rgba(148, 158, 178, 0.3); }
   .tmb-file-aside .tmb-quote-kind { border-color: rgba(148, 158, 178, 0.3); }
-  .tmb-entry { border-color: rgba(178, 156, 160, 0.24); background-image: linear-gradient(172deg, rgba(58, 52, 50, 0.5) 0%, rgba(46, 41, 40, 0.35) 100%); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 246, 226, 0.05); }
-  .tmb-entry::before, .tmb-entry::after { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 1px 2px rgba(0, 0, 0, 0.3); }
-  .tmb-page--file .tmb-entry { border-color: rgba(148, 158, 178, 0.18); background-image: linear-gradient(172deg, rgba(46, 50, 60, 0.5) 0%, rgba(38, 41, 50, 0.35) 100%); }
-  .tmb-page--file .tmb-entry::before, .tmb-page--file .tmb-entry::after { background: linear-gradient(180deg, rgba(58, 62, 74, 0.9), rgba(44, 48, 58, 0.95)); }
   .tmb-file-title { color: #d9dfec; }
   .tmb-text--file { color: #d5dae4; }
   .tmb-seal { background-image: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0) 62%); }
@@ -659,9 +645,7 @@ export const BOOK_STYLES = `
   .tmb-book-stitch, .tmb-book-holes { display: none; }
   .tmb-book-title { left: 2px; right: 2px; font-size: 9.5px; }
   .tmb-page { padding: 14px 40px 0 15px; min-height: clamp(360px, 62vh, 620px); }
-  .tmb-entry { padding: 11px 9px 11px 10px; }
-  .tmb-entry::before, .tmb-entry::after { display: none; }
-  .tmb-entry:nth-child(even), .tmb-entry:nth-child(odd) { transform: none; }
+  .tmb-entry { margin-top: 16px; padding: 12px 0 0; }
   .tmb-text { font-size: 14px; line-height: 2.02; }
   /* 双栏卷宗窄窗降级：塔单列——DOM 序正文在前，信息栏自然换到正文后（「正文优先」）；
      分隔线从右缘竖线换顶部虚线；本页无丝带，右内边距比通用值更短 */
@@ -674,16 +658,18 @@ export const BOOK_STYLES = `
   .tmb-page--file { padding: 14px 18px 0 15px; }
   .tmb-page--file .tmb-foot { margin: 12px -18px 0 -15px; }
   .tmb-foot { margin: 12px -40px 0 -15px; padding: 8px 12px 10px; }
+  .tmb-foot-mid { flex: 1 1 100%; margin-left: 0; justify-content: space-between; gap: 6px; }
+  .tmb-foot-mid > .tmb-btn { flex: 1 1 64px; }
+  .tmb-foot-mid > .tmb-leaf-ind { min-width: 0; overflow-wrap: anywhere; }
   /* 小窗车道收窄（丝带右 24 + 宽 12 → 占 24~36），页右内边距 40 已足避让 */
   .tmb-card { --tmb-col: 100%; }
-  .tmb-btn { padding: 5px 10px; font-size: 12px; }
+  .tmb-btn { padding: 5px 8px; font-size: 12px; }
   .tmb-ribbon { right: 24px; width: 12px; }
 }
 
 /* 动效关闭偏好：书本不弹、纸叠不歪 */
 @media (prefers-reduced-motion: reduce) {
   .tmb-spine, .tmb-spine:hover, .tmb-btn, .tmb-btn:hover:not(:disabled) { transform: none !important; transition: none !important; }
-  .tmb-entry:nth-child(even), .tmb-entry:nth-child(odd) { transform: none !important; }
   .tmb-stack-slab, .tmb-stack-slab--top, .tmb-stack:hover .tmb-stack-slab--top { transform: none !important; transition: none !important; }
 }
 `
