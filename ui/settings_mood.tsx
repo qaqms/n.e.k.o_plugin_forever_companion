@@ -17,7 +17,7 @@ export function MoodSettingsCard(props: {
       </div>
       <TmSwitch
         checked={form.mood_enabled}
-        label={t("panel.settings.moodEnabled", { defaultValue: "情绪系统（实验性：允许她自主使用冷战沉默等情绪动作）" })}
+        label={t("panel.settings.moodEnabled", { defaultValue: "启用情绪系统（实验性）" })}
         onChange={(value: boolean) => updateForm({ mood_enabled: value })}
       />
       {form.mood_enabled ? (

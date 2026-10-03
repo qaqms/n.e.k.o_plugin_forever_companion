@@ -304,7 +304,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     if (!id) return
     const ok = await confirmDialog({
       title: t("actions.gallery_remove.label", { defaultValue: "从图库删除图片" }),
-      message: t("actions.gallery_remove.confirm", { defaultValue: "将从图库删除这张图片（若正在使用会一并停用背景），不可恢复，确认？" }),
+      message: t("actions.gallery_remove.confirm", { defaultValue: "确定从图库删除这张图片吗？如果正在使用，也会取消壁纸。删除后无法恢复。" }),
       tone: "danger",
       ...confirmLabels,
     })
@@ -353,7 +353,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       throw new Error(t("panel.errors.actionUnavailable", { defaultValue: "操作不可用（插件可能未运行）" }))
     }
     if (!DATE_RE.test(String(state.anchor_date || ""))) {
-      throw new Error(t("panel.errors.setAnchorFirst", { defaultValue: "请先设置潮汐首日锚点，再开启模拟" }))
+      throw new Error(t("panel.errors.setAnchorFirst", { defaultValue: "请先设置周期起点，再开启模拟" }))
     }
     const base = formBaseline.current as Record<string, any>
     const current = form as Record<string, any>
@@ -435,7 +435,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     const turningOff = status.enabled !== false
     const ok = await confirmDialog({
       title: turningOff ? t("panel.turnOff", { defaultValue: "关闭模拟" }) : t("panel.turnOn", { defaultValue: "开启模拟" }),
-      message: t("actions.toggle.confirm", { defaultValue: "切换身体节律模拟的总开关，确认？" }),
+      message: t("actions.toggle.confirm", { defaultValue: "确定切换模拟总开关吗？" }),
       tone: turningOff ? "warning" : "primary",
       ...confirmLabels,
     })
@@ -476,7 +476,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   async function onClearDiary() {
     const ok = await confirmDialog({
       title: t("actions.clear_diary.label", { defaultValue: "清空时光日记" }),
-      message: t("actions.clear_diary.confirm", { defaultValue: "将删除全部时光日记（她的手记与自动碎片），不可恢复，确认？" }),
+      message: t("actions.clear_diary.confirm", { defaultValue: "确定清空当前角色的时光日记吗？手记和对话片段都会删除，且无法恢复。" }),
       tone: "danger",
       ...confirmLabels,
     })
@@ -492,8 +492,8 @@ export default function Panel(props: PluginSurfaceProps<State>) {
 
   async function onDeleteFragment(ts: string) {
     const ok = await confirmDialog({
-      title: t("actions.delete_diary_item.label", { defaultValue: "删除这条碎片" }),
-      message: t("actions.delete_diary_item.confirm", { defaultValue: "将删除这条自动记录的碎片，不可恢复，确认？" }),
+      title: t("actions.delete_diary_item.label", { defaultValue: "删除这条片段" }),
+      message: t("actions.delete_diary_item.confirm", { defaultValue: "确定删除这条对话片段吗？删除后无法恢复。" }),
       tone: "danger",
       ...confirmLabels,
     })
@@ -558,13 +558,13 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       // 不能与"开关未开启"共用一条 info 软提示（1.2.4 语义不变）；
       // respond（当面递到）/ read（冷却内悄悄补递）分文案（1.2.3 既定双态）
       if (r.invited === false && r.mode === "failed") {
-        toast.error(t("panel.journal.inviteFailed", { defaultValue: "邀请没能送到她手上（消息通道正忙或不可用），再按一次试试" }))
+        toast.error(t("panel.journal.inviteFailed", { defaultValue: "邀请发送失败，消息通道可能正忙或不可用。请稍后重试。" }))
       } else if (r.invited === false) {
         toast.info(t("panel.journal.inviteOff", { defaultValue: "个人日记开关未开启，邀请未发送" }))
       } else if (r.mode === "respond") {
-        toast.success(t("panel.journal.invitedRespond", { defaultValue: "邀请已当面递到她手上，她这会儿正想着呢——写不写由她自己决定" }))
+        toast.success(t("panel.journal.invitedRespond", { defaultValue: "写作请求已发送，是否写作由角色决定" }))
       } else {
-        toast.success(t("panel.journal.invitedQuiet", { defaultValue: "她刚收到过邀请，这次改成悄悄提醒——给她留点考虑的空间" }))
+        toast.success(t("panel.journal.invitedQuiet", { defaultValue: "最近已发送过邀请，本次改为后台提醒" }))
       }
     } catch (err) {
       toast.error(errorText(err, t))
@@ -609,13 +609,13 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       await props.api.refresh()
       const r = (payload || {}) as Record<string, any>
       if (r.accepted) {
-        toast.info(t("panel.review.accepted", { defaultValue: "已开始写这一篇，写完会自动出现在这里，不用守着" }))
+        toast.info(t("panel.review.accepted", { defaultValue: "已加入生成队列，完成后会显示在这里" }))
       } else if (r.reason === "already_writing") {
-        toast.info(t("panel.review.alreadyWriting", { defaultValue: "上一篇还在写，写完会自动出现在这里，稍等一下" }))
+        toast.info(t("panel.review.alreadyWriting", { defaultValue: "已有内容正在生成，请等待完成" }))
       } else if (r.reason === "not_enough_material") {
         // 数字走插值不进文案（后端只回 turns/min_turns 字段）
         toast.info(t("panel.review.notEnoughMaterial", {
-          defaultValue: "素材还不够（目前 {turns} 轮，至少 {min_turns} 轮才值得写一篇），再聊聊吧",
+          defaultValue: "素材不足：目前 {turns} 轮，至少需要 {min_turns} 轮互动",
           turns: String(r.turns ?? 0),
           min_turns: String(r.min_turns ?? 10),
         }))
@@ -623,13 +623,13 @@ export default function Panel(props: PluginSurfaceProps<State>) {
         // 休眠原因复用新手向导通道卡的既有文案（零新增 key，1.md 既定）；熔断这一档
         // 必须自己占一个分支——落到"槽位没配模型"上就把"被服务端拒了"说成了"你没配"
         const why = r.dormant_reason === "free_route"
-          ? t("onboarding.channels.freeRoute", { defaultValue: "休眠 · 直连撞上免费路由" })
+          ? t("onboarding.channels.freeRoute", { defaultValue: "免费路由不支持直连" })
           : r.dormant_reason === "rejected"
-            ? t("panel.channel.rejected", { defaultValue: "服务端拒了 · 已熔断" })
-            : t("onboarding.channels.noModel", { defaultValue: "休眠 · 槽位没配模型" })
+            ? t("panel.channel.rejected", { defaultValue: "请求被拒绝 · 通道已暂停" })
+            : t("onboarding.channels.noModel", { defaultValue: "未配置模型" })
         toast.info(why)
       } else {
-        toast.info(t("panel.review.writeFailed", { defaultValue: "这一篇还没写成，稍后再试" }))
+        toast.info(t("panel.review.writeFailed", { defaultValue: "生成失败，请稍后重试" }))
       }
     } catch (err) {
       toast.error(errorText(err, t))
@@ -661,11 +661,11 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     if (reviewResultSeen.current === result.ts) return
     reviewResultSeen.current = result.ts
     if (result.written) {
-      toast.success(t("panel.review.written", { defaultValue: "这一篇已经写好了，翻开看看吧" }))
+      toast.success(t("panel.review.written", { defaultValue: "记录已生成" }))
     } else if (result.reason === "persist_failed") {
-      toast.error(t("panel.review.persistFailed", { defaultValue: "这一篇写成了但没存住，素材还留着，可以再点一次" }))
+      toast.error(t("panel.review.persistFailed", { defaultValue: "内容已生成，但保存失败。素材已保留，可稍后重试。" }))
     } else {
-      toast.info(t("panel.review.writeFailed", { defaultValue: "这一篇还没写成，稍后再试" }))
+      toast.info(t("panel.review.writeFailed", { defaultValue: "生成失败，请稍后重试" }))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.review_brief && state.review_brief.last_result && state.review_brief.last_result.ts, state.lanlan])
@@ -675,8 +675,8 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   // 取 actions.reset.*（与后端 @ui.action 的 label/confirm 同一对键，两端同源）
   async function onResetAll() {
     const ok = await confirmDialog({
-      title: t("actions.reset.label", { defaultValue: "重置全部数据" }),
-      message: t("actions.reset.confirm", { defaultValue: "将清空当前角色的周期偏移、情绪状态和心情手记，确认？" }),
+      title: t("actions.reset.label", { defaultValue: "重置状态与记录" }),
+      message: t("actions.reset.confirm", { defaultValue: "确定重置当前角色的状态与记录吗？快进天数、情绪状态、时光日记，以及未归档的我的日记和累计素材都会清空，且无法恢复。模拟开关恢复默认设置；个人日记、归档和其他角色不受影响。" }),
       tone: "danger",
       ...confirmLabels,
     })
@@ -692,7 +692,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   async function onClearReview() {
     const ok = await confirmDialog({
       title: t("actions.clear_review.label", { defaultValue: "清空我的日记" }),
-      message: t("actions.clear_review.confirm", { defaultValue: "将删除全部「我的日记」评价（累计素材一并清零），不可恢复，确认？" }),
+      message: t("actions.clear_review.confirm", { defaultValue: "确定清空当前角色的我的日记吗？所有记录（含归档）和累计素材都会删除，且无法恢复。" }),
       tone: "danger",
       ...confirmLabels,
     })
@@ -758,7 +758,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       const payload = unwrapCallResult(await props.api.call("set_capability", { capability_id: id, enabled }))
       const r = (payload || {}) as Record<string, any>
       if (r.note === "reverted_to_default") {
-        toast.info(t("panel.features.reverted", { defaultValue: "该功能在功能配置里是关着的（或被依赖的功能挡住），这里无法强行点亮" }))
+        toast.info(t("panel.features.reverted", { defaultValue: "此功能在设置中已关闭，或所需功能尚未开启。请先完成相关设置。" }))
         return false
       } else if (r.persist_error) {
         // 既定契约：内存当场生效、盘上保持原样，如实报错可重试；
@@ -783,8 +783,8 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       const r = (payload || {}) as Record<string, any>
       toast.success(
         r.hide_disabled_tools
-          ? t("panel.features.hideToolsOn", { defaultValue: "已开启：不再生效的功能会把她看不见的工具一并摘除" })
-          : t("panel.features.hideToolsOff", { defaultValue: "已回到温和模式：工具始终在位，调用时才拒绝" }),
+          ? t("panel.features.hideToolsOn", { defaultValue: "隐藏对所有角色都不生效的工具" })
+          : t("panel.features.hideToolsOff", { defaultValue: "保留工具，已关闭的功能不执行" }),
       )
       await props.api.refresh()
       return true
@@ -803,7 +803,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     }
     const ok = await confirmDialog({
       title: t("actions.prune_lanlan.label", { defaultValue: "清除残留数据" }),
-      message: t("actions.prune_lanlan.confirm", { defaultValue: "将删除该角色残留的周期、情绪与手记数据，不可恢复，确认？" }),
+      message: t("actions.prune_lanlan.confirm", { defaultValue: "确定清除这个角色的残留数据吗？周期、情绪、日记和旧版周记都会删除，且无法恢复。" }),
       tone: "danger",
       ...confirmLabels,
     })
@@ -820,8 +820,8 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   async function onSetAnchor(date: string): Promise<boolean> {
     if (!setAnchor) return false
     const ok = await confirmDialog({
-      title: t("actions.set_anchor.label", { defaultValue: "设置潮汐首日" }),
-      message: t("actions.set_anchor.confirm", { defaultValue: "将重设周期锚点并重新计算阶段，确认？" }),
+      title: t("actions.set_anchor.label", { defaultValue: "设置周期起点" }),
+      message: t("actions.set_anchor.confirm", { defaultValue: "确定设置新的周期起点吗？快进天数会清零，并重新计算当前阶段。" }),
       tone: "warning",
       ...confirmLabels,
     })
@@ -855,7 +855,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       await props.api.call("update_settings", { birthday_date: date, birthday_keep_diary: keepDiary })
       await props.api.refresh()
       if (date) {
-        toast.success(t("panel.birthday.saved", { defaultValue: "已记下主人的生日" }))
+        toast.success(t("panel.birthday.saved", { defaultValue: "生日已保存" }))
       } else {
         toast.success(t("panel.birthday.cleared", { defaultValue: "已清除生日设置" }))
       }
@@ -983,7 +983,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
           {activeTab === "cycle" ? (
             <div className="tm-pane">
               {!state.anchor_date ? (
-                <Alert tone="warning" message={t("panel.errors.setAnchorFirst", { defaultValue: "请先设置潮汐首日锚点，再开启模拟" })} />
+                <Alert tone="warning" message={t("panel.errors.setAnchorFirst", { defaultValue: "请先设置周期起点，再开启模拟" })} />
               ) : null}
               <CycleSettingsCard t={t} settings={settings} form={form} updateForm={updateForm} lanlan={state.lanlan} />
               <InjectSettingsCard t={t} form={form} updateForm={updateForm} />

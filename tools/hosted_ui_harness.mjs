@@ -37,6 +37,22 @@ function escapeScript(value) {
   return value.replace(/<\/script/gi, "<\\/script").replace(/<!--/g, "<\\!--")
 }
 
+function loadFixtureIntros(pluginRoot) {
+  const python = join(pluginRoot, ".venv", "Scripts", "python.exe")
+  const code = `
+import json, runpy, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+specs = runpy.run_path(str(root / "core/capabilities.py"))["CAPABILITY_SPECS"]
+build = runpy.run_path(str(root / "core/intros.py"))["build_intro_payload"]
+ref = lambda key, default: {"$i18n": key, "default": default}
+print(json.dumps({key: build(spec, ref) for key, spec in specs.items() if spec.managed}))
+`
+  const result = spawnSync(existsSync(python) ? python : "python", ["-B", "-c", code, pluginRoot], { encoding: "utf8" })
+  assert.equal(result.status, 0, result.stderr || "Cannot load real capability introductions")
+  return JSON.parse(result.stdout)
+}
+
 async function loadSources(pluginRoot, hostRoot) {
   const scannerPath = join(hostRoot, HOSTED, "hostedTsxModule.mjs")
   const scanner = await import(pathToFileURL(scannerPath).href)
@@ -71,7 +87,7 @@ async function loadSources(pluginRoot, hostRoot) {
   const messages = {}
   for (const file of readdirSync(join(pluginRoot, "i18n")).filter(file => file.endsWith(".json"))) messages[basename(file, ".json")] = JSON.parse(readFileSync(join(pluginRoot, "i18n", file), "utf8"))
   return {
-    compiled, messages, dependencies: dependencies.map(({ path, bytes }) => ({ path, bytes })), dependencyBytes: bytes,
+    compiled, messages, intros: loadFixtureIntros(pluginRoot), dependencies: dependencies.map(({ path, bytes }) => ({ path, bytes })), dependencyBytes: bytes,
     sourceHash: createHash("sha256").update(bundle).digest("hex"),
     runtime: readFileSync(join(hostRoot, HOSTED, "ui-kit/runtime.js"), "utf8"),
     styles: readFileSync(join(hostRoot, HOSTED, "ui-kit/styles.css"), "utf8"),
@@ -106,7 +122,7 @@ window.__QA_INITIAL_TAB = ${JSON.stringify(initialTab)};
 }
 
 function parentDocument(sources, parameters, origin) {
-  const fixture = makeFixture(sources.messages, { ...parameters, empty: parameters.empty === "true", wizard: parameters.wizard === "true" })
+  const fixture = makeFixture(sources.messages, { ...parameters, intros: sources.intros, empty: parameters.empty === "true", wizard: parameters.wizard === "true" })
   const child = documentFor(sources, fixture.context, origin, parameters.tab || "overview")
   return `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden}iframe{display:block;width:100vw;height:100vh;border:0}</style></head><body><iframe id="hosted" title="Isolated Hosted TSX QA" sandbox="allow-scripts"></iframe><script>
 const fixture = ${escapeScript(JSON.stringify(fixture))};
@@ -257,7 +273,8 @@ async function interactionChecks(browser, origin, output) {
     })
     await check("dangerous-reset-can-be-cancelled", async () => {
       const before = await page.evaluate(() => window.qaMessages.filter(message => message.method === "call" && message.payload.actionId === "reset_all").length)
-      await frame.getByRole("button", { name: "Reset all data", exact: true }).click()
+      const label = await page.evaluate(() => window.qaFixture.context.i18n.messages.en["actions.reset.label"])
+      await frame.getByRole("button", { name: label, exact: true }).click()
       await frame.waitForSelector(".neko-modal")
       await frame.getByRole("button", { name: "Cancel", exact: true }).last().click()
       assert.equal(await page.evaluate(() => window.qaMessages.filter(message => message.method === "call" && message.payload.actionId === "reset_all").length), before)
@@ -269,7 +286,8 @@ async function interactionChecks(browser, origin, output) {
       assert.equal(await page.evaluate(() => window.qaFixture.context.state.capabilities.capabilities[0].enabled), false)
       await frame.locator(".tm-ci-open").first().click()
       await frame.waitForSelector(".tm-ci")
-      assert.match(await frame.locator(".tm-content").innerText(), /QA fixture purpose/)
+      const purpose = await page.evaluate(() => window.qaFixture.context.i18n.messages.en["panel.capintro.whisper.purpose"])
+      assert((await frame.locator(".tm-content").innerText()).includes(purpose))
     })
     await check("journal-and-review-render-real-reading-views", async () => {
       await frame.locator(".tm-tab").nth(TABS.indexOf("diary")).click()
@@ -1070,6 +1088,174 @@ async function calendarDiagnostics(browser, origin, output) {
   return results
 }
 
+async function copyChecks(browser, sources, origin, output) {
+  const screenshots = []
+  const checks = []
+  async function check(name, operation) {
+    try { await operation(); checks.push({ name, passed: true }); console.log(`PASS ${name}`) }
+    catch (error) { checks.push({ name, passed: false, error: error.stack }); console.log(`FAIL ${name}: ${error.message}`) }
+  }
+  async function capture(loaded, id, save = true) {
+    const layout = await inspectLayout(loaded.frame)
+    assert(layout.documentOverflow <= 2, `${id}: document overflow ${layout.documentOverflow}`)
+    assert(layout.contentOverflow <= 2, `${id}: content overflow ${layout.contentOverflow}`)
+    assert.deepEqual(layout.issues, [], `${id}: clipped copy`)
+    assert.deepEqual(loaded.errors, [], `${id}: runtime errors`)
+    if (!save) return
+    const path = join(output, `${id}.png`)
+    await loaded.page.screenshot({ path, animations: "disabled" })
+    screenshots.push({ id, path, layout, errors: [...loaded.errors], diagnostics: await loaded.page.evaluate(() => window.qaDiagnostics.filter(message => message.type === "neko-hosted-surface-error")) })
+  }
+  async function refreshState(loaded, patch) {
+    const payload = await loaded.page.evaluate(next => {
+      Object.assign(window.qaFixture.context.state, next)
+      return window.qaFixture.context
+    }, patch)
+    await loaded.frame.evaluate(next => window.__NekoRefreshHostedPayload(next), payload)
+    await loaded.frame.waitForTimeout(70)
+  }
+  const calls = (page, action) => page.evaluate(id => window.qaMessages.filter(message => message.method === "call" && message.payload.actionId === id).length, action)
+  for (const locale of option("copy-locales", Object.keys(sources.messages).join(",")).split(",")) {
+    const text = sources.messages[locale]
+    for (const width of [1280, 390]) for (const theme of ["light", "dark"]) {
+      const id = `copy-${locale}-${width}-${theme}`
+      const save = (width === 1280 && theme === "light") || (width === 390 && theme === "dark")
+      const loaded = await loadPage(browser, origin, { locale, wizard: "true", empty: "true", wallpaper: "none" }, width, width === 390 ? 600 : 900, theme)
+      try {
+        await check(`${id}-six-step-guide`, async () => {
+          for (let step = 0; step < 6; step += 1) {
+            await loaded.frame.waitForSelector(".tm-ob-step")
+            await capture(loaded, `${id}-guide-${step + 1}`, save)
+            if (step < 5) await loaded.frame.getByRole("button", { name: text["onboarding.wizard.next"], exact: true }).click()
+          }
+          assert((await loaded.frame.locator(".tm-ob-step").innerText()).includes(text["onboarding.done.lead"]))
+          await loaded.frame.getByRole("button", { name: text["onboarding.wizard.finish"], exact: true }).click()
+          await loaded.frame.waitForSelector(".neko-modal", { state: "detached" })
+          assert.equal(await calls(loaded.page, "set_onboarding"), 1)
+          assert.equal(await calls(loaded.page, "toggle"), 0)
+          assert.equal(await calls(loaded.page, "update_settings"), 0)
+        })
+        await check(`${id}-all-real-introductions`, async () => {
+          await loaded.frame.locator(".tm-tab").nth(TABS.indexOf("features")).click()
+          for (const [index, cap] of Object.keys(sources.intros).entries()) {
+            await loaded.frame.locator(".tm-ci-open").nth(index).click()
+            await loaded.frame.waitForSelector(".tm-ci-purpose")
+            assert.equal(await loaded.frame.locator(".tm-ci-purpose").innerText(), text[`panel.capintro.${cap}.purpose`])
+            assert.equal(await loaded.frame.locator(".tm-ci-node").count(), sources.intros[cap].flow.length)
+            await capture(loaded, `${id}-intro-${cap}`, save)
+            await loaded.frame.locator(".tm-ci-back").click()
+          }
+        })
+      } finally { await loaded.context.close() }
+    }
+    const loaded = await loadPage(browser, origin, { locale, empty: "true", wallpaper: "none", tab: "diary" }, 390, 600, "light")
+    try {
+      await check(`copy-${locale}-diary-empty-and-invite`, async () => {
+        assert((await loaded.frame.locator(".tm-content").innerText()).includes(text["panel.diary.emptyTitle"]))
+        await loaded.frame.getByRole("button", { name: text["panel.journal.tabJournal"], exact: true }).click()
+        await loaded.frame.waitForTimeout(120)
+        assert((await loaded.frame.locator(".tm-content").innerText()).includes(text["panel.journal.emptyTitle"]))
+        await refreshState(loaded, { journal_invite_pending: true })
+        assert((await loaded.frame.locator(".tm-content").innerText()).includes(text["panel.journal.invitePending"]))
+        await capture(loaded, `copy-${locale}-journal-invite-pending`)
+        const outcomes = [
+          [{ invited: true, mode: "respond" }, "panel.journal.invitedRespond"],
+          [{ invited: true, mode: "quiet" }, "panel.journal.invitedQuiet"],
+          [{ invited: false, mode: "failed" }, "panel.journal.inviteFailed"],
+          [{ invited: false, mode: "off" }, "panel.journal.inviteOff"],
+        ]
+        for (const [result, key] of outcomes) {
+          await loaded.page.evaluate(value => { window.qaResults.invite_journal = value }, result)
+          await loaded.frame.getByRole("button", { name: text["panel.journal.invite"], exact: true }).click()
+          await loaded.frame.waitForTimeout(90)
+          assert((await loaded.frame.locator(".neko-toast").allTextContents()).some(value => value.includes(text[key])), key)
+        }
+      })
+      await check(`copy-${locale}-review-progress-and-results`, async () => {
+        await loaded.frame.getByRole("button", { name: text["panel.review.tabReview"], exact: true }).click()
+        await loaded.frame.waitForTimeout(100)
+        assert((await loaded.frame.locator(".tm-content").innerText()).includes(text["panel.review.emptyTitle"]))
+        await capture(loaded, `copy-${locale}-review-empty`)
+        await refreshState(loaded, { review_brief: { enabled: true, entries: 0, writing: true } })
+        assert((await loaded.frame.locator(".tm-content").innerText()).includes(text["panel.review.writingHint"]))
+        assert(await loaded.frame.getByRole("button", { name: text["panel.review.writing"], exact: true }).isDisabled())
+        await capture(loaded, `copy-${locale}-review-writing`)
+        await refreshState(loaded, { review_brief: { enabled: true, entries: 0, writing: false, last_result: { ts: "qa-failed", written: false } } })
+        assert((await loaded.frame.locator(".tm-content").innerText()).includes(text["panel.review.lastFailed"]))
+        const outcomes = [
+          [{ accepted: true }, "panel.review.accepted"],
+          [{ reason: "already_writing" }, "panel.review.alreadyWriting"],
+          [{ reason: "not_enough_material", turns: 3, min_turns: 10 }, "panel.review.notEnoughMaterial"],
+        ]
+        for (const [result, key] of outcomes) {
+          await loaded.page.evaluate(value => { window.qaResults.write_review_now = value }, result)
+          await loaded.frame.getByRole("button", { name: text["panel.review.writeNow"], exact: true }).click()
+          await loaded.frame.waitForTimeout(90)
+          const expected = text[key].replace("{turns}", "3").replace("{min_turns}", "10")
+          assert((await loaded.frame.locator(".neko-toast").allTextContents()).some(value => value.includes(expected)), key)
+        }
+        const entry = makeFixture(sources.messages, { locale, intros: sources.intros }).review[0]
+        await loaded.page.evaluate(value => { window.qaFixture.review = [value] }, entry)
+        await refreshState(loaded, { review_brief: { enabled: true, entries: 1, writing: false } })
+        await loaded.frame.waitForSelector(".tmb-meter")
+        assert(!/\{(?:n|total|d)\}/.test(await loaded.frame.locator(".tmb-meter").innerText()))
+        await capture(loaded, `copy-${locale}-review-progress`)
+      })
+      await check(`copy-${locale}-toggle-confirm-and-cancel`, async () => {
+        await loaded.frame.waitForFunction(() => document.querySelectorAll(".neko-toast").length === 0)
+        const before = await calls(loaded.page, "toggle")
+        await loaded.frame.locator(".tm-statusbar .tm-sw-track").click()
+        await loaded.frame.waitForSelector(".neko-modal")
+        assert((await loaded.frame.locator(".neko-modal").innerText()).includes(text["actions.toggle.confirm"]))
+        await capture(loaded, `copy-${locale}-toggle-confirm`)
+        await loaded.frame.getByRole("button", { name: text["panel.cancel"], exact: true }).last().click()
+        assert.equal(await calls(loaded.page, "toggle"), before)
+        await loaded.frame.locator(".tm-statusbar .tm-sw-track").click()
+        await loaded.frame.getByRole("button", { name: text["panel.confirm"], exact: true }).last().click()
+        await loaded.frame.waitForSelector(".neko-modal", { state: "detached" })
+        assert.equal(await calls(loaded.page, "toggle"), before + 1)
+      })
+      await check(`copy-${locale}-dependency-placeholder`, async () => {
+        await loaded.frame.locator(".tm-tab").nth(TABS.indexOf("features")).click()
+        const caps = await loaded.page.evaluate(() => {
+          const caps = window.qaFixture.context.state.capabilities
+          const cap = caps.capabilities.find(value => value.id === "activity_sense")
+          cap.enabled = false
+          cap.source = "upstream_off"
+          cap.blocked_by = ["whisper"]
+          return caps
+        })
+        await refreshState(loaded, { capabilities: caps })
+        const body = await loaded.frame.locator(".tm-content").innerText()
+        assert(body.includes(text["panel.features.hint.upstream"].replace("{deps}", text["panel.features.cap.whisper.label"])))
+        assert(!body.includes("{deps}"))
+        await capture(loaded, `copy-${locale}-features-dependency`)
+      })
+      await check(`copy-${locale}-destructive-confirmation-cancel`, async () => {
+        await loaded.frame.locator(".tm-tab").nth(TABS.indexOf("settings")).click()
+        const before = await calls(loaded.page, "reset_all")
+        await loaded.frame.getByRole("button", { name: text["actions.reset.label"], exact: true }).click()
+        await loaded.frame.waitForSelector(".neko-modal")
+        assert((await loaded.frame.locator(".neko-modal").innerText()).includes(text["actions.reset.confirm"]))
+        await capture(loaded, `copy-${locale}-reset-confirm`)
+        await loaded.frame.getByRole("button", { name: text["panel.cancel"], exact: true }).last().click()
+        assert.equal(await calls(loaded.page, "reset_all"), before)
+      })
+    } finally { await loaded.context.close() }
+    const skipped = await loadPage(browser, origin, { locale, wizard: "true", wallpaper: "none" }, 390, 600, "light")
+    try {
+      await check(`copy-${locale}-guide-can-be-skipped`, async () => {
+        await skipped.frame.getByRole("button", { name: text["onboarding.wizard.skip"], exact: true }).click()
+        await skipped.frame.waitForSelector(".neko-modal", { state: "detached" })
+        assert.equal(await calls(skipped.page, "set_onboarding"), 1)
+        const action = await skipped.page.evaluate(() => window.qaMessages.find(message => message.method === "call" && message.payload.actionId === "set_onboarding"))
+        assert.equal(action.payload.args.action, "skip")
+      })
+    } finally { await skipped.context.close() }
+  }
+  return { screenshots, checks }
+}
+
 function isolatedTypecheck(pluginRoot, hostRoot) {
   const typescript = loadDependency("typescript")
   const scratch = mkdtempSync(join(tmpdir(), "neko-companion-hosted-typecheck-"))
@@ -1121,7 +1307,7 @@ async function main() {
     let browser
     try {
       browser = await chromium.launch(launch)
-      if (!process.argv.includes("--interactions-only") && !process.argv.includes("--diagnostics-only") && !process.argv.includes("--compact-only") && !process.argv.includes("--theme-only")) report.screenshots = await screenshotMatrix(browser, sources, origin, output)
+      if (!process.argv.includes("--interactions-only") && !process.argv.includes("--diagnostics-only") && !process.argv.includes("--compact-only") && !process.argv.includes("--theme-only") && !process.argv.includes("--copy-only")) report.screenshots = await screenshotMatrix(browser, sources, origin, output)
       if (process.argv.includes("--details")) report.screenshots.push(...await detailScreenshots(browser, origin, output))
       if (process.argv.includes("--calendar-diagnostics")) report.calendarDiagnostics = await calendarDiagnostics(browser, origin, output)
       if (process.argv.includes("--interactions") || process.argv.includes("--interactions-only")) {
@@ -1130,6 +1316,11 @@ async function main() {
       }
       if (process.argv.includes("--compact") || process.argv.includes("--compact-only")) report.interactions.push(...await compactAndFooterChecks(browser, origin, output))
       if (process.argv.includes("--theme") || process.argv.includes("--theme-only")) report.interactions.push(...await themeChecks(browser, origin, output))
+      if (process.argv.includes("--copy") || process.argv.includes("--copy-only")) {
+        const copy = await copyChecks(browser, sources, origin, output)
+        report.screenshots.push(...copy.screenshots)
+        report.interactions.push(...copy.checks)
+      }
     } finally {
       if (browser) await browser.close()
       await new Promise(resolvePromise => server.close(resolvePromise))
@@ -1139,9 +1330,10 @@ async function main() {
   writeFileSync(reportPath, JSON.stringify(report, null, 2))
   const failures = report.interactions.filter(item => !item.passed).length + (report.typecheck && !report.typecheck.passed ? 1 : 0)
   const runtimeFailures = report.screenshots.filter(item => item.errors.length || item.diagnostics.length || item.layout.errorNodes.length).length
+  const layoutFailures = report.screenshots.filter(item => item.layout.documentOverflow > 2 || item.layout.contentOverflow > 2 || item.layout.issues.length).length
   console.log(`REPORT ${reportPath}`)
-  console.log(`SUMMARY ${report.screenshots.length} screenshots, ${report.interactions.length} interaction checks, ${failures} check failures, ${runtimeFailures} render failures`)
-  process.exitCode = failures || runtimeFailures ? 1 : 0
+  console.log(`SUMMARY ${report.screenshots.length} screenshots, ${report.interactions.length} interaction checks, ${failures} check failures, ${runtimeFailures} render failures, ${layoutFailures} layout failures`)
+  process.exitCode = failures || runtimeFailures || layoutFailures ? 1 : 0
 }
 
 main().catch(error => { console.error(error.stack); process.exitCode = 1 })

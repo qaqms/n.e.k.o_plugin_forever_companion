@@ -66,10 +66,10 @@ type LlmBadge = { key: string; def: string; tone: "warning" | "success" | "defau
 type LlmBadgeMap = Record<string, LlmBadge>
 
 export const LLM_BADGES: LlmBadgeMap = {
-  tool: { key: "panel.features.llm.tool", def: "LLM 工具", tone: "warning" },
+  tool: { key: "panel.features.llm.tool", def: "模型工具", tone: "warning" },
   direct: { key: "panel.features.llm.direct", def: "直连模型", tone: "warning" },
   host_http: { key: "panel.features.llm.host", def: "宿主模型", tone: "warning" },
-  injection: { key: "panel.features.llm.injection", def: "上下文注入", tone: "default" },
+  injection: { key: "panel.features.llm.injection", def: "后台提示", tone: "default" },
   none: { key: "panel.features.llm.local", def: "纯本地", tone: "success" },
 }
 
@@ -155,11 +155,11 @@ export function CapIntroView(props: CapIntroViewProps) {
                 <div className="tm-ci-chips">
                   {deps.length ? deps.map((d) => (
                     <span key={d} className="tm-ci-chip" data-tone="dep">
-                      {t("panel.capintro.depUpstream", { defaultValue: "上游功能" })} · {capLabel(d)}
+                      {t("panel.capintro.depUpstream", { defaultValue: "所需功能" })} · {capLabel(d)}
                     </span>
                   )) : (
                     <span className="tm-ci-chip" data-tone="none">
-                      {t("panel.capintro.depsNone", { defaultValue: "无上游功能依赖" })}
+                      {t("panel.capintro.depsNone", { defaultValue: "不依赖其他功能" })}
                     </span>
                   )}
                   {configKeys.map((k) => (
@@ -169,7 +169,7 @@ export function CapIntroView(props: CapIntroViewProps) {
                   ))}
                   {tools.length ? (
                     <span className="tm-ci-chip" data-tone="tool" title={tools.join("  ·  ")}>
-                      {t("panel.capintro.toolsCount", { defaultValue: "占用 {n} 个模型工具", n: tools.length })}
+                      {t("panel.capintro.toolsCount", { defaultValue: "提供 {n} 个模型工具", n: tools.length })}
                     </span>
                   ) : null}
                 </div>
@@ -178,7 +178,7 @@ export function CapIntroView(props: CapIntroViewProps) {
           </div>
 
           <section className="tm-ci-sec">
-            <h4 className="tm-ci-h">{t("panel.capintro.flowTitle", { defaultValue: "原理演示" })}</h4>
+            <h4 className="tm-ci-h">{t("panel.capintro.flowTitle", { defaultValue: "处理流程" })}</h4>
             <IntroFlow t={t} nodes={(intro.flow || []) as IntroFlowNode[]} />
           </section>
         </div>

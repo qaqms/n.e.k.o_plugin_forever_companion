@@ -43,8 +43,11 @@ node tools\hosted_ui_harness.mjs --interactions-only --gallery --compact --detai
 # Wallpaper palette linking, fallback, caching, and narrow swatch checks only.
 node tools\hosted_ui_harness.mjs --theme-only --out "$env:TEMP\neko-companion-ui-theme"
 
+# Eight-locale guide, real introductions, diary states and confirmations.
+node tools\hosted_ui_harness.mjs --copy-only --out "$env:TEMP\neko-companion-ui-copy"
+
 # Complete delivery run, including wallpaper theme regressions.
-node tools\hosted_ui_harness.mjs --full --typecheck --interactions --gallery --compact --details --theme --calendar-diagnostics --out "$env:TEMP\neko-companion-ui-delivery"
+node tools\hosted_ui_harness.mjs --full --typecheck --interactions --gallery --compact --details --theme --calendar-diagnostics --copy --out "$env:TEMP\neko-companion-ui-delivery"
 
 # Typecheck only, using a temporary copy of the host's supported scaffold.
 node tools\hosted_ui_harness.mjs --typecheck --typecheck-only --out "$env:TEMP\neko-companion-ui-types"
@@ -83,14 +86,27 @@ at rest and on hover, keyboard focus visibility/contrast, and the separation
 of soft fill colors from readable ink in both themes and two widths.
 `--calendar-diagnostics` measures calendar overflow with and without tooltip
 boxes in the isolated DOM and captures the actual hovered tooltip.
+`--copy` checks all six onboarding steps and all ten real introductions in
+eight locales, two widths and both themes. It also checks diary empty states,
+optional writing invitations, generated-review states and results, dependency
+interpolation, master-switch confirmation/cancellation, destructive-operation
+cancellation, and skipping the guide. `--copy-only` skips the base matrix;
+`--copy-locales zh-CN,en` limits just this suite during development.
+
+Introduction fixtures come from the real `core/capabilities.py` and
+`core/intros.py` declarations, loaded with Python's `runpy`, not placeholder
+prose. The harness uses the plugin's development Python when present, or
+`python` on PATH. This reads pure data modules only; it does not import or
+start the plugin backend.
 
 ## Results And Limits
 
 Every completed run writes `report.json` alongside its PNG screenshots. The
 report includes the real source hash, runtime import graph and byte budget,
 layout diagnostics, browser/runtime errors, interaction results, and optional
-host-supported typecheck output. Failed interaction, typecheck, or runtime
-checks return a nonzero exit code.
+host-supported typecheck output. Failed interaction, typecheck, runtime, or
+layout checks return a nonzero exit code. Content/document horizontal overflow
+and clipped text are part of the layout gate.
 
 The fixture uses the real sandboxed iframe and `postMessage` API transport, but
 its backend responses are intentionally synthetic. Host file permissions,
@@ -166,3 +182,61 @@ changing UI source. The final pre-release run passed all 530 Python tests,
 the CI-equivalent Ruff check, the official plugin check, the 26-module link
 check, and the isolated host-supported typecheck. The frozen UI source hash
 and full browser regression results above remain applicable.
+
+## Unreleased Clear-Copy Verification (1.3.3)
+
+The final 2026-10-03 run passed 528 reported screenshots, 201 interaction
+checks, four calendar diagnostics, and the host-supported typecheck. Including
+interaction captures, the output contains 601 PNG files. Check, render, and
+layout failures are all zero. Content/document horizontal overflow and clipped
+text are included in the layout gate.
+
+The copy suite covers all six guide steps and ten real capability introductions
+in eight locales, both themes and 1280/390 widths. It also covers diary empty
+states, optional journal invitations, generated-review progress/results,
+dependency interpolation, master-switch and destructive-operation cancellation,
+and skipping onboarding. Narrow feature layouts were manually inspected after
+fixing the grid's minimum width for longer Spanish, Portuguese and Russian text.
+Wallpaper, gallery, compact reading/save bars, and existing theme checks remain
+passing.
+
+Dependencies total 25 files / 368,647 bytes, below the 32-file / 512-KiB limits.
+UI source hash:
+`39b6b7bbb5156ccef7b12a34449fba7572a53371e40d2e893a16ab9a084fbca4`.
+The Python suite passed all 557 tests, including 27 copy-contract cases. Ruff,
+the official plugin check, and the 26-module link check passed. The official
+check's uncommitted-worktree warning is expected for this local test delivery.
+
+Package: `forever_companion_1.3.3_clear_copy.neko-plugin`, 583,895 bytes /
+72 entries. Official payload hash and ZIP CRC verification passed. All 67
+packaged source files match the checkout byte-for-byte: 28 UI files, 23 Python
+files, eight locales, and the remaining manifest/configuration/documentation
+files. No user data, tests, tools, dependencies, or caches are included.
+SHA-256:
+`87ec474bc08472646407f2769804c57e79aee2b7f7e87067793623ad72e6edce`.
+
+Runtime Python, manifest settings, permissions, tool descriptions and metadata
+were separately checked for unchanged behavior. Guide version remains 2, so
+existing users are not forced through onboarding again. The host checkout and
+the original public 1.3.3 package remain unchanged. These are local fixture and
+package checks, not Steam import, persisted-data, or real-model verification;
+no commit, push, release, or market notification was performed.
+
+## 1.3.4 Release Promotion
+
+The author approved the clear-copy delivery for public version 1.3.4.
+Only version metadata, the README's current-version note, and release records
+change during promotion. The UI source is unchanged, so the frozen 528-screen /
+201-interaction browser results and source hash above remain applicable.
+The 1.3.3 clear-copy package remains a historical local test artifact and is not
+overwritten; the public 1.3.4 package is rebuilt from the release commit.
+
+The repository's reusable GitHub release workflow validates, tests, builds and
+publishes a GitHub Release. Its market-release check enforces repository/tag
+conventions and writes evidence only; no plugin-market registration, submission,
+or notification endpoint is invoked.
+
+After the version change, all 557 Python tests passed again, along with the
+CI-equivalent pinned Ruff check, official strict plugin check, isolated
+host-supported typecheck and 26-module link check. The UI source hash remains
+`39b6b7bbb5156ccef7b12a34449fba7572a53371e40d2e893a16ab9a084fbca4`.

@@ -138,7 +138,7 @@ export function DiaryPane(props: {
         const fetched = await onLoadReviewArchive()
         if (fetched === null) {
           // 与藏书阁同款：拉不到当场说清，不演"点了没反应"
-          toast.error(t("panel.review.archiveLoadError", { defaultValue: "没能取到旧卷宗（通道不可用），稍后再点一次试试" }))
+          toast.error(t("panel.review.archiveLoadError", { defaultValue: "归档加载失败，请稍后重试" }))
           return
         }
         list = fetched
@@ -146,7 +146,7 @@ export function DiaryPane(props: {
         setReviewArchiveLoaded(true)
       } catch (err) {
         console.warn("[forever_companion] load review archive failed:", err)
-        toast.error(t("panel.review.archiveLoadError", { defaultValue: "没能取到旧卷宗（通道不可用），稍后再点一次试试" }))
+        toast.error(t("panel.review.archiveLoadError", { defaultValue: "归档加载失败，请稍后重试" }))
         return
       } finally {
         setReviewArchiveLoading(false)
@@ -243,7 +243,7 @@ export function DiaryPane(props: {
         const fetched = await onLoadJournalArchive()
         if (fetched === null) {
           // 面板不再"点了没反应"：拉取失败当场说清（1.3.0 真机验收反馈背锅位）
-          toast.error(t("panel.journal.archiveLoadError", { defaultValue: "没能取到合订本（通道不可用），稍后再点一次试试" }))
+          toast.error(t("panel.journal.archiveLoadError", { defaultValue: "归档加载失败，请稍后重试" }))
           return
         }
         list = fetched
@@ -251,7 +251,7 @@ export function DiaryPane(props: {
         setArchiveLoaded(true)
       } catch (err) {
         console.warn("[forever_companion] load journal archive failed:", err)
-        toast.error(t("panel.journal.archiveLoadError", { defaultValue: "没能取到合订本（通道不可用），稍后再点一次试试" }))
+        toast.error(t("panel.journal.archiveLoadError", { defaultValue: "归档加载失败，请稍后重试" }))
         return
       } finally {
         setArchiveLoading(false)
@@ -280,7 +280,7 @@ export function DiaryPane(props: {
                   <div className="tm-diary">
                     <div className="tm-diary-toolbar">
                       <span className="tm-diary-count">
-                        {t("panel.diary.summary", { defaultValue: "共 {total} 条 · 她手写 {self} · 自动碎片 {auto}" })
+                        {t("panel.diary.summary", { defaultValue: "共 {total} 条 · 手记 {self} · 对话片段 {auto}" })
                           .replace("{total}", String(diaryTotal))
                           .replace("{self}", String(diaryTotal - fragmentTotal))
                           .replace("{auto}", String(fragmentTotal))}
@@ -294,18 +294,18 @@ export function DiaryPane(props: {
                       <div className="tm-diary-more">
                         <Button onClick={() => { loadMore() }} disabled={diaryLoading}>
                           {diaryLoading
-                            ? t("panel.diary.loadingMore", { defaultValue: "翻找中…" })
+                            ? t("panel.diary.loadingMore", { defaultValue: "加载中…" })
                             : t("panel.diary.loadMore", { defaultValue: "加载更多" })}
                         </Button>
                       </div>
                     ) : (
-                      <div className="tm-diary-end">{t("panel.diary.endReached", { defaultValue: "已经翻到最早的一篇了" })}</div>
+                      <div className="tm-diary-end">{t("panel.diary.endReached", { defaultValue: "已显示全部记录" })}</div>
                     )}
                   </div>
                 ) : (
                   <EmptyState
-                    title={t("panel.diary.emptyTitle", { defaultValue: "日记本还是空的" })}
-                    description={t("panel.diary.emptyDesc", { defaultValue: "她主动写下的手记、以及小模型从对话里替她记下的重要片段，都会出现在这里。" })}
+                    title={t("panel.diary.emptyTitle", { defaultValue: "暂无时光记录" })}
+                    description={t("panel.diary.emptyDesc", { defaultValue: "这里会保存角色手记，以及从对话中提取的重要片段。" })}
                   />
                 )}
               </Card>
@@ -324,17 +324,17 @@ export function DiaryPane(props: {
                     {/* 刷新按钮已移除（1.2.5）：书页指纹（页码:段数:末笔时刻）随 5s
                         轮询自动检测，新页/续写都会自动重拉整本，无需手动刷新 */}
                     <Button tone="primary" onClick={onInviteJournal}>
-                      {t("panel.journal.invite", { defaultValue: "请她写一篇" })}
+                      {t("panel.journal.invite", { defaultValue: "邀请写日记" })}
                     </Button>
                   </span>
                 </div>
                 {invitePending ? (
                   <div className="tm-derived">
-                    {t("panel.journal.invitePending", { defaultValue: "邀请已递出，正等她落笔——她说写就写、说缓就缓，下一页会自己出现在这里。" })}
+                    {t("panel.journal.invitePending", { defaultValue: "邀请已发送，等待角色决定是否写作。新内容保存后会显示在这里。" })}
                   </div>
                 ) : null}
                 <div className="tm-derived">
-                  {t("panel.journal.hint", { defaultValue: "她每隔一段时间自己写的一篇日记，只给你看；翻页看看她这段时间在想什么。" })}
+                  {t("panel.journal.hint", { defaultValue: "角色写下的近期感受，供你在面板翻阅。" })}
                 </div>
                 {visibleArchive ? (
                   <JournalBook
@@ -347,12 +347,12 @@ export function DiaryPane(props: {
                     onBack={() => { setOpenArchiveNo(null) }}
                     onPrev={() => { if (archIdx !== null && archIdx > 0) setOpenArchiveNo(archiveList[archIdx - 1].page_no || null) }}
                     onNext={() => { if (archIdx !== null && archIdx < archiveList.length - 1) setOpenArchiveNo(archiveList[archIdx + 1].page_no || null) }}
-                    archiveLabel={t("panel.journal.archiveBadge", { defaultValue: "藏书阁·合订本" })}
+                    archiveLabel={t("panel.journal.archiveBadge", { defaultValue: "已归档" })}
                   />
                 ) : bookLoaded && pages.length === 0 ? (
                   <EmptyState
-                    title={t("panel.journal.emptyTitle", { defaultValue: "还没有写过日记" })}
-                    description={t("panel.journal.emptyDesc", { defaultValue: "点右上角「请她写一篇」递个邀请；当她愿意写时，第一页会出现在这里。" })}
+                    title={t("panel.journal.emptyTitle", { defaultValue: "暂无个人日记" })}
+                    description={t("panel.journal.emptyDesc", { defaultValue: "角色写下的日记会显示在这里。也可以发送写作邀请，但不保证立即生成。" })}
                   />
                 ) : visiblePage ? (
                   <JournalBook
@@ -403,8 +403,8 @@ export function DiaryPane(props: {
                       disabled={reviewLoading || !!(reviewBrief && reviewBrief.writing)}
                     >
                       {reviewBrief && reviewBrief.writing
-                        ? t("panel.review.writing", { defaultValue: "正在写…" })
-                        : t("panel.review.writeNow", { defaultValue: "立即写一篇" })}
+                        ? t("panel.review.writing", { defaultValue: "生成中…" })
+                        : t("panel.review.writeNow", { defaultValue: "立即生成" })}
                     </Button>
                     <Button tone="danger" onClick={onClearReview}>
                       {t("panel.review.clear", { defaultValue: "清空" })}
@@ -413,7 +413,7 @@ export function DiaryPane(props: {
                 </div>
                 {reviewBrief && reviewBrief.writing ? (
                   <div className="tm-derived">
-                    {t("panel.review.writingHint", { defaultValue: "她正把这段时间写下来，写完会自动出现在这里，不用守着。" })}
+                    {t("panel.review.writingHint", { defaultValue: "后台模型正在整理近期互动，完成后会显示在这里。" })}
                   </div>
                 ) : null}
                 {/* 成文失败常驻兜底（1.3.0 第十一轮）：失败结论不能被 toast 时序
@@ -421,11 +421,11 @@ export function DiaryPane(props: {
                     清空（write_review_now 的作废逻辑），警示行随之消失 */}
                 {reviewBrief && !reviewBrief.writing && reviewBrief.last_result && !reviewBrief.last_result.written ? (
                   <div className="tm-derived">
-                    {t("panel.review.lastFailed", { defaultValue: "上一篇没写成，素材还留着，可以再点一次。" })}
+                    {t("panel.review.lastFailed", { defaultValue: "上次生成失败，素材已保留，可稍后重试。" })}
                   </div>
                 ) : null}
                 <div className="tm-derived">
-                  {t("panel.review.hint", { defaultValue: "对我的记录" })}
+                  {t("panel.review.hint", { defaultValue: "后台模型整理的相处记录，仅供回顾，不是对你的评分。" })}
                 </div>
                 {visibleReviewArchive ? (
                   <ReviewBook
@@ -438,7 +438,7 @@ export function DiaryPane(props: {
                     onBack={() => { setOpenReviewArchiveTs(null) }}
                     onPrev={() => { if (reviewArchIdx > 0) setOpenReviewArchiveTs(String(reviewArchive[reviewArchIdx - 1].ts || "")) }}
                     onNext={() => { if (reviewArchIdx >= 0 && reviewArchIdx < reviewArchive.length - 1) setOpenReviewArchiveTs(String(reviewArchive[reviewArchIdx + 1].ts || "")) }}
-                    archiveLabel={t("panel.review.archiveBadge", { defaultValue: "档案室·旧卷宗" })}
+                    archiveLabel={t("panel.review.archiveBadge", { defaultValue: "已归档" })}
                   />
                 ) : visibleReview ? (
                   <ReviewBook
@@ -468,7 +468,7 @@ export function DiaryPane(props: {
                         onOpen={openReviewArchive}
                         file
                         seal={t("panel.review.archiveSeal", { defaultValue: "档" })}
-                        tip={t("panel.review.archiveTip", { defaultValue: "攒满下架的旧卷宗都封存在这里——点开只读翻阅" })}
+                        tip={t("panel.review.archiveTip", { defaultValue: "查看已归档的相处记录，内容仅供阅读" })}
                       />
                     ) : null}
                   />
@@ -536,7 +536,7 @@ function DiaryRow(props: { key?: string; t: TFunc; item: DiaryItem; onDelete: (t
   return (
     <div className="tm-tl-row" data-source="self">
       <div className="tm-tl-head">
-        <span className="tm-tl-badge" data-kind="self">{t("panel.diary.selfBadge", { defaultValue: "她写" })}</span>
+        <span className="tm-tl-badge" data-kind="self">{t("panel.diary.selfBadge", { defaultValue: "角色手记" })}</span>
         {item.mood ? <span className="tm-tl-mood">{item.mood}</span> : null}
         <span className="tm-tl-ts">{fmtTs(item.ts)}</span>
       </div>
@@ -560,7 +560,7 @@ function JournalShelf(props: {
 }) {
   const { t, index, onOpen, loading, stack } = props
   if (!index.length) {
-    return <div className="tm-derived">{loading ? t("panel.journal.loading", { defaultValue: "翻开日记本…" }) : ""}</div>
+    return <div className="tm-derived">{loading ? t("panel.journal.loading", { defaultValue: "加载日记中…" }) : ""}</div>
   }
   return (
     <div className="tmb-shelf">
@@ -625,12 +625,12 @@ function JournalBook(props: {
     <div className="tmb-book">
       <div className="tmb-book-strip">
         <span className="tmb-book-stitch" />
-        <span className="tmb-book-title">{archiveLabel || t("panel.journal.spineTitle", { defaultValue: "她的日记" })}</span>
+        <span className="tmb-book-title">{archiveLabel || t("panel.journal.spineTitle", { defaultValue: "个人日记" })}</span>
       </div>
       <div className="tmb-page">
         <span className="tmb-ribbon" />
         <div className="tmb-head">
-          <span className="tmb-head-kicker">{t("panel.journal.kicker", { defaultValue: "她的手写" })}</span>
+          <span className="tmb-head-kicker">{t("panel.journal.kicker", { defaultValue: "角色日记" })}</span>
           <span className="tmb-head-no">
             {t("panel.journal.pageN", { defaultValue: "第 {n} 页" }).replace("{n}", String(page.page_no || ""))}
           </span>
@@ -664,7 +664,7 @@ function JournalBook(props: {
         </div>
         <div className="tmb-foot">
           <button type="button" className="tmb-btn" onClick={onBack}>
-            {t("panel.journal.backToShelf", { defaultValue: "← 放回书架" })}
+            {t("panel.journal.backToShelf", { defaultValue: "← 返回日记列表" })}
           </button>
           <span className="tmb-foot-mid">
             <button type="button" className="tmb-btn" onClick={onPrev} disabled={!hasPrev}>
@@ -735,11 +735,11 @@ function ReviewShelf(props: {
   if (!entries.length) {
     return loaded ? (
       <EmptyState
-        title={t("panel.review.emptyTitle", { defaultValue: "还没有写过评价" })}
-        description={t("panel.review.emptyDesc", { defaultValue: "攒够一段时间的相处素材后会自动写第一篇；也可以点右上角「立即写一篇」（至少需要 10 轮互动）。" })}
+        title={t("panel.review.emptyTitle", { defaultValue: "暂无相处记录" })}
+        description={t("panel.review.emptyDesc", { defaultValue: "积累足够的互动素材后会自动生成。也可点击「立即生成」（至少需要 10 轮互动）。结果由模型整理，可能存在偏差。" })}
       />
     ) : (
-      <div className="tm-derived">{loading ? t("panel.journal.loading", { defaultValue: "翻开日记本…" }) : ""}</div>
+      <div className="tm-derived">{loading ? t("panel.journal.loading", { defaultValue: "加载日记中…" }) : ""}</div>
     )
   }
   return (
@@ -747,13 +747,13 @@ function ReviewShelf(props: {
       <div className="tmb-meter">
         <div className="tmb-meter-row">
           <span>
-            {t("panel.review.progress", { defaultValue: "下一份素材：{n} / {total} 轮" })
+            {t("panel.review.progress", { defaultValue: "互动素材：{n} / {total} 轮" })
               .replace("{n}", String(turns))
               .replace("{total}", String(threshold))}
           </span>
           <span className="tmb-head-spacer" />
           {progress.due ? (
-            <span className="tmb-meter-due">{t("panel.review.dueNow", { defaultValue: "到时候了，会自己动笔" })}</span>
+            <span className="tmb-meter-due">{t("panel.review.dueNow", { defaultValue: "已达到生成条件，等待后台处理" })}</span>
           ) : null}
           <span>{pct}%</span>
         </div>
@@ -763,7 +763,7 @@ function ReviewShelf(props: {
         {/* 天数维度（1.3.0）：轮数没满但日子到了同样成文——两条门槛都要看得见 */}
         <div className="tmb-meter-row tmb-meter-row--sub">
           <span>
-            {t("panel.review.daysProgress", { defaultValue: "或满 {total} 天（现第 {d} 天）" })
+            {t("panel.review.daysProgress", { defaultValue: "或达到 {total} 天（目前第 {d} 天）" })
               .replace("{total}", String(daysThreshold))
               .replace("{d}", String(days))}
           </span>
@@ -839,19 +839,19 @@ function ReviewBook(props: {
     <div className="tmb-book">
       <div className="tmb-book-strip tmb-book-strip--file">
         <span className="tmb-book-holes" />
-        <span className="tmb-book-title tmb-book-title--file">{archiveLabel || t("panel.review.spineTitle", { defaultValue: "相处卷宗" })}</span>
+        <span className="tmb-book-title tmb-book-title--file">{archiveLabel || t("panel.review.spineTitle", { defaultValue: "相处记录" })}</span>
       </div>
       <div className="tmb-page tmb-page--file">
         <div className="tmb-file-cols">
           <div className="tmb-file-main">
-            <div className="tmb-file-title">{t("panel.review.docTitle", { defaultValue: "关于这段时间的记录" })}</div>
+            <div className="tmb-file-title">{t("panel.review.docTitle", { defaultValue: "近期相处记录" })}</div>
             {paras.map((para, pi) => (
               <div className="tmb-text tmb-text--file" key={String(pi)}>{para}</div>
             ))}
           </div>
           <aside className="tmb-file-aside">
             <div className="tmb-file-date">{String(entry.ts || "").slice(0, 10) || t("panel.journal.noDate", { defaultValue: "未注明日期" })}</div>
-            <div className="tmb-file-kicker">{t("panel.review.kicker", { defaultValue: "第三者记录" })} · {t("panel.review.tipComposed", { defaultValue: "成文" })}</div>
+            <div className="tmb-file-kicker">{t("panel.review.kicker", { defaultValue: "相处记录" })} · {t("panel.review.tipComposed", { defaultValue: "生成" })}</div>
             <div className="tmb-file-rows">
               <div className="tmb-file-row">
                 <span>{t("panel.review.fieldSpan", { defaultValue: "统计区间" })}</span>
@@ -862,22 +862,22 @@ function ReviewBook(props: {
                 <b>{turns}</b>
               </div>
               <div className="tmb-file-row">
-                <span>{t("panel.review.fieldSelfActions", { defaultValue: "她自主起的情绪" })}</span>
+                <span>{t("panel.review.fieldSelfActions", { defaultValue: "自主情绪次数" })}</span>
                 <b>{selfActions}</b>
               </div>
             </div>
             {hasEvidence ? (
               <div className="tmb-evidence">
-                <div className="tmb-evidence-title">{t("panel.review.evidence", { defaultValue: "本卷依据" })}</div>
+                <div className="tmb-evidence-title">{t("panel.review.evidence", { defaultValue: "参考素材" })}</div>
                 {toneParts.length ? (
                   <div className="tmb-evidence-line">
-                    <span className="tmb-evidence-label">{t("panel.review.evidenceTone", { defaultValue: "她的语气分布" })}</span>
+                    <span className="tmb-evidence-label">{t("panel.review.evidenceTone", { defaultValue: "语气分布" })}</span>
                     <span className="tmb-evidence-value">{toneParts.join(" · ")}</span>
                   </div>
                 ) : null}
                 {moodAvg !== null ? (
                   <div className="tmb-evidence-line">
-                    <span className="tmb-evidence-label">{t("panel.review.evidenceMood", { defaultValue: "她的心情走向" })}</span>
+                    <span className="tmb-evidence-label">{t("panel.review.evidenceMood", { defaultValue: "心情趋势" })}</span>
                     <span className="tmb-evidence-value">
                       {t(journalTrendKey(moodAvg), { defaultValue: "" })}（{moodAvg >= 0 ? "+" : ""}{moodAvg.toFixed(2)}）
                     </span>
@@ -892,21 +892,21 @@ function ReviewBook(props: {
               </div>
             ) : null}
             <div className="tmb-file-sign">
-              <span className="tmb-seal">{t("panel.review.seal", { defaultValue: "观察者记" })}</span>
+              <span className="tmb-seal">{t("panel.review.seal", { defaultValue: "相处小结" })}</span>
             </div>
           </aside>
         </div>
         <div className="tmb-foot">
           <button type="button" className="tmb-btn" onClick={onBack}>
-            {t("panel.review.backToShelf", { defaultValue: "← 放回架上" })}
+            {t("panel.review.backToShelf", { defaultValue: "← 返回日记列表" })}
           </button>
           <span className="tmb-foot-mid">
             <button type="button" className="tmb-btn" onClick={onPrev} disabled={!hasPrev}>
-              {t("panel.review.prevFile", { defaultValue: "前一卷" })}
+              {t("panel.review.prevFile", { defaultValue: "上一篇" })}
             </button>
             <span className="tmb-ind">{position} / {totalFiles}</span>
             <button type="button" className="tmb-btn" onClick={onNext} disabled={!hasNext}>
-              {t("panel.review.nextFile", { defaultValue: "后一卷" })}
+              {t("panel.review.nextFile", { defaultValue: "下一篇" })}
             </button>
           </span>
         </div>
@@ -999,11 +999,11 @@ function ArchiveStack(props: {
   const from = String(brief.first_ts || "").slice(0, 10)
   const to = String(brief.last_ts || "").slice(0, 10)
   const fullTip = [
-    tip || t("panel.journal.archiveTip", { defaultValue: "写满下架的旧页，合订在这一摞里——点开只读翻阅" }),
+    tip || t("panel.journal.archiveTip", { defaultValue: "查看已归档的个人日记，内容仅供阅读" }),
     from ? `${from} – ${to || "?"}` : "",
     loading ? (file
-      ? t("panel.review.archiveLoading", { defaultValue: "取旧卷宗…" })
-      : t("panel.journal.archiveLoading", { defaultValue: "取合订本…" })) : "",
+      ? t("panel.review.archiveLoading", { defaultValue: "加载归档中…" })
+      : t("panel.journal.archiveLoading", { defaultValue: "加载归档中…" })) : "",
   ].filter((p) => p).join(" · ")
   return (
     <button type="button" className={file ? "tmb-stack tmb-stack--file" : "tmb-stack"} title={fullTip} onClick={onOpen}>
@@ -1021,7 +1021,7 @@ function ArchiveStack(props: {
 // 不派生任何会随淘汰平移的序号
 function fileTip(t: TFunc, ts: string, span: string, turns: string): string {
   const parts: string[] = [
-    `${t("panel.review.tipComposed", { defaultValue: "成文" })} ${ts.slice(0, 10) || "--"}`,
+    `${t("panel.review.tipComposed", { defaultValue: "生成" })} ${ts.slice(0, 10) || "--"}`,
   ]
   if (span) parts.push(`${t("panel.review.fieldSpan", { defaultValue: "统计区间" })} ${span}`)
   parts.push(t("panel.review.turnsMeta", { defaultValue: "{n} 轮" }).replace("{n}", turns))

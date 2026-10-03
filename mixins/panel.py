@@ -865,8 +865,8 @@ class PanelEntriesMixin:
         })
 
     @ui.action(
-        label=tr("actions.set_anchor.label", default="设置潮汐首日"),
-        confirm=tr("actions.set_anchor.confirm", default="将重设周期首日、清除快进天数并重新计算阶段，确认？"),
+        label=tr("actions.set_anchor.label", default="设置周期起点"),
+        confirm=tr("actions.set_anchor.confirm", default="确定设置新的周期起点吗？快进天数会清零，并重新计算当前阶段。"),
         refresh_context=True,
     )
     @plugin_entry(
@@ -998,7 +998,7 @@ class PanelEntriesMixin:
 
     @ui.action(
         label=tr("actions.toggle.label", default="开/关模拟"),
-        confirm=tr("actions.toggle.confirm", default="切换身体节律模拟的总开关（当前角色），确认？"),
+        confirm=tr("actions.toggle.confirm", default="确定切换模拟总开关吗？"),
         refresh_context=True,
     )
     @plugin_entry(
@@ -1024,9 +1024,9 @@ class PanelEntriesMixin:
         })
 
     @ui.action(
-        label=tr("actions.reset.label", default="重置全部数据"),
+        label=tr("actions.reset.label", default="重置状态与记录"),
         tone="danger",
-        confirm=tr("actions.reset.confirm", default="将清空当前角色的周期偏移、情绪状态和心情手记，确认？"),
+        confirm=tr("actions.reset.confirm", default="确定重置当前角色的状态与记录吗？快进天数、情绪状态、时光日记，以及未归档的我的日记和累计素材都会清空，且无法恢复。模拟开关恢复默认设置；个人日记、归档和其他角色不受影响。"),
         refresh_context=True,
     )
     @plugin_entry(
@@ -1483,7 +1483,7 @@ class PanelEntriesMixin:
         })
 
     @ui.action(
-        label=tr("actions.invite_journal.label", default="请她写一篇日记"),
+        label=tr("actions.invite_journal.label", default="邀请写日记"),
         tone="primary",
         refresh_context=True,
     )
@@ -1512,9 +1512,9 @@ class PanelEntriesMixin:
         return Ok({"invited": True, "mode": deliver, "lanlan": lanlan})
 
     @ui.action(
-        label=tr("actions.delete_diary_item.label", default="删除这条碎片"),
+        label=tr("actions.delete_diary_item.label", default="删除这条片段"),
         tone="danger",
-        confirm=tr("actions.delete_diary_item.confirm", default="将删除这条自动记录的碎片，不可恢复，确认？"),
+        confirm=tr("actions.delete_diary_item.confirm", default="确定删除这条对话片段吗？删除后无法恢复。"),
         refresh_context=True,
     )
     @plugin_entry(
@@ -1550,7 +1550,7 @@ class PanelEntriesMixin:
         return Ok({"removed": removed, "lanlan": lanlan})
 
     @ui.action(
-        label=tr("actions.get_journal.label", default="翻看个人日记"),
+        label=tr("actions.get_journal.label", default="查看个人日记"),
         tone="default",
     )
     @plugin_entry(
@@ -1583,7 +1583,7 @@ class PanelEntriesMixin:
         return Ok({"pages": pages, "lanlan": lanlan, "scope": "archive" if want_archive else "shelf"})
 
     @ui.action(
-        label=tr("actions.get_journal_archive.label", default="翻阅藏书阁合订本"),
+        label=tr("actions.get_journal_archive.label", default="查看个人日记归档"),
         tone="default",
     )
     @plugin_entry(
@@ -1605,7 +1605,7 @@ class PanelEntriesMixin:
         return Ok({"pages": pages, "lanlan": lanlan})
 
     @ui.action(
-        label=tr("actions.get_review.label", default="翻看我的日记"),
+        label=tr("actions.get_review.label", default="查看我的日记"),
         tone="default",
     )
     @plugin_entry(
@@ -1658,7 +1658,7 @@ class PanelEntriesMixin:
         })
 
     @ui.action(
-        label=tr("actions.get_review_archive.label", default="翻阅档案室旧卷宗"),
+        label=tr("actions.get_review_archive.label", default="查看我的日记归档"),
         tone="default",
     )
     @plugin_entry(
@@ -1676,7 +1676,7 @@ class PanelEntriesMixin:
         return Ok({"entries": list(reversed(shard.review_archive)), "lanlan": lanlan})
 
     @ui.action(
-        label=tr("actions.write_review_now.label", default="立即写一篇"),
+        label=tr("actions.write_review_now.label", default="立即生成"),
         tone="primary",
         refresh_context=True,
     )
@@ -1732,7 +1732,7 @@ class PanelEntriesMixin:
     @ui.action(
         label=tr("actions.clear_review.label", default="清空我的日记"),
         tone="danger",
-        confirm=tr("actions.clear_review.confirm", default="将删除当前角色的全部「我的日记」评价（含档案室旧卷宗，累计素材一并清零），不可恢复，确认？"),
+        confirm=tr("actions.clear_review.confirm", default="确定清空当前角色的我的日记吗？所有记录（含归档）和累计素材都会删除，且无法恢复。"),
         refresh_context=True,
     )
     @plugin_entry(
@@ -1826,7 +1826,7 @@ class PanelEntriesMixin:
     @ui.action(
         label=tr("actions.clear_stats.label", default="清零相处统计"),
         tone="danger",
-        confirm=tr("actions.clear_stats.confirm", default="将清零当前角色的相处统计（相伴起点、里程碑、热力图与月报，三本日记不受影响），不可恢复，确认？"),
+        confirm=tr("actions.clear_stats.confirm", default="确定清零当前角色的相处统计吗？起点、里程碑、热力图和月报都会重置，且无法恢复。三本日记不受影响。"),
         refresh_context=True,
     )
     @plugin_entry(
@@ -1849,7 +1849,7 @@ class PanelEntriesMixin:
     @ui.action(
         label=tr("actions.clear_diary.label", default="清空时光日记"),
         tone="danger",
-        confirm=tr("actions.clear_diary.confirm", default="将删除当前角色的全部时光日记（手记与碎片），不可恢复，确认？"),
+        confirm=tr("actions.clear_diary.confirm", default="确定清空当前角色的时光日记吗？手记和对话片段都会删除，且无法恢复。"),
         refresh_context=True,
     )
     @plugin_entry(
@@ -1874,7 +1874,7 @@ class PanelEntriesMixin:
         tone="danger",
         confirm=tr(
             "actions.prune_lanlan.confirm",
-            default="将删除该角色残留的周期、情绪与手记数据，不可恢复，确认？",
+            default="确定清除这个角色的残留数据吗？周期、情绪、日记和旧版周记都会删除，且无法恢复。",
         ),
         refresh_context=True,
     )

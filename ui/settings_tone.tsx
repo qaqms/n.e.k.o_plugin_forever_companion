@@ -49,7 +49,7 @@ export function ChannelSettingsCard(props: {
   // 对这两条要自定义 prompt 的通道无意义），emotion 槽只由语气分析那张卡暴露
   const directSlots = allSlots.filter((opt) => String(opt.value) !== DEFAULT_SLOT_SENTINEL && String(opt.value) !== "emotion")
   const modeOptions = [
-    { value: MODE_HOST, label: t("panel.settings.channelModeHost", { defaultValue: "宿主（开箱即用）" }) },
+    { value: MODE_HOST, label: t("panel.settings.channelModeHost", { defaultValue: "通过宿主" }) },
     { value: MODE_CUSTOM, label: t("panel.settings.channelModeCustom", { defaultValue: "自定义直连" }) },
   ]
 
@@ -68,7 +68,7 @@ export function ChannelSettingsCard(props: {
       <ChannelRow
         t={t}
         label={t("panel.settings.channelTone", { defaultValue: "语气分析" })}
-        hint={t("panel.settings.channelToneHint", { defaultValue: "默认跟随宿主情感模型（经宿主端点调用，免费路由下也可用）；选其他槽位时改为插件直连" })}
+        hint={t("panel.settings.channelToneHint", { defaultValue: "默认通过宿主调用情感模型；选择其他槽位时改为直连。互动文本可能发送给配置的模型服务。" })}
         light={channelLight(t, toneCh, form.emotion_sense_enabled)}
       >
         <Select
@@ -83,7 +83,7 @@ export function ChannelSettingsCard(props: {
       {/* 碎片提取：默认复用宿主管线，可切自定义直连 */}
       <ChannelRow
         t={t}
-        label={t("panel.settings.channelFragments", { defaultValue: "碎片提取" })}
+        label={t("panel.settings.channelFragments", { defaultValue: "对话片段提取" })}
         hint={channelHint(t, form.fragments_mode)}
         light={channelLight(t, fragCh, form.fragments_enabled, form.fragments_mode || MODE_HOST)}
       >
@@ -98,7 +98,7 @@ export function ChannelSettingsCard(props: {
       {/* 我的日记成文：与碎片提取同款通道 */}
       <ChannelRow
         t={t}
-        label={t("panel.settings.channelReview", { defaultValue: "我的日记成文" })}
+        label={t("panel.settings.channelReview", { defaultValue: "我的日记生成" })}
         hint={channelHint(t, form.review_mode)}
         light={channelLight(t, reviewCh, form.review_enabled, form.review_mode || MODE_HOST)}
       >
@@ -118,10 +118,10 @@ export function ChannelSettingsCard(props: {
           只在说明里讲清"还有一道在代码里"。5/150/20 三个字面量与后端同值，
           由 test_ui_budget_input_range_matches_backend_bounds / 出厂值同源门钉住 */}
       <div className="tm-derived">
-        {t("panel.settings.agentBudgetHelp", { defaultValue: "碎片提取与我的日记成文只要走 agent 槽就合记这一份当日计数（按角色分账），用完即休眠到次日。宿主免费路由的 agent 档带服务端日配额（500 次/天），而且宿主自己的 agent 功能花的是同一个池子——推荐 5~50，最多 150。另有一道 300 秒间隔地板在代码里，配置写更小也不生效。" })}
+        {t("panel.settings.agentBudgetHelp", { defaultValue: "对话片段和我的日记使用 agent 模型时，共享此上限，按角色分别计数；用完后次日恢复。可设为 5～150 次，建议 5～50 次。调用间隔至少 300 秒，宿主服务还可能有额外额度限制。" })}
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <span>{t("panel.settings.agentBudget", { defaultValue: "agent 档每日预算" })}</span>
+        <span>{t("panel.settings.agentBudget", { defaultValue: "agent 模型每日调用上限" })}</span>
         <NumberInput
           value={form.agent_daily_budget}
           min={5}
@@ -142,7 +142,7 @@ export function ChannelSettingsCard(props: {
           免费路由，或宿主模式回落到直连后仍拼不出端点——其余状态各灯自己解释 */}
       {isFreeRoute(fragCh) || isFreeRoute(reviewCh) ? (
         <div className="tm-channel-warn">
-          {t("panel.settings.freeRouteWarn", { defaultValue: "直连通道要从宿主本地配置拼出端点，而免费路由的端点与模型名并不写在配置里，所以拼不出可用端点、功能休眠。想零配置跑通：把上方槽位换成「agent」（会占用宿主 agent 功能的当日额度）；或先在宿主设置里配置自己的 API 服务商。" })}
+          {t("panel.settings.freeRouteWarn", { defaultValue: "免费路由不支持自定义直连。可选择通过宿主使用 agent 模型（受宿主调用额度限制），或在宿主中配置自己的模型服务。" })}
         </div>
       ) : null}
     </Card>
@@ -152,8 +152,8 @@ export function ChannelSettingsCard(props: {
 // 通道说明文案：两种模式的代价/收益不同，说清各自那一句
 function channelHint(t: TFunc, mode: string | undefined): string {
   return (mode || MODE_HOST) === MODE_CUSTOM
-    ? t("panel.settings.channelHintCustom", { defaultValue: "插件读宿主本地配置直连该槽端点；该槽未配模型、或宿主在用免费路由时拼不出可用端点，功能自动休眠" })
-    : t("panel.settings.channelHintHost", { defaultValue: "复用宿主自己的模型管线（与宿主内置插件同一条路）：端点与客户端身份都由宿主给出，插件不读你的配置文件。能不能真用起来还要看服务端放行哪一档——免费路由下目前只有「agent」槽实测可通" })
+    ? t("panel.settings.channelHintCustom", { defaultValue: "读取宿主本地模型配置，直接调用所选服务。未配置模型或使用免费路由时，直连功能不可用。" })
+    : t("panel.settings.channelHintHost", { defaultValue: "通过宿主模型通道调用，默认使用 agent 槽位。可用性取决于宿主配置和服务权限；通道不可用时可能尝试直连。" })
 }
 
 // 通道行：名称 + 状态灯 + 说明 + 槽位/通道下拉
@@ -185,20 +185,20 @@ function channelLight(
   }
   if (!ch) return { cls: "tm-light-ok", text: t("panel.channel.ok", { defaultValue: "正常" }) }
   if (ch.dormant_reason === "free_route") {
-    return { cls: "tm-light-dormant", text: t("panel.channel.freeRoute", { defaultValue: "免费路由 · 直连不可用" }) }
+    return { cls: "tm-light-dormant", text: t("panel.channel.freeRoute", { defaultValue: "免费路由不支持直连" }) }
   }
   if (ch.dormant_reason === "no_model") {
-    return { cls: "tm-light-dormant", text: t("panel.channel.noModel", { defaultValue: "槽位未配模型 · 休眠" }) }
+    return { cls: "tm-light-dormant", text: t("panel.channel.noModel", { defaultValue: "未配置模型" }) }
   }
   // 端点解析得到、真发出去却被服务端连着拒 → 已熔断（不再发请求）。这一档必须单独
   // 有灯：1.3.3 实机就是"解析成功=绿灯 + 15 次静默失败"，用户看不出任何异常
   if (ch.dormant_reason === "rejected") {
-    return { cls: "tm-light-dormant", text: t("panel.channel.rejected", { defaultValue: "服务端拒了 · 已熔断" }) }
+    return { cls: "tm-light-dormant", text: t("panel.channel.rejected", { defaultValue: "请求被拒绝 · 通道已暂停" }) }
   }
   // 当日 agent 档预算用完：这是我们自己按下不发（不是故障），说明与"改路"无关，
   // 所以不和 rejected 共用文案，免得用户以为服务端把他拒了
   if (ch.dormant_reason === "budget") {
-    return { cls: "tm-light-dormant", text: t("panel.channel.budget", { defaultValue: "今日额度已用完 · 休眠" }) }
+    return { cls: "tm-light-dormant", text: t("panel.channel.budget", { defaultValue: "今日额度已用完 · 次日恢复" }) }
   }
   if (ch.dormant_reason === "disabled") {
     return { cls: "tm-light-off", text: t("panel.channel.off", { defaultValue: "未启用" }) }
@@ -207,7 +207,7 @@ function channelLight(
   // 如实说——否则"正常"灯会藏住一次静默回落。反之 mode=custom 走 direct 是用户自己
   // 选的，报"回落"就等于把一次正常配置说成故障，所以这里必须带上 mode 判据。
   if (mode === MODE_HOST && ch.transport === "direct") {
-    return { cls: "tm-light-dormant", text: t("panel.channel.fellBackDirect", { defaultValue: "宿主管线未生效 · 已回落直连" }) }
+    return { cls: "tm-light-dormant", text: t("panel.channel.fellBackDirect", { defaultValue: "宿主通道不可用 · 已改用直连" }) }
   }
   return { cls: "tm-light-ok", text: t("panel.channel.ok", { defaultValue: "正常" }) }
 }

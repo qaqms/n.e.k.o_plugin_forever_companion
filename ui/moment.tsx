@@ -41,7 +41,7 @@ export function MomentPane(props: {
       </Card>
 
       {/* ---- 我们的一月 ---- */}
-      <Card title={t("panel.stats.monthReport", { defaultValue: "我们的一月" })}>
+      <Card title={t("panel.stats.monthReport", { defaultValue: "月度小结" })}>
         <MonthNav
           t={t}
           month={month}
@@ -83,14 +83,14 @@ function SummaryHero(props: { t: TFunc; summary?: StatsSummary; lanlan?: string 
   const ringPct = Math.max(0, Math.min(1, progress)) * 100
   const ringStyle = { background: `conic-gradient(rgb(245, 176, 77) ${ringPct}%, rgba(148, 163, 184, 0.22) 0)` }
   const daysHint = lanlan
-    ? t("panel.stats.sum.daysHint", { defaultValue: "自你们的第一句互动起算（跟随 {n}）" }).replace("{n}", String(lanlan))
-    : t("panel.stats.sum.daysHintPlain", { defaultValue: "自你们的第一句互动起算" })
+    ? t("panel.stats.sum.daysHint", { defaultValue: "从首次互动起算（时区：{n}）" }).replace("{n}", String(lanlan))
+    : t("panel.stats.sum.daysHintPlain", { defaultValue: "从首次互动起算" })
   const cells = [
     {
       key: "turns",
       value: String(s.total_turns ?? 0),
       label: t("panel.stats.sum.turns", { defaultValue: "互动轮数" }),
-      hint: t("panel.stats.sum.turnsHint", { defaultValue: "你发给她的消息总数" }),
+      hint: t("panel.stats.sum.turnsHint", { defaultValue: "发送给角色的消息总数" }),
     },
     {
       key: "streak",
@@ -104,13 +104,13 @@ function SummaryHero(props: { t: TFunc; summary?: StatsSummary; lanlan?: string 
         .replace("{c}", String(s.cold_wars ?? 0))
         .replace("{m}", String(s.made_ups ?? 0)),
       label: t("panel.stats.sum.fight", { defaultValue: "冷战 / 和好" }),
-      hint: t("panel.stats.sum.fightHint", { defaultValue: "只数她自己起的情绪；和好 = 她主动转晴" }),
+      hint: t("panel.stats.sum.fightHint", { defaultValue: "仅统计角色自主触发的情绪；和好指主动恢复平静" }),
     },
     {
       key: "warm",
       value: String(s.warm_moments ?? 0),
       label: t("panel.stats.sum.warm", { defaultValue: "开心时刻" }),
-      hint: t("panel.stats.sum.warmHint", { defaultValue: "她自己起的暖流与满潮" }),
+      hint: t("panel.stats.sum.warmHint", { defaultValue: "角色自主触发的「暖流涌动」与「满潮欢喜」次数" }),
     },
   ]
   return (
@@ -126,7 +126,7 @@ function SummaryHero(props: { t: TFunc; summary?: StatsSummary; lanlan?: string 
         </AdaptiveTip>
         {days > 0 ? (
           <AdaptiveTip
-            content={t("panel.stats.sum.nextHint", { defaultValue: "满 30/100/… 天的日子，她当天会知道" })}
+            content={t("panel.stats.sum.nextHint", { defaultValue: "达到 30、100 等天数时，可通过纪念日功能提醒角色" })}
             place="bottom"
           >
             <div className="tm-hero-ring">
@@ -194,11 +194,11 @@ function BadgeWall(props: { t: TFunc; badges?: StatsBadge[]; daysTogether?: numb
           ? t("panel.stats.badge.unlockedOn", { defaultValue: "{d} 解锁" }).replace("{d}", String(badge.date || "—"))
           : (badge.days
               ? t("panel.stats.badge.inDays", { defaultValue: "还差 {n} 天" }).replace("{n}", String(badge.days))
-              : t("panel.stats.badge.locked", { defaultValue: "还未发生" }))
+              : t("panel.stats.badge.locked", { defaultValue: "尚未达成" }))
         const icon = badgeShape(badge)
         const tip = unlocked
           ? t("panel.stats.badge.unlockedOn", { defaultValue: "{d} 解锁" }).replace("{d}", String(badge.date || "—"))
-          : t("panel.stats.badge.lockedTip", { defaultValue: "继续相处，它会在某一天悄悄点亮" })
+          : t("panel.stats.badge.lockedTip", { defaultValue: "达到条件后会自动解锁" })
         const pct = unlocked ? 100 : Math.min(100, Math.round((cur / Number(badge.days)) * 100))
         return (
           <AdaptiveTip key={badge.id || label} content={`${label} · ${tip}`}>
@@ -397,7 +397,7 @@ function HeatGrid(props: { t: TFunc; heatmap: Heatmap | null; onPickYear: (year:
     return (
       <EmptyState
         title={t("panel.stats.heatEmpty", { defaultValue: "还没有可展示的日子" })}
-        description={t("panel.stats.heatEmptySub", { defaultValue: "互动过的日子会在这里亮起来。" })}
+        description={t("panel.stats.heatEmptySub", { defaultValue: "聊天后会显示每日互动情况。" })}
       />
     )
   }
@@ -582,7 +582,7 @@ function MonthReportView(props: { t: TFunc; month?: MonthReport | null }) {
     return (
       <EmptyState
         title={t("panel.stats.monthEmpty", { defaultValue: "这个月还没有记录" })}
-        description={t("panel.stats.monthEmptySub", { defaultValue: "等这个月过完，这里会为你们留一份小结。" })}
+        description={t("panel.stats.monthEmptySub", { defaultValue: "有互动后会显示本月小结，月份结束后归档。" })}
       />
     )
   }
@@ -604,7 +604,7 @@ function MonthReportView(props: { t: TFunc; month?: MonthReport | null }) {
           value={t("panel.stats.month.daysValue", { defaultValue: "{n} 天" }).replace("{n}", String(m.active_days || 0))}
         />
         <MonthCell
-          label={t("panel.stats.month.busiest", { defaultValue: "最热闹的一天" })}
+          label={t("panel.stats.month.busiest", { defaultValue: "互动最多的一天" })}
           value={m.busiest_day
             ? t("panel.stats.month.busiestValue", { defaultValue: "{d}（{n} 轮）" })
                 .replace("{d}", String(m.busiest_day).slice(5))
@@ -630,7 +630,7 @@ function MonthReportView(props: { t: TFunc; month?: MonthReport | null }) {
       {/* 语气主色：她这个月回复的整体色调 */}
       {toneEntries.length ? (
         <div className="tm-month-tone">
-          <span className="tm-month-tone-label">{t("panel.stats.month.toneLabel", { defaultValue: "她的语气" })}</span>
+          <span className="tm-month-tone-label">{t("panel.stats.month.toneLabel", { defaultValue: "角色语气" })}</span>
           {toneEntries.map(([label, count]) => (
             <span key={label} className="tm-month-tone-item">
               {t(toneLabelKey(label) || "panel.stats.tone.neutral", { defaultValue: label })}
@@ -650,14 +650,14 @@ function MonthReportView(props: { t: TFunc; month?: MonthReport | null }) {
       {m.voice && m.voice.entry ? (
         <div className="tm-month-voice">
           <div className="tm-month-voice-label">
-            {t("panel.stats.month.voiceLabel", { defaultValue: "这个月她写下的一句话" })}
+            {t("panel.stats.month.voiceLabel", { defaultValue: "本月手记摘选" })}
             {m.voice.mood ? <StatusBadge tone="default" label={String(m.voice.mood)} /> : null}
           </div>
           <div className="tm-month-voice-text">「{String(m.voice.entry)}」</div>
         </div>
       ) : (
         <div className="tm-month-voice-empty">
-          {t("panel.stats.month.voiceEmpty", { defaultValue: "这个月她还没有写过手记。" })}
+          {t("panel.stats.month.voiceEmpty", { defaultValue: "本月暂无角色手记。" })}
         </div>
       )}
     </div>

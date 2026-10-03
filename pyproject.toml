@@ -1,6 +1,6 @@
 [project]
 name = "forever_companion"
-version = "1.3.3"
+version = "1.3.4"
 requires-python = ">=3.11"
 dependencies = []
 
@@ -29,6 +29,7 @@ exclude_dirs = [
     ".vscode",
     ".venv",
     ".pytest_cache",
+    ".pytest-tmp",
     ".ruff_cache",
     ".benchmarks",
     "__pycache__",

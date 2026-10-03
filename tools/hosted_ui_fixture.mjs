@@ -76,7 +76,7 @@ function calendarMonth(year, month) {
   return { year, month, label: `${year} / ${String(month).padStart(2, "0")}`, cells }
 }
 
-export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", empty = false, wizard = false } = {}) {
+export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", empty = false, wizard = false, intros = {} } = {}) {
   const appearance = { bg_id: wallpaper === "none" ? "" : "qa-wallpaper", fill: "cover", position: "center", blur: 0, dim: 0.4, brightness: 100, saturate: 100, contrast: 100, glass: 0, card_alpha: 0, text_weight: 100 }
   const palettes = {
     olive: [[191, 185, 125], [125, 167, 191]],
@@ -106,7 +106,7 @@ export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", em
     ["birthday", "rhythm", "injection"], ["mood_engine", "mood", "tool"],
     ["tone_sense", "mood", "host_http"], ["fragments", "diary", "direct"],
     ["journal", "diary", "injection"], ["review", "diary", "direct"],
-  ].map(([id, group, llm]) => ({ id, group, llm, enabled: true, source: "on", tools: id === "mood_engine" ? ["mood_ripple", "mood_warm_current"] : [], user_off: false }))
+  ].map(([id, group, llm]) => ({ id, group, llm, enabled: !empty, source: empty ? "master_off" : "on", tools: intros[id]?.tools || [], depends: intros[id]?.deps || [], user_off: false }))
   const heatDays = empty ? [] : Array.from({ length: 184 }, (_, index) => {
     const date = new Date(Date.UTC(2026, 3, 1 + index)).toISOString().slice(0, 10)
     return { date, turns: index % 5 === 0 ? 0 : index % 30 + 2, tone: "happy", valence: 0.25 }
@@ -142,7 +142,7 @@ export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", em
       locale, i18n: { locale, default_locale: "zh-CN", messages },
     },
     appearance, image, images, gallery: Object.entries(images).map(([id, data], index) => ({ id, name: `qa-landscape-${"ABC"[index]}.png`, mime: "image/png", size: data.length, added_at: TODAY, thumb: data })),
-    journal, review, diary, reviewProgress: { turns: 32, turns_threshold: 50, days: 4, days_threshold: 7, span: "2026-09-28~2026-10-02", due: false },
+    intros, journal, review, diary, reviewProgress: { turns: 32, turns_threshold: 50, days: 4, days_threshold: 7, span: "2026-09-28~2026-10-02", due: false },
     stats: { heatmap: { days: heatDays, start: "2026-04-01", end: "2026-10-01", years: [2026], year: 2026, months: [] }, months: ["2026-10", "2026-09", "2026-08"], month: { month: "2026-10", turns: 124, active_days: 2, busiest_day: TODAY, busiest_turns: 68, longest_streak: 2, cold_wars: 0, made_ups: 0, warm_moments: 3, tone: { happy: 72, neutral: 33, sad: 4 }, valence_avg: 0.24, voice: { ts: TODAY, mood: "warm", entry: SAMPLE.repeat(3) }, sealed: false } },
   }
 }
@@ -154,6 +154,7 @@ export function installFixtureBridge(fixture) {
   window.qaDiagnostics = []
   window.qaRefreshes = 0
   window.qaFailNext = ""
+  window.qaResults = {}
   window.qaDelays = {}
   window.qaResolved = []
   const clone = value => JSON.parse(JSON.stringify(value))
@@ -163,13 +164,14 @@ export function installFixtureBridge(fixture) {
       window.qaFailNext = ""
       throw new Error("persist_failed")
     }
+    if (Object.hasOwn(window.qaResults, action)) return clone(window.qaResults[action])
     if (action === "get_panel_gallery") return { items: fixture.gallery, appearance: fixture.appearance }
     if (action === "get_gallery_image") return { data_url: fixture.images[args.item_id] || fixture.image }
     if (action === "get_journal") return { pages: fixture.journal }
     if (action === "get_review") return { entries: fixture.review, progress: fixture.reviewProgress }
     if (action === "get_diary") return { items: fixture.diary.slice(Number(args.offset || 0)), has_more: false }
     if (action === "get_stats") return { ...fixture.stats, month: { ...fixture.stats.month, month: args.month || fixture.stats.month.month } }
-    if (action === "get_capability_intro") return { found: true, id: args.capability_id, purpose: "QA fixture purpose.", scenarios: ["QA fixture scenario."], limits: ["QA fixture limit."], deps: [], config_keys: ["tide.enabled"], llm: "injection", tools: [], flow: [{ kind: "src", label: "Message" }, { kind: "proc", label: "State" }, { kind: "out", label: "Context" }] }
+    if (action === "get_capability_intro") return clone(fixture.intros[args.capability_id] || { found: false, id: args.capability_id })
     if (action === "update_settings") {
       Object.assign(state.settings, args)
       if ("birthday_date" in args) state.birthday.date = args.birthday_date
@@ -188,7 +190,19 @@ export function installFixtureBridge(fixture) {
       if (fixture.appearance.bg_id === args.item_id) fixture.appearance.bg_id = ""
       return { items: clone(fixture.gallery), appearance: clone(fixture.appearance) }
     }
-    if (action === "toggle") { state.status.enabled = !state.status.enabled; return { enabled: state.status.enabled } }
+    if (action === "toggle") {
+      const enabled = !state.status.enabled
+      state.status.enabled = enabled
+      state.settings.enabled = enabled
+      state.capabilities.master_enabled = enabled
+      for (const cap of state.capabilities.capabilities) {
+        if (cap.source === "master_off" || cap.source === "on") {
+          cap.enabled = enabled
+          cap.source = enabled ? "on" : "master_off"
+        }
+      }
+      return { enabled }
+    }
     if (action === "set_capability") {
       const cap = state.capabilities.capabilities.find(item => item.id === args.capability_id)
       if (cap) { cap.enabled = args.enabled; cap.source = args.enabled ? "on" : "user_off" }

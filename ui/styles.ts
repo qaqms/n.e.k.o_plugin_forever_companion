@@ -1288,6 +1288,7 @@ export const PANEL_STYLES = `
 .tm-reopen-guide { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
 .tm-reopen-hint { font-size: 12px; color: var(--muted); }
 /* 功能管理页（1.2.7）：能力行列表 + LLM 徽标侧栏 + 高级选项说明 */
+.tm-features-pane { min-width: 0; grid-template-columns: minmax(0, 1fr); }
 .tm-feat-list { display: flex; flex-direction: column; gap: 6px; }
 .tm-feat-row .tm-field { margin-bottom: 0; }
 .tm-feat-side { display: inline-flex; align-items: center; gap: 10px; }
@@ -1303,13 +1304,14 @@ export const PANEL_STYLES = `
   -webkit-backdrop-filter: var(--tm-glass-filter, none); backdrop-filter: var(--tm-glass-filter, none);
 }
 .tm-feat-adv-label { font-size: 12px; font-weight: 720; color: var(--muted); flex: none; }
-.tm-feat-adv-switch { flex: none; cursor: help; }
+.tm-feat-adv-switch { flex: 0 1 auto; min-width: 0; max-width: 100%; cursor: help; }
+.tm-feat-adv-switch .tm-sw { max-width: 100%; }
 .tm-feat-adv-help {
   flex: 1; min-width: 120px; text-align: right; font-size: 11px; color: var(--muted);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-@media (max-width: 900px) { .tm-feat-cols { grid-template-columns: 1fr 1fr; } }
-@media (max-width: 620px) { .tm-feat-cols { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .tm-feat-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 620px) { .tm-feat-cols { grid-template-columns: minmax(0, 1fr); } }
 /* 功能介绍（1.2.7 二轮修订）：行内虚线胶囊按钮 + 页内介绍子页（贴合外框、
    随窗口自适应）+ 纯 CSS 流程图（无图标，配色即类型；hosted 无 SVG 命名空间） */
 .tm-feat-label { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }

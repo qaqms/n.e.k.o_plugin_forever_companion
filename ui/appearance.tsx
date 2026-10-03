@@ -75,7 +75,7 @@ export function AppearanceCard(props: {
     const result = compressImageDataUrl(url, mime, quality)
     result.then((res) => {
       if (res.dataUrl.length > 6000000) {
-        setUploadError(t("panel.appearance.errorTooLargeShort", { defaultValue: "图片太大了，请压缩到 4MB 以内" }))
+        setUploadError(t("panel.appearance.errorTooLargeShort", { defaultValue: "图片超过大小限制，请压缩到 4MB 以内" }))
         return
       }
       onAdd(res.dataUrl, res.thumb, name)
@@ -89,7 +89,7 @@ export function AppearanceCard(props: {
     <Card title={t("panel.appearance.title", { defaultValue: "面板外观" })}>
       <div className="tm-appearance">
         <div className="tm-derived">
-          {t("panel.appearance.hint", { defaultValue: "导入的图片会留在图库里，随时切换当壁纸；下方调节实时预览，点保存后生效。" })}
+          {t("panel.appearance.hint", { defaultValue: "图片保存在本地图库。选择壁纸和调整效果后，可预览外观；点击「保存设置」后生效。" })}
         </div>
 
         {/* —— 图库：网格选择 + 导入 + 删除（即时落盘，不经保存钮） —— */}
@@ -155,7 +155,7 @@ export function AppearanceCard(props: {
 
         <Field
           label={t("panel.appearance.modeLabel", { defaultValue: "导入方式" })}
-          help={t("panel.appearance.modeHelp", { defaultValue: "自动压缩会缩到长边 2560 并重编码，图库能放更多张；GIF / SVG 一律原样保留" })}
+          help={t("panel.appearance.modeHelp", { defaultValue: "自动压缩将图片长边缩至最多 2560 像素，并重新编码。GIF / SVG 保留原文件。" })}
         >
           <SegmentedControl
             value={quality}
@@ -168,7 +168,7 @@ export function AppearanceCard(props: {
         </Field>
         <Field
           label={t("panel.appearance.upload", { defaultValue: "导入图片" })}
-          help={noImage ? t("panel.appearance.galleryEmptyHint", { defaultValue: "图库还是空的——导入第一张试试吧" }) : t("panel.appearance.uploadHelp", { defaultValue: "支持 PNG / JPG / WebP / GIF / SVG，原画质档不超过 4MB" })}
+          help={noImage ? t("panel.appearance.galleryEmptyHint", { defaultValue: "暂无图片" }) : t("panel.appearance.uploadHelp", { defaultValue: "支持 PNG / JPG / WebP / GIF / SVG。原画质文件不能超过 4MB。" })}
           error={uploadError || undefined}
         >
           <ImageUpload
@@ -207,7 +207,7 @@ export function AppearanceCard(props: {
         {/* —— 背景调节：全部作用于当前壁纸，实时预览、保存生效 —— */}
         <Field label={t("panel.appearance.adjustSection", { defaultValue: "背景调节" })}>
           {!hasBg ? (
-            <div className="tm-derived">{t("panel.appearance.noBgHint", { defaultValue: "先在上方选一张壁纸（或用「不用壁纸」格取消），调节即实时预览" })}</div>
+            <div className="tm-derived">{t("panel.appearance.noBgHint", { defaultValue: "选择图片后可预览壁纸效果。选择「不用壁纸」可恢复默认主题。" })}</div>
           ) : null}
           <div className={hasBg ? "tm-adjust-grid" : "tm-adjust-grid tm-adjust-off"}>
             <Field label={t("panel.appearance.fillLabel", { defaultValue: "填充方式" })}>
@@ -258,7 +258,7 @@ export function AppearanceCard(props: {
             <Field label={t("panel.appearance.cardAlphaLabel", { defaultValue: "卡片底色强度" })} help={t("panel.appearance.cardAlphaHelp", { defaultValue: "卡片自身底色的不透明度（%），调低更透" })}>
               <Slider value={draft.card_alpha} min={0} max={100} step={5} showValue disabled={!hasBg} onChange={(v: any) => { onDraft({ card_alpha: Number(v) }) }} />
             </Field>
-            <Field label={t("panel.appearance.textWeightLabel", { defaultValue: "整体字体显示强度" })} help={t("panel.appearance.textWeightHelp", { defaultValue: "正文文字的深浅；调高更清晰，低值仍保留可读性" })}>
+            <Field label={t("panel.appearance.textWeightLabel", { defaultValue: "整体字体显示强度" })} help={t("panel.appearance.textWeightHelp", { defaultValue: "调节文字深浅，数值越高越清晰" })}>
               <Slider value={draft.text_weight} min={40} max={100} step={5} showValue disabled={!hasBg} onChange={(v: any) => { onDraft({ text_weight: Number(v) }) }} />
             </Field>
           </div>
@@ -269,7 +269,7 @@ export function AppearanceCard(props: {
           <span className="tm-save-hint">
             {dirty
               ? t("panel.appearance.unsavedHint", { defaultValue: "有未保存的外观调整" })
-              : t("panel.appearance.savedHint", { defaultValue: "外观已同步" })}
+              : t("panel.appearance.savedHint", { defaultValue: "外观已保存" })}
           </span>
           <Button tone="default" disabled={!dirty} onClick={onRevert}>
             {t("panel.appearance.revert", { defaultValue: "还原" })}
@@ -286,11 +286,11 @@ function localizeUploadError(t: TFunc, error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error || "")
   const tooLarge = raw.match(/File is too large \((\d+) MB\)/)
   if (tooLarge) {
-    return t("panel.appearance.errorTooLarge", { defaultValue: "图片太大了（{n} MB），请换小一点的图或选「自动压缩」" })
+    return t("panel.appearance.errorTooLarge", { defaultValue: "图片超过大小限制（{n} MB）。请使用更小的图片，或选择「自动压缩」。" })
       .replace("{n}", tooLarge[1])
   }
   if (/too large/i.test(raw)) {
-    return t("panel.appearance.errorTooLargeShort", { defaultValue: "图片太大了，请压缩到 4MB 以内" })
+    return t("panel.appearance.errorTooLargeShort", { defaultValue: "图片超过大小限制，请压缩到 4MB 以内" })
   }
   return raw
 }

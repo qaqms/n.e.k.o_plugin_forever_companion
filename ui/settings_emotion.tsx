@@ -12,10 +12,10 @@ export function EmotionSenseSettingsCard(props: {
   const { t, form, updateForm } = props
 
   const toneCheckRates = [
-    { value: "1", label: t("panel.settings.toneCheckRateEvery", { defaultValue: "每轮都查" }) },
-    { value: "0.5", label: t("panel.settings.toneCheckRateHalf", { defaultValue: "一半" }) },
+    { value: "1", label: t("panel.settings.toneCheckRateEvery", { defaultValue: "每轮" }) },
+    { value: "0.5", label: t("panel.settings.toneCheckRateHalf", { defaultValue: "约一半" }) },
     { value: "0.25", label: t("panel.settings.toneCheckRateRare", { defaultValue: "偶尔" }) },
-    { value: "0", label: t("panel.settings.toneCheckRateOff", { defaultValue: "关闭筛选" }) },
+    { value: "0", label: t("panel.settings.toneCheckRateOff", { defaultValue: "关闭检查" }) },
   ]
   const toneSensitivities = [
     { value: "0.1", label: t("panel.settings.toneSensitivityGentle", { defaultValue: "温和" }) },
@@ -36,21 +36,21 @@ export function EmotionSenseSettingsCard(props: {
       {form.emotion_sense_enabled ? (
         <>
           <div className="tm-derived">
-            {t("panel.settings.emotionSenseHint", { defaultValue: "分析在她回复完成后异步进行，不影响聊天延迟；只提醒，不会自动改变状态" })}
+            {t("panel.settings.emotionSenseHint", { defaultValue: "回复完成后在后台分析，只发送提醒，不自动改变情绪状态" })}
           </div>
           <Grid cols={2}>
-            <Field className="tm-reserve-help" label={t("panel.settings.toneCheckRate", { defaultValue: "筛选抽查频率" })}>
+            <Field className="tm-reserve-help" label={t("panel.settings.toneCheckRate", { defaultValue: "语气检查频率" })}>
               <Select value={String(form.tone_check_rate)} options={toneCheckRates} onChange={(v: any) => updateForm({ tone_check_rate: Number(v) })} />
             </Field>
             {form.tone_phase_sensitivity_enabled ? (
-              <Field className="tm-reserve-help" label={t("panel.settings.tonePhaseSensitivity", { defaultValue: "阶段灵敏度强度" })}>
+              <Field className="tm-reserve-help" label={t("panel.settings.tonePhaseSensitivity", { defaultValue: "灵敏度调整幅度" })}>
                 <Select value={String(form.tone_phase_sensitivity)} options={toneSensitivities} onChange={(v: any) => updateForm({ tone_phase_sensitivity: Number(v) })} />
               </Field>
             ) : null}
           </Grid>
           <TmSwitch
             checked={form.tone_phase_sensitivity_enabled}
-            label={t("panel.settings.tonePhaseSensitivityEnabled", { defaultValue: "阶段灵敏度（潮汐期/回升期/活跃期筛选更灵敏）" })}
+            label={t("panel.settings.tonePhaseSensitivityEnabled", { defaultValue: "随阶段调整语气灵敏度" })}
             onChange={(value: boolean) => updateForm({ tone_phase_sensitivity_enabled: value })}
           />
         </>

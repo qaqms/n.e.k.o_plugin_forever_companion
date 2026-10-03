@@ -51,13 +51,13 @@ export function ManagePane(props: {
         </Field>
         <TmSwitch
           checked={form.debug_mode}
-          label={t("panel.settings.debugMode", { defaultValue: "调试模式（注册 debug_* 调试入口，把内部机制快进到秒级可验证）" })}
+          label={t("panel.settings.debugMode", { defaultValue: "调试模式（供开发测试使用）" })}
           onChange={(value: boolean) => updateForm({ debug_mode: value })}
         />
         {onReopenGuide ? (
           <div className="tm-reopen-guide">
-            <span className="tm-reopen-hint">{t("panel.manage.reopenHint", { defaultValue: "想重新走一遍首次配置向导？（不会改动任何设置）" })}</span>
-            <Button onClick={onReopenGuide}>{t("panel.manage.reopenGuide", { defaultValue: "再看一次新手引导" })}</Button>
+            <span className="tm-reopen-hint">{t("panel.manage.reopenHint", { defaultValue: "再次查看初始设置流程。现有设置会保留。" })}</span>
+            <Button onClick={onReopenGuide}>{t("panel.manage.reopenGuide", { defaultValue: "重新打开引导" })}</Button>
           </div>
         ) : null}
       </Card>
@@ -66,9 +66,9 @@ export function ManagePane(props: {
           卡内只留「还原」，落盘与通用设置共用下方那一条保存条 */}
       {props.children}
 
-      <Card title={t("panel.settings.dangerZone", { defaultValue: "危险区" })}>
+      <Card title={t("panel.settings.dangerZone", { defaultValue: "数据重置" })}>
         {resetAll && onResetAll ? (
-          <Button tone="danger" onClick={onResetAll}>{t("actions.reset.label", { defaultValue: "重置全部数据" })}</Button>
+          <Button tone="danger" onClick={onResetAll}>{t("actions.reset.label", { defaultValue: "重置状态与记录" })}</Button>
         ) : null}
       </Card>
 
