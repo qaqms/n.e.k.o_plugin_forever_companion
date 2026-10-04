@@ -10,6 +10,7 @@ import { spawnSync } from "node:child_process"
 import { installFixtureBridge, makeFixture } from "./hosted_ui_fixture.mjs"
 import { demoChecks } from "./hosted_ui_demo_checks.mjs"
 import { introChecks } from "./hosted_ui_intro_checks.mjs"
+import { appearanceChecks, expandAppearance } from "./hosted_ui_appearance_checks.mjs"
 
 const TOOL_ROOT = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_PLUGIN = resolve(TOOL_ROOT, "..")
@@ -365,6 +366,7 @@ async function galleryChecks(browser, origin, output) {
       assert.equal(await frame.locator(".tm-gallery-preview").count(), 0)
     })
     await check("glass-zero-and-card-alpha-zero-preview-and-save", async () => {
+      await expandAppearance(frame)
       const range = frame.locator('input[type="range"]')
       const controls = await range.evaluateAll(elements => elements.map(element => ({ max: element.max, min: element.min, value: element.value })))
       const glassIndex = controls.findIndex(item => item.max === "40")
@@ -602,6 +604,7 @@ async function themeChecks(browser, origin, output) {
       try {
         await check(`wallpaper-primary-secondary-linked-${wallpaper}-${width}-${theme}`, async () => {
           await loaded.frame.waitForSelector(".tm-bg")
+          await expandAppearance(loaded.frame)
           const colors = await inspectTheme(loaded.frame)
           assert.equal(colors.source, "wallpaper")
           assert.notEqual(colors.rawPrimary, "#409eff")
@@ -692,6 +695,7 @@ async function themeChecks(browser, origin, output) {
       assert.equal(await loaded.frame.evaluate(() => window.qaThemeReads), 1)
     })
     await check("refresh-and-filter-sliders-do-not-reextract-palette", async () => {
+      await expandAppearance(loaded.frame)
       const refreshBefore = await loaded.page.evaluate(() => window.qaRefreshes)
       const ranges = loaded.frame.locator('input[type="range"]')
       await ranges.nth(0).evaluate(element => { element.value = "10"; element.dispatchEvent(new Event("input", { bubbles: true })) })
@@ -734,6 +738,7 @@ async function themeChecks(browser, origin, output) {
     const clear = await loadPage(browser, origin, { locale: "en", wallpaper, tab: "settings" }, 390, 900, "light")
     try {
       await check(`colored-controls-readable-with-zero-mask-and-card-${wallpaper}`, async () => {
+        await expandAppearance(clear.frame)
         const ranges = clear.frame.locator('input[type="range"]')
         const controls = await ranges.evaluateAll(elements => elements.map(element => ({ min: element.min, max: element.max })))
         for (const index of [controls.findIndex(item => item.max === "0.85"), controls.findIndex(item => item.min === "0" && item.max === "100")]) {
@@ -1309,7 +1314,7 @@ async function main() {
     let browser
     try {
       browser = await chromium.launch(launch)
-      if (!process.argv.includes("--interactions-only") && !process.argv.includes("--diagnostics-only") && !process.argv.includes("--compact-only") && !process.argv.includes("--theme-only") && !process.argv.includes("--copy-only") && !process.argv.includes("--demo-only") && !process.argv.includes("--intro-only")) report.screenshots = await screenshotMatrix(browser, sources, origin, output)
+      if (!process.argv.includes("--interactions-only") && !process.argv.includes("--diagnostics-only") && !process.argv.includes("--compact-only") && !process.argv.includes("--theme-only") && !process.argv.includes("--copy-only") && !process.argv.includes("--demo-only") && !process.argv.includes("--intro-only") && !process.argv.includes("--appearance-only")) report.screenshots = await screenshotMatrix(browser, sources, origin, output)
       if (process.argv.includes("--details")) report.screenshots.push(...await detailScreenshots(browser, origin, output))
       if (process.argv.includes("--calendar-diagnostics")) report.calendarDiagnostics = await calendarDiagnostics(browser, origin, output)
       if (process.argv.includes("--interactions") || process.argv.includes("--interactions-only")) {
@@ -1332,6 +1337,11 @@ async function main() {
         const intro = await introChecks(browser, sources, origin, output, { loadPage, inspectLayout })
         report.screenshots.push(...intro.screenshots)
         report.interactions.push(...intro.checks)
+      }
+      if (process.argv.includes("--appearance") || process.argv.includes("--appearance-only")) {
+        const appearance = await appearanceChecks(browser, sources, origin, output, { loadPage, inspectLayout })
+        report.screenshots.push(...appearance.screenshots)
+        report.interactions.push(...appearance.checks)
       }
     } finally {
       if (browser) await browser.close()

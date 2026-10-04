@@ -291,3 +291,36 @@ The prior `forever_companion_1.3.5_feature_intro.neko-plugin` remains an unchang
 local test artifact. A new 1.3.6 package is built from the release commit.
 Publication is limited to GitHub; plugin-market submission and notification
 remain the author's responsibility.
+
+## Public 1.3.7 Appearance-Disclosure Release
+
+The author approved the default-collapsed appearance adjustments for public
+version 1.3.7. The gallery, import controls, theme swatches, save feedback and
+revert control remain outside the native disclosure. All ten fields, eight
+sliders, original ranges, disabled rules, draft callbacks and save schema are
+preserved. Native open state survives ordinary draft updates and hosted refresh.
+
+The accepted final UI passed 172 screenshots and 329 interaction checks:
+the eight-locale matrix contributed 136 screenshots / 192 checks, the
+390-by-600 short-window matrix contributed 36 screenshots / 48 checks, and
+the gallery/theme/compact regression contributed 89 checks. There were no
+render, clipping, overlap, horizontal-overflow or interaction failures.
+The last slider's real hit test confirms it is not covered by the sticky
+save bar after scrolling. A scoped scroll margin reuses the measured save-bar
+clearance rather than changing shared layout.
+
+After the version change, all 590 Python tests passed again, together with
+CI-equivalent Ruff 0.12.4, official strict plugin check, isolated host-supported
+typecheck and the 29-module link check. The frozen UI source hash remains
+`32a97ac311460bf9a94d2dd014f6a280a3420e79d583fef1632672da3fb4251d`,
+matching all three final browser reports and the release typecheck report.
+The runtime graph has 28 dependencies / 453,624 bytes, below the host's
+32-file / 512-KiB limits. These checks do not claim a Steam import or a
+production-data/real-model test.
+
+Version metadata, README and release records are synchronized to 1.3.7.
+The previous 1.3.6 release and appearance test packages are preserved.
+The existing audited GitHub workflows remain pinned to host commit
+`9cdc4dfce7ae3203673ad4846a02ae1c7fbe8ad0`. Publication is limited to
+GitHub: no plugin-market registration, submission or notification is invoked,
+and no host source is changed.

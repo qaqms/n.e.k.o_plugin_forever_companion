@@ -106,9 +106,23 @@ def gallery_controls():
             const positions = nodes.filter(n => hasClass(n, "tm-pos-cell")).map(n => ({
                 type: n.type, label: n.props["aria-label"], pressed: n.props["aria-pressed"],
             }));
+            const adjustment = nodes.find(n => hasClass(n, "tm-appearance-adjust"));
+            const adjustmentNodes = walk(adjustment);
+            const summary = adjustment.children.find(n => n.type === "summary");
+            const grid = adjustmentNodes.find(n => hasClass(n, "tm-adjust-grid"));
             return {
                 tiles: summaries, removals, afterDeletePatches, patches, positions,
                 mutatedProps: before !== JSON.stringify({ draft, saved }),
+                adjustment: {
+                    type: adjustment.type,
+                    hasOpenProp: Object.hasOwn(adjustment.props, "open"),
+                    summary: text(summary),
+                    fields: grid.children.filter(n => n.type === "kit:Field").length,
+                    sliders: adjustmentNodes.filter(n => n.type === "kit:Slider").length,
+                    galleryInside: adjustmentNodes.some(n => hasClass(n, "tm-gallery")),
+                    uploadInside: adjustmentNodes.some(n => n.type === "kit:ImageUpload"),
+                    saveInside: adjustmentNodes.some(n => hasClass(n, "tm-appearance-save")),
+                },
             };
         }
         console.log(JSON.stringify({
@@ -186,6 +200,39 @@ def test_position_buttons_expose_selected_state(gallery_controls):
     assert all(p["type"] == "button" and p["label"] for p in positions)
     assert all(p["pressed"] in {"true", "false"} for p in positions)
     assert sum(p["pressed"] == "true" for p in positions) == 1
+
+
+def test_appearance_adjustments_are_native_and_collapsed_by_default(gallery_controls):
+    for state in gallery_controls.values():
+        adjustment = state["adjustment"]
+        assert adjustment["type"] == "details"
+        assert adjustment["hasOpenProp"] is False
+        assert adjustment["summary"] == "panel.appearance.adjustSection"
+        assert adjustment["fields"] == 10
+        assert adjustment["sliders"] == 8
+
+
+def test_appearance_gallery_upload_and_save_stay_outside_disclosure(gallery_controls):
+    for state in gallery_controls.values():
+        adjustment = state["adjustment"]
+        assert adjustment["galleryInside"] is False
+        assert adjustment["uploadInside"] is False
+        assert adjustment["saveInside"] is False
+
+
+def test_appearance_disclosure_has_keyboard_focus_and_wrapping_styles():
+    css = (ROOT / "ui" / "styles.ts").read_text(encoding="utf-8")
+    assert ".tm-appearance-adjust-summary:focus-visible" in css
+    summary = re.search(r"\.tm-appearance-adjust-summary\s*\{([^}]+)\}", css).group(1)
+    assert "min-height: 44px" in summary
+    assert "overflow-wrap: anywhere" in summary
+    assert "cursor: pointer" in summary
+
+
+def test_appearance_sliders_scroll_clear_of_the_measured_savebar():
+    css = (ROOT / "ui" / "styles.ts").read_text(encoding="utf-8")
+    sliders = re.search(r"\.tm-appearance-adjust-body \.neko-slider-input\s*\{([^}]+)\}", css).group(1)
+    assert "scroll-margin-block-end: var(--tm-save-clearance, 72px)" in sliders
 
 
 def test_seal_labels_wrap_inside_the_fixed_stamp():

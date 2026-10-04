@@ -692,6 +692,18 @@ export const PANEL_STYLES = `
 .tm-appearance .neko-field { min-width: 0; }
 .tm-appearance .neko-segmented { display: flex; flex-wrap: wrap; }
 .tm-appearance .neko-segmented-button { flex: 1 1 90px; min-width: 0; font-size: 13px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
+.tm-appearance-adjust { min-width: 0; border-top: 1px solid var(--tm-border); }
+.tm-appearance-adjust-summary {
+  box-sizing: border-box; min-height: 44px; padding: 10px 8px;
+  font-size: 13px; font-weight: 600; line-height: 1.5; color: var(--text);
+  border-radius: 4px; list-style-position: inside; overflow-wrap: anywhere; cursor: pointer;
+}
+.tm-appearance-adjust-summary::marker { color: var(--primary); }
+.tm-appearance-adjust-summary:hover { background: var(--tm-accent-soft); }
+.tm-appearance-adjust-summary:focus-visible { outline: 2px solid var(--tm-focus); outline-offset: 2px; }
+.tm-appearance-adjust[open] > .tm-appearance-adjust-summary { color: var(--primary); }
+.tm-appearance-adjust-body { display: grid; min-width: 0; gap: 10px; padding: 10px 8px 2px; }
+.tm-appearance-adjust-body .neko-slider-input { scroll-margin-block-end: var(--tm-save-clearance, 72px); }
 .tm-appearance-save {
   display: flex; gap: 8px; align-items: center;
   border-top: 1px solid var(--tm-border);

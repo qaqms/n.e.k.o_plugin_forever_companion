@@ -204,65 +204,69 @@ export function AppearanceCard(props: {
           </Field>
         ) : null}
 
-        {/* —— 背景调节：全部作用于当前壁纸，实时预览、保存生效 —— */}
-        <Field label={t("panel.appearance.adjustSection", { defaultValue: "背景调节" })}>
-          {!hasBg ? (
-            <div className="tm-derived">{t("panel.appearance.noBgHint", { defaultValue: "选择图片后可预览壁纸效果。选择「不用壁纸」可恢复默认主题。" })}</div>
-          ) : null}
-          <div className={hasBg ? "tm-adjust-grid" : "tm-adjust-grid tm-adjust-off"}>
-            <Field label={t("panel.appearance.fillLabel", { defaultValue: "填充方式" })}>
-              <SegmentedControl
-                value={draft.fill}
-                options={fillOptions()}
-                onChange={(v: any) => { onDraft({ fill: String(v) }) }}
-              />
-            </Field>
-            <Field label={t("panel.appearance.posLabel", { defaultValue: "背景位置" })}>
-              <div className="tm-pos-grid">
-                {APPEARANCE_POSITIONS.map((value) => {
-                  const cellClass = value === draft.position ? "tm-pos-cell tm-pos-active" : "tm-pos-cell"
-                  return (
-                    <button
-                      key={value}
-                      type="button"
-                      className={cellClass}
-                      title={posLabel(value)}
-                      aria-label={posLabel(value)}
-                      aria-pressed={value === draft.position ? "true" : "false"}
-                      onClick={() => { onDraft({ position: value }) }}
-                    >
-                      <span className="tm-pos-dot" style={posCellStyle(value)} />
-                    </button>
-                  )
-                })}
-              </div>
-            </Field>
-            <Field label={t("panel.appearance.blurLabel", { defaultValue: "背景模糊" })} help={t("panel.appearance.blurHelp", { defaultValue: "虚化壁纸（px），0=清晰" })}>
-              <Slider value={draft.blur} min={0} max={30} step={1} showValue disabled={!hasBg} onChange={(v: any) => { onDraft({ blur: Number(v) }) }} />
-            </Field>
-            <Field label={t("panel.appearance.dim", { defaultValue: "遮罩强度" })} help={t("panel.appearance.dimHelp", { defaultValue: "越高越暗；背景偏亮时调高一些，文字更清晰" })}>
-              <Slider value={draft.dim} min={0} max={0.85} step={0.05} showValue disabled={!hasBg} onChange={(v: any) => { onDraft({ dim: Number(v) }) }} />
-            </Field>
-            <Field label={t("panel.appearance.brightnessLabel", { defaultValue: "背景亮度" })}>
-              <Slider value={draft.brightness} min={30} max={150} step={5} showValue disabled={!hasBg} onChange={(v: any) => { onDraft({ brightness: Number(v) }) }} />
-            </Field>
-            <Field label={t("panel.appearance.saturateLabel", { defaultValue: "背景饱和度" })}>
-              <Slider value={draft.saturate} min={0} max={200} step={5} showValue disabled={!hasBg} onChange={(v: any) => { onDraft({ saturate: Number(v) }) }} />
-            </Field>
-            <Field label={t("panel.appearance.contrastLabel", { defaultValue: "背景对比度" })}>
-              <Slider value={draft.contrast} min={50} max={200} step={5} showValue disabled={!hasBg} onChange={(v: any) => { onDraft({ contrast: Number(v) }) }} />
-            </Field>
-            <Field label={t("panel.appearance.glassLabel", { defaultValue: "卡片毛玻璃强度" })} help={t("panel.appearance.glassHelp", { defaultValue: "卡片背后虚化的半径（px）" })}>
-              <Slider value={draft.glass} min={0} max={40} step={1} showValue disabled={!hasBg} onChange={(v: any) => { onDraft({ glass: Number(v) }) }} />
-            </Field>
-            <Field label={t("panel.appearance.cardAlphaLabel", { defaultValue: "卡片底色强度" })} help={t("panel.appearance.cardAlphaHelp", { defaultValue: "卡片自身底色的不透明度（%），调低更透" })}>
-              <Slider value={draft.card_alpha} min={0} max={100} step={5} showValue disabled={!hasBg} onChange={(v: any) => { onDraft({ card_alpha: Number(v) }) }} />
-            </Field>
-            <Field label={t("panel.appearance.textWeightLabel", { defaultValue: "整体字体显示强度" })} help={t("panel.appearance.textWeightHelp", { defaultValue: "调节文字深浅，数值越高越清晰" })}>
-              <Slider value={draft.text_weight} min={40} max={100} step={5} showValue disabled={!hasBg} onChange={(v: any) => { onDraft({ text_weight: Number(v) }) }} />
-            </Field>
+        <details className="tm-appearance-adjust">
+          <summary className="tm-appearance-adjust-summary">
+            {t("panel.appearance.adjustSection", { defaultValue: "背景调节" })}
+          </summary>
+          <div className="tm-appearance-adjust-body">
+            {!hasBg ? (
+              <div className="tm-derived">{t("panel.appearance.noBgHint", { defaultValue: "选择图片后可预览壁纸效果。选择「不用壁纸」可恢复默认主题。" })}</div>
+            ) : null}
+            <div className={hasBg ? "tm-adjust-grid" : "tm-adjust-grid tm-adjust-off"}>
+              <Field label={t("panel.appearance.fillLabel", { defaultValue: "填充方式" })}>
+                <SegmentedControl
+                  value={draft.fill}
+                  options={fillOptions()}
+                  onChange={(v: any) => { onDraft({ fill: String(v) }) }}
+                />
+              </Field>
+              <Field label={t("panel.appearance.posLabel", { defaultValue: "背景位置" })}>
+                <div className="tm-pos-grid">
+                  {APPEARANCE_POSITIONS.map((value) => {
+                    const cellClass = value === draft.position ? "tm-pos-cell tm-pos-active" : "tm-pos-cell"
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        className={cellClass}
+                        title={posLabel(value)}
+                        aria-label={posLabel(value)}
+                        aria-pressed={value === draft.position ? "true" : "false"}
+                        onClick={() => { onDraft({ position: value }) }}
+                      >
+                        <span className="tm-pos-dot" style={posCellStyle(value)} />
+                      </button>
+                    )
+                  })}
+                </div>
+              </Field>
+              <Field label={t("panel.appearance.blurLabel", { defaultValue: "背景模糊" })} help={t("panel.appearance.blurHelp", { defaultValue: "虚化壁纸（px），0=清晰" })}>
+                <Slider value={draft.blur} min={0} max={30} step={1} showValue disabled={!hasBg} onChange={(v: any) => { onDraft({ blur: Number(v) }) }} />
+              </Field>
+              <Field label={t("panel.appearance.dim", { defaultValue: "遮罩强度" })} help={t("panel.appearance.dimHelp", { defaultValue: "越高越暗；背景偏亮时调高一些，文字更清晰" })}>
+                <Slider value={draft.dim} min={0} max={0.85} step={0.05} showValue disabled={!hasBg} onChange={(v: any) => { onDraft({ dim: Number(v) }) }} />
+              </Field>
+              <Field label={t("panel.appearance.brightnessLabel", { defaultValue: "背景亮度" })}>
+                <Slider value={draft.brightness} min={30} max={150} step={5} showValue disabled={!hasBg} onChange={(v: any) => { onDraft({ brightness: Number(v) }) }} />
+              </Field>
+              <Field label={t("panel.appearance.saturateLabel", { defaultValue: "背景饱和度" })}>
+                <Slider value={draft.saturate} min={0} max={200} step={5} showValue disabled={!hasBg} onChange={(v: any) => { onDraft({ saturate: Number(v) }) }} />
+              </Field>
+              <Field label={t("panel.appearance.contrastLabel", { defaultValue: "背景对比度" })}>
+                <Slider value={draft.contrast} min={50} max={200} step={5} showValue disabled={!hasBg} onChange={(v: any) => { onDraft({ contrast: Number(v) }) }} />
+              </Field>
+              <Field label={t("panel.appearance.glassLabel", { defaultValue: "卡片毛玻璃强度" })} help={t("panel.appearance.glassHelp", { defaultValue: "卡片背后虚化的半径（px）" })}>
+                <Slider value={draft.glass} min={0} max={40} step={1} showValue disabled={!hasBg} onChange={(v: any) => { onDraft({ glass: Number(v) }) }} />
+              </Field>
+              <Field label={t("panel.appearance.cardAlphaLabel", { defaultValue: "卡片底色强度" })} help={t("panel.appearance.cardAlphaHelp", { defaultValue: "卡片自身底色的不透明度（%），调低更透" })}>
+                <Slider value={draft.card_alpha} min={0} max={100} step={5} showValue disabled={!hasBg} onChange={(v: any) => { onDraft({ card_alpha: Number(v) }) }} />
+              </Field>
+              <Field label={t("panel.appearance.textWeightLabel", { defaultValue: "整体字体显示强度" })} help={t("panel.appearance.textWeightHelp", { defaultValue: "调节文字深浅，数值越高越清晰" })}>
+                <Slider value={draft.text_weight} min={40} max={100} step={5} showValue disabled={!hasBg} onChange={(v: any) => { onDraft({ text_weight: Number(v) }) }} />
+              </Field>
+            </div>
           </div>
-        </Field>
+        </details>
 
         {/* 待存读数 + 还原：真正的落盘在页面底部那条「保存设置」上 */}
         <div className="tm-appearance-save">
