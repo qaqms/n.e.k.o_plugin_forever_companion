@@ -8,6 +8,7 @@ import { basename, dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { spawnSync } from "node:child_process"
 import { installFixtureBridge, makeFixture } from "./hosted_ui_fixture.mjs"
+import { demoChecks } from "./hosted_ui_demo_checks.mjs"
 
 const TOOL_ROOT = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_PLUGIN = resolve(TOOL_ROOT, "..")
@@ -169,8 +170,8 @@ async function inspectLayout(frame) {
   })
 }
 
-async function loadPage(browser, origin, parameters, width, height, theme) {
-  const context = await browser.newContext({ viewport: { width, height }, colorScheme: theme, deviceScaleFactor: 1, reducedMotion: "reduce" })
+async function loadPage(browser, origin, parameters, width, height, theme, motion = "reduce") {
+  const context = await browser.newContext({ viewport: { width, height }, colorScheme: theme, deviceScaleFactor: 1, reducedMotion: motion })
   const page = await context.newPage()
   const errors = []
   page.on("pageerror", error => errors.push(error.message))
@@ -1307,7 +1308,7 @@ async function main() {
     let browser
     try {
       browser = await chromium.launch(launch)
-      if (!process.argv.includes("--interactions-only") && !process.argv.includes("--diagnostics-only") && !process.argv.includes("--compact-only") && !process.argv.includes("--theme-only") && !process.argv.includes("--copy-only")) report.screenshots = await screenshotMatrix(browser, sources, origin, output)
+      if (!process.argv.includes("--interactions-only") && !process.argv.includes("--diagnostics-only") && !process.argv.includes("--compact-only") && !process.argv.includes("--theme-only") && !process.argv.includes("--copy-only") && !process.argv.includes("--demo-only")) report.screenshots = await screenshotMatrix(browser, sources, origin, output)
       if (process.argv.includes("--details")) report.screenshots.push(...await detailScreenshots(browser, origin, output))
       if (process.argv.includes("--calendar-diagnostics")) report.calendarDiagnostics = await calendarDiagnostics(browser, origin, output)
       if (process.argv.includes("--interactions") || process.argv.includes("--interactions-only")) {
@@ -1320,6 +1321,11 @@ async function main() {
         const copy = await copyChecks(browser, sources, origin, output)
         report.screenshots.push(...copy.screenshots)
         report.interactions.push(...copy.checks)
+      }
+      if (process.argv.includes("--demo") || process.argv.includes("--demo-only")) {
+        const demo = await demoChecks(browser, sources, origin, output, { loadPage, inspectLayout })
+        report.screenshots.push(...demo.screenshots)
+        report.interactions.push(...demo.checks)
       }
     } finally {
       if (browser) await browser.close()

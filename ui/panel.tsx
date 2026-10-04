@@ -17,6 +17,7 @@ import {
   settingsToForm,
 } from "./utils"
 import { PANEL_STYLES } from "./styles"
+import { CAPDEMO_STYLES } from "./styles_capdemo"
 import { DEFAULT_THEME_COLORS, readWallpaperTheme, themeColorVars } from "./theme"
 import type { ThemeColors } from "./theme"
 import { StatusBar } from "./statusbar"
@@ -898,6 +899,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     <Page className={bgDataUrl ? "tm-has-bg" : ""}>
       <div key="root" className="tm-appearance-root" style={rootStyle}>
       <style key="styles">{PANEL_STYLES}</style>
+      <style key="demo-styles">{CAPDEMO_STYLES}</style>
 
       {bgDataUrl ? (
         <div key="bg" className="tm-bg" aria-hidden="true">

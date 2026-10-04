@@ -13,12 +13,10 @@
 // 用 resolveText() 手动展开：zh 走 default，en 等语言进 i18n/*.json 补同名
 // key 即生效。依赖链/LLM 触点/配置键从声明表 payload 现场取，与开关同源。
 //
-// 原理图：hosted-tsx 运行时无 SVG 命名空间（mount 用 createElement，见
-// ring.tsx 注释），流程图为纯 CSS 文字胶囊 + 箭头。应用户反馈已删 emoji
-// 图标：类型区分全靠配色（src 蓝 / proc 紫 / gate 琥珀虚线 / out 绿，
-// 未知 kind 回落中性）。
+// 原理演示独立于真实功能开关；具体场景、动画和分步查看在 capdemo.tsx。
 import { StatusBadge } from "@neko/plugin-ui"
 import type { CapItem, TFunc } from "./types"
+import { CapPrincipleDemo } from "./capdemo"
 
 // ---- 文案引用解析（$i18n 引用 / 裸字符串都吃得下）----
 type I18nRef = { $i18n?: string; default?: string }
@@ -28,7 +26,7 @@ export type IntroText = string | I18nRef
 // hosted 链接器的导出扫描器扫到带 JSX 的函数时（不分导出不导出！）会状态
 // 漂移，把其后所有 `export function/const` 漏采——编译产物残留裸 export →
 // iframe 语法错、整面白屏，本地 tsc 查不出。故：只导出跨文件引用的符号；
-// 一切带 JSX 的函数（含 IntroFlow 这类纯内部件）一律排在全部导出之后；
+// 一切带 JSX 的函数一律排在全部导出之后；
 // 确需多导出的函数用命名类型 + 单行签名，不要把带 JSX 的导出排在它们前面；
 // 改版 ui/*.tsx 后必须过仓内 hosted 链接自检（能完整复现此坑，比肉眼可靠）。
 export function resolveText(t: TFunc, v: IntroText | null | undefined): string {
@@ -127,8 +125,9 @@ export function CapIntroView(props: CapIntroViewProps) {
       ) : null}
       {!loading && !error && intro && intro.found !== false ? (
         <div className="tm-ci">
+          <CapPrincipleDemo t={t} id={item.id} nodes={intro.flow || []} />
           {/* 自适应网格：容器够宽时双栏（左：作用+场景 / 右：限制+依赖），
-              窄面板自动回落单栏；流程图通栏置底。全部按子页可用宽度计算，
+              窄面板自动回落单栏。全部按子页可用宽度计算，
               不再有任何视口级 media query */}
           <div className="tm-ci-grid">
             <div className="tm-ci-col">
@@ -176,41 +175,8 @@ export function CapIntroView(props: CapIntroViewProps) {
               </section>
             </div>
           </div>
-
-          <section className="tm-ci-sec">
-            <h4 className="tm-ci-h">{t("panel.capintro.flowTitle", { defaultValue: "处理流程" })}</h4>
-            <IntroFlow t={t} nodes={(intro.flow || []) as IntroFlowNode[]} />
-          </section>
         </div>
       ) : null}
-    </div>
-  )
-}
-
-
-// IntroFlow：纯内部渲染函数（不导出），按签名纪律固定在文件末尾：
-// 带 JSX 的函数（即使不导出）排在导出之前同样会撞漂扫描器丢导出（二进宫
-// 实验），由 CapIntroView 内部直用，函数声明提升保证前向引用成立
-function IntroFlow(props: { t: TFunc; nodes: IntroFlowNode[] }) {
-  const { t, nodes } = props
-  if (!nodes.length) {
-    return (
-      <div className="tm-ci-flow-empty">
-        {t("panel.capintro.flowEmpty", { defaultValue: "该功能暂无可视化流程" })}
-      </div>
-    )
-  }
-  return (
-    <div className="tm-ci-flow">
-      {nodes.map((node, i) => (
-        // 流程链是静态内容，位置即身份，index key 稳定够用
-        <span key={i} className="tm-ci-flow-step">
-          {i > 0 ? <span className="tm-ci-flow-arrow">→</span> : null}
-          <span className="tm-ci-node" data-kind={node.kind || "proc"}>
-            <span className="tm-ci-node-label">{resolveText(t, node.label)}</span>
-          </span>
-        </span>
-      ))}
     </div>
   )
 }

@@ -37,7 +37,7 @@ export function DiarySettingsCard(props: {
           onChange={(value: boolean) => updateForm({ anniversary_inject: value })}
         />
         <div className="tm-derived">
-          {t("settings.anniversary.desc", { defaultValue: "到达 30、100 等相伴纪念节点时提醒角色，是否在聊天中提起由角色决定。" })}
+          {t("settings.anniversary.desc", { defaultValue: "到达 30、60 等相伴纪念节点时提醒角色，是否在聊天中提起由角色决定。" })}
         </div>
       </div>
 

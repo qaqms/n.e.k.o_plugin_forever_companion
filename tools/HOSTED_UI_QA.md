@@ -46,6 +46,12 @@ node tools\hosted_ui_harness.mjs --theme-only --out "$env:TEMP\neko-companion-ui
 # Eight-locale guide, real introductions, diary states and confirmations.
 node tools\hosted_ui_harness.mjs --copy-only --out "$env:TEMP\neko-companion-ui-copy"
 
+# Animated principle demos, eight-locale comparison matrix and lifecycle checks.
+node tools\hosted_ui_harness.mjs --demo-only --typecheck --out "$env:TEMP\neko-companion-ui-demo"
+
+# Motion/control checks without the comparison screenshot matrix.
+node tools\hosted_ui_harness.mjs --demo-only --demo-dynamic-only --out "$env:TEMP\neko-companion-ui-demo-motion"
+
 # Complete delivery run, including wallpaper theme regressions.
 node tools\hosted_ui_harness.mjs --full --typecheck --interactions --gallery --compact --details --theme --calendar-diagnostics --copy --out "$env:TEMP\neko-companion-ui-delivery"
 
@@ -92,6 +98,17 @@ optional writing invitations, generated-review states and results, dependency
 interpolation, master-switch confirmation/cancellation, destructive-operation
 cancellation, and skipping the guide. `--copy-only` skips the base matrix;
 `--copy-locales zh-CN,en` limits just this suite during development.
+`--demo` adds the principle demo suite; `--demo-only` skips the base matrix.
+The default demo matrix covers ten real capabilities, both comparison modes,
+eight locales, two widths and both themes. Reduced-motion/manual-final-step
+screenshots test reading and fit, not animation. Separate no-preference checks
+verify visual motion, pause/resume/replay, steps, independent comparison modes,
+journal choices, the privacy route, refresh persistence, runtime motion
+preferences, real offscreen intersection and unmount cancellation.
+`--demo-locales zh-CN,en` limits the screenshot locales; `--demo-static-only`
+and `--demo-dynamic-only` select the respective phase. The explicitly named
+synthetic child-document visibility test exercises event handling only; it
+does not claim a real operating-system background transition.
 
 Introduction fixtures come from the real `core/capabilities.py` and
 `core/intros.py` declarations, loaded with Python's `runpy`, not placeholder
