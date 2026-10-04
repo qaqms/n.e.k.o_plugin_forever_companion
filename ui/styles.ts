@@ -1312,8 +1312,7 @@ export const PANEL_STYLES = `
 }
 @media (max-width: 900px) { .tm-feat-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 620px) { .tm-feat-cols { grid-template-columns: minmax(0, 1fr); } }
-/* 功能介绍（1.2.7 二轮修订）：行内虚线胶囊按钮 + 页内介绍子页（贴合外框、
-   随窗口自适应）+ 纯 CSS 流程图（无图标，配色即类型；hosted 无 SVG 命名空间） */
+/* Function introductions keep plain reading sections separate from their framed demo. */
 .tm-feat-label { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tm-ci-open {
   font-size: 11px; line-height: 1.4; padding: 1px 9px; border-radius: 999px;
@@ -1321,44 +1320,99 @@ export const PANEL_STYLES = `
   color: var(--primary); cursor: pointer; transition: background 0.15s ease, border-color 0.15s ease;
 }
 .tm-ci-open:hover { background: var(--tm-accent-soft); border-color: var(--primary); }
-/* 功能介绍子页（1.2.7 二轮修订）：不再是居中 Modal——旧的 980px/95vw 弹窗
-   宽高按视口算、与面板实际框体脱节，默认窗口下要么压迫要么挤出横向滚动。
-   子页直接内嵌进 .tm-content（自然宽度 100%、overflow-y 自动），刚好贴合
-   外框且随窗口伸缩；头部一行：返回按钮 + 功能名 + LLM 徽标 + 生效态 */
-.tm-ci-page { display: flex; flex-direction: column; gap: 12px; }
+.tm-ci-page {
+  display: flex; flex-direction: column; gap: 16px; min-width: 0;
+  container: tm-ci / inline-size; font-size: 13px; line-height: 1.65; letter-spacing: 0;
+}
 .tm-ci-back {
-  font-size: 12px; line-height: 1.4; padding: 3px 10px; border-radius: 999px;
-  border: 1px solid var(--tm-border); background: transparent;
-  color: var(--muted); cursor: pointer; transition: background 0.15s ease, color 0.15s ease;
+  display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%;
+  font-size: 12px; line-height: 1.5; padding: 5px 7px; border-radius: 5px;
+  border: 1px solid transparent; background: transparent; color: var(--muted);
+  cursor: pointer; overflow-wrap: anywhere; text-align: left;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 .tm-ci-back:hover { background: var(--tm-accent-soft); color: var(--primary); }
-.tm-ci-title { margin: 0; font-size: 15px; font-weight: 760; color: var(--text); }
+.tm-ci-back-icon {
+  flex: 0 0 12px; width: 12px; height: 12px; position: relative;
+  background: linear-gradient(currentColor, currentColor) center / 11px 1.5px no-repeat;
+}
+.tm-ci-back-icon::before {
+  content: ""; position: absolute; width: 6px; height: 6px; left: 1px; top: 3px;
+  border-left: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+}
+.tm-ci-title {
+  margin: 0; min-width: 0; font-size: 16px; font-weight: 720; line-height: 1.5;
+  color: var(--text); overflow-wrap: anywhere;
+}
 .tm-ci-head-spacer { flex: 1; }
-.tm-ci { display: flex; flex-direction: column; gap: 10px; }
-.tm-ci-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tm-ci { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.tm-ci-head {
+  display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap;
+  padding-bottom: 12px; border-bottom: 1px solid var(--tm-divider);
+}
+.tm-ci-head .neko-badge { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.tm-ci-sec { min-width: 0; }
 .tm-ci-h {
-  margin: 0 0 3px; font-size: 11px; font-weight: 700; letter-spacing: 0;
-  color: var(--primary); text-transform: none;
+  margin: 0 0 9px; font-size: 14px; font-weight: 700; line-height: 1.5;
+  letter-spacing: 0; color: var(--text); text-transform: none; overflow-wrap: anywhere;
 }
-/* 自适应网格：容器够宽时双栏，窄面板由 auto-fit 自动回落单栏；
-   min(330px,100%) 保证极窄时不溢出（旧视口 media query 已移除，
-   尺寸判断全部基于子页实际可用宽度） */
-.tm-ci-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(330px, 100%), 1fr)); gap: 0 18px; align-items: start; }
-.tm-ci-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.tm-ci-purpose { margin: 0; font-size: 12px; line-height: 1.66; color: var(--text); overflow-wrap: anywhere; }
-.tm-ci-list { margin: 0; padding-left: 16px; }
-.tm-ci-list li { font-size: 11.5px; line-height: 1.55; color: var(--text); margin: 2px 0; overflow-wrap: anywhere; }
-.tm-ci-list-warn li { color: var(--tm-warning-text); }
-.tm-ci-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.tm-ci-chip {
-  font-size: 11px; padding: 2px 9px; border-radius: 999px; max-width: 100%;
-  overflow-wrap: anywhere;
-  border: 1px solid var(--tm-border); background: transparent; color: var(--muted);
+.tm-ci-summary { padding-left: 12px; border-left: 3px solid var(--primary); }
+.tm-ci-summary .tm-ci-h { color: var(--primary); margin-bottom: 6px; }
+.tm-ci-purpose { margin: 0; font-size: 14px; line-height: 1.75; color: var(--text); overflow-wrap: anywhere; }
+.tm-ci-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+  gap: 18px 28px; align-items: start; min-width: 0;
 }
-.tm-ci-chip[data-tone="dep"] { border-color: rgba(96, 165, 250, 0.5); color: var(--tm-info-text); background: rgba(96, 165, 250, 0.09); }
-.tm-ci-chip[data-tone="cfg"] { border-color: rgba(168, 85, 247, 0.45); color: var(--tm-config-text); background: rgba(168, 85, 247, 0.07); }
-.tm-ci-chip[data-tone="tool"] { border-color: rgba(245, 158, 11, 0.5); color: var(--tm-warning-text); background: rgba(245, 158, 11, 0.08); cursor: help; }
+.tm-ci-grid > .tm-ci-sec { padding-top: 14px; border-top: 1px solid var(--tm-divider); }
+.tm-ci-limits .tm-ci-h { color: var(--tm-warning-text); }
+.tm-ci-list { margin: 0; padding-left: 18px; }
+.tm-ci-list li {
+  padding-left: 2px; font-size: 13px; line-height: 1.7; color: var(--text);
+  margin: 0 0 6px; overflow-wrap: anywhere;
+}
+.tm-ci-list li:last-child { margin-bottom: 0; }
+.tm-ci-list li::marker { color: var(--secondary); }
+.tm-ci-list-warn li::marker { color: var(--tm-warning-text); }
+.tm-ci-requirements { padding-top: 14px; border-top: 1px solid var(--tm-divider); }
+.tm-ci-prerequisite { margin: 0 0 10px; font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
+.tm-ci-facts { display: flex; flex-direction: column; gap: 10px; margin: 0; min-width: 0; }
+.tm-ci-fact { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 8px 18px; min-width: 0; }
+.tm-ci-fact dt {
+  margin: 0; font-size: 13px; font-weight: 600; line-height: 1.65;
+  color: var(--muted); overflow-wrap: anywhere;
+}
+.tm-ci-fact dd {
+  margin: 0; min-width: 0; font-size: 13px; line-height: 1.65;
+  color: var(--text); overflow-wrap: anywhere;
+}
+.tm-ci-deps { display: flex; flex-wrap: wrap; gap: 4px 16px; list-style: none; padding: 0; margin: 0; }
+.tm-ci-deps li { min-width: 0; color: var(--tm-info-text); overflow-wrap: anywhere; }
+.tm-ci-model { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 10px; }
+.tm-ci-model > .neko-badge { flex: 0 1 auto; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.tm-ci-model p { flex: 1 1 240px; margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.tm-ci-demo-section { padding-top: 16px; border-top: 1px solid var(--tm-divider); }
+.tm-ci-demo-section .tm-demo-heading { font-size: 14px; font-weight: 700; line-height: 1.5; }
+.tm-ci-technical { min-width: 0; padding-top: 12px; border-top: 1px solid var(--tm-divider); }
+.tm-ci-tech-summary {
+  display: list-item; width: fit-content; max-width: 100%; padding: 4px 2px;
+  list-style-position: inside; cursor: pointer; font-size: 13px; font-weight: 650;
+  line-height: 1.6; color: var(--muted); overflow-wrap: anywhere; border-radius: 4px;
+}
+.tm-ci-tech-summary::marker { color: var(--primary); }
+.tm-ci-tech-summary:hover { color: var(--primary); background: var(--tm-accent-soft); }
+.tm-ci-tech-summary:focus-visible { outline: 2px solid var(--tm-focus); outline-offset: 2px; }
+.tm-ci-technical[open] > .tm-ci-tech-summary { margin-bottom: 12px; color: var(--text); }
+.tm-ci-code-list { display: flex; flex-wrap: wrap; gap: 5px 16px; list-style: none; padding: 0; margin: 0; }
+.tm-ci-code-list li { min-width: 0; max-width: 100%; }
+.tm-ci-code-list code { font-size: 13px; color: var(--tm-config-text); white-space: normal; overflow-wrap: anywhere; }
+.tm-ci-tools-count { margin: 0 0 7px; font-size: 13px; color: var(--muted); }
 .tm-ci-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+@container tm-ci (max-width: 520px) {
+  .tm-ci-fact { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+  .tm-ci-model { align-items: flex-start; }
+  .tm-ci-model p { flex-basis: 100%; }
+}
 .tm-ci-flow {
   display: flex; flex-wrap: wrap; align-items: center; row-gap: 6px; overflow-wrap: anywhere;
   padding: 8px 10px; border-left: 2px solid var(--tm-divider);
@@ -1379,9 +1433,6 @@ export const PANEL_STYLES = `
   padding: 18px 0; text-align: center; font-size: 12px; color: var(--muted);
 }
 .tm-ci-error { padding: 10px 12px; font-size: 12px; color: var(--tm-warning-text); background: rgba(245, 158, 11, 0.09); border-radius: var(--radius-sm); }
-/* 旧居中 Modal 时代的页脚样式（foot/spacer）子页化后零引用，已删 */
-/* 弹窗内部布局已按弹窗宽度自适应（auto-fit），不再需要视口级 media query；
-   旧 760px 断点只强转单栏、解决不了横向溢出，已移除 */
 /* ---- 动画开关 TmSwitch（1.3.1）：统一替换宿主 Kit 原生 checkbox 开关 ----
    经典顺滑型：滑块 0.25s 缓动平移、轨道同步渐变换色；开启态浅蓝与面板
    淡蓝磨砂底同族（#93c5fd/#60a5fa 系）。small 档供状态条/引导行等窄位。 */

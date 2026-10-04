@@ -13,8 +13,8 @@ permissions:
 
 jobs:
   release:
-    uses: Project-N-E-K-O/N.E.K.O/.github/workflows/plugin-market-release.yml@main
+    uses: Project-N-E-K-O/N.E.K.O/.github/workflows/plugin-market-release.yml@9cdc4dfce7ae3203673ad4846a02ae1c7fbe8ad0
     with:
       plugin-id: forever_companion
       neko-repository: Project-N-E-K-O/N.E.K.O
-      neko-ref: main
+      neko-ref: 9cdc4dfce7ae3203673ad4846a02ae1c7fbe8ad0

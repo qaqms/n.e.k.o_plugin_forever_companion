@@ -220,6 +220,7 @@ passing.
 Dependencies total 25 files / 368,647 bytes, below the 32-file / 512-KiB limits.
 UI source hash:
 `39b6b7bbb5156ccef7b12a34449fba7572a53371e40d2e893a16ab9a084fbca4`.
+
 The Python suite passed all 557 tests, including 27 copy-contract cases. Ruff,
 the official plugin check, and the 26-module link check passed. The official
 check's uncommitted-worktree warning is expected for this local test delivery.
@@ -257,3 +258,36 @@ After the version change, all 557 Python tests passed again, along with the
 CI-equivalent pinned Ruff check, official strict plugin check, isolated
 host-supported typecheck and 26-module link check. The UI source hash remains
 `39b6b7bbb5156ccef7b12a34449fba7572a53371e40d2e893a16ab9a084fbca4`.
+
+## Public 1.3.6 Feature-Introduction Release
+
+The author approved the 2026-10-04 feature-introduction redesign for public
+version 1.3.6. The older 1.3.6 wallpaper heading above describes a local
+development milestone, not this public release. Promotion changes version
+metadata and release documentation only; the accepted UI and copy stay frozen.
+
+The completed isolated browser runs passed 508 screenshots and 1,257 checks
+across eight locales, ten capability introductions, light/dark themes, wide and
+narrow viewports, intermediate breakpoints, and short windows. There were no
+render, clipping, overlap, horizontal-overflow, or interaction failures.
+Demo animation and controls, privacy/journal choices, refresh preservation,
+unmount cleanup, and absence of business mutations were also verified.
+
+After the version change, all 586 Python tests passed again, along with the
+CI-equivalent pinned Ruff check, official strict plugin check, isolated
+host-supported typecheck, and 29-module link check. The frozen UI source hash is
+`863553c29f42848c9aaa1fa3e250e41b5d4ad1d403b108680d2467f2698a17e2`.
+The runtime graph contains 28 dependencies / 452,543 bytes, below the host's
+32-file / 512-KiB limits. These fixture checks do not claim a Steam import or a
+production-data/real-model test. Only the plugin repository is changed.
+
+The reusable verify/release workflows and host checkout are pinned to the
+audited host commit `9cdc4dfce7ae3203673ad4846a02ae1c7fbe8ad0`.
+Their sync/check/build path does not call the CLI publish/market-notify path;
+the market-release flag validates repository, tag and version conventions and
+writes evidence only.
+
+The prior `forever_companion_1.3.5_feature_intro.neko-plugin` remains an unchanged
+local test artifact. A new 1.3.6 package is built from the release commit.
+Publication is limited to GitHub; plugin-market submission and notification
+remain the author's responsibility.

@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 import { spawnSync } from "node:child_process"
 import { installFixtureBridge, makeFixture } from "./hosted_ui_fixture.mjs"
 import { demoChecks } from "./hosted_ui_demo_checks.mjs"
+import { introChecks } from "./hosted_ui_intro_checks.mjs"
 
 const TOOL_ROOT = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_PLUGIN = resolve(TOOL_ROOT, "..")
@@ -1308,7 +1309,7 @@ async function main() {
     let browser
     try {
       browser = await chromium.launch(launch)
-      if (!process.argv.includes("--interactions-only") && !process.argv.includes("--diagnostics-only") && !process.argv.includes("--compact-only") && !process.argv.includes("--theme-only") && !process.argv.includes("--copy-only") && !process.argv.includes("--demo-only")) report.screenshots = await screenshotMatrix(browser, sources, origin, output)
+      if (!process.argv.includes("--interactions-only") && !process.argv.includes("--diagnostics-only") && !process.argv.includes("--compact-only") && !process.argv.includes("--theme-only") && !process.argv.includes("--copy-only") && !process.argv.includes("--demo-only") && !process.argv.includes("--intro-only")) report.screenshots = await screenshotMatrix(browser, sources, origin, output)
       if (process.argv.includes("--details")) report.screenshots.push(...await detailScreenshots(browser, origin, output))
       if (process.argv.includes("--calendar-diagnostics")) report.calendarDiagnostics = await calendarDiagnostics(browser, origin, output)
       if (process.argv.includes("--interactions") || process.argv.includes("--interactions-only")) {
@@ -1326,6 +1327,11 @@ async function main() {
         const demo = await demoChecks(browser, sources, origin, output, { loadPage, inspectLayout })
         report.screenshots.push(...demo.screenshots)
         report.interactions.push(...demo.checks)
+      }
+      if (process.argv.includes("--intro") || process.argv.includes("--intro-only")) {
+        const intro = await introChecks(browser, sources, origin, output, { loadPage, inspectLayout })
+        report.screenshots.push(...intro.screenshots)
+        report.interactions.push(...intro.checks)
       }
     } finally {
       if (browser) await browser.close()
