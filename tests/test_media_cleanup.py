@@ -11,7 +11,6 @@ import threading
 
 import pytest
 from forever_companion.core.media import video_chunk_key
-
 from tests.test_media_files import (
     FILE_MANIFEST_PREFIX,
     FILE_REGISTRY,

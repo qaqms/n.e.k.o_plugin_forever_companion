@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 from forever_companion.core import media_files, media_playback
 from forever_companion.core.state import _GALLERY_VIDEO_CHUNK_BYTES
-
 from tests.test_media_files import (
     add_video,
     begin,
