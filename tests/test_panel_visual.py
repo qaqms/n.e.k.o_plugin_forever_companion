@@ -112,6 +112,7 @@ def test_wallpaper_defaults_use_requested_values_and_existing_parameter_names(ap
         "glass": 0,
         "card_alpha": 0,
         "text_weight": 100,
+        "motion": True,
     }
     assert appearance_values["defaultVars"]["--tm-glass-filter"] == "none"
     assert appearance_values["defaultVars"]["--tm-sidebar-glass-filter"] == "none"
@@ -162,22 +163,31 @@ def test_background_filter_and_fill_do_not_modify_mask(appearance_values):
 
 def test_wallpaper_image_and_mask_are_independent_sibling_layers():
     source = PANEL.read_text(encoding="utf-8")
-    assert re.search(
-        r'<div key="bg" className="tm-bg" aria-hidden="true">\s*'
-        r'<div className="tm-bg-image" style=\{bgLayerStyle\(draftAp, bgDataUrl\)\} />\s*'
-        r'<div className="tm-bg-dim" style=\{\{ opacity: String\(draftAp\.dim\) \}\} />\s*'
-        r"</div>",
-        source,
-    ), "Wallpaper filters must be on the image, not the wrapper or mask"
+    wrapper = '<div key="bg" className="tm-bg" aria-hidden="true">'
+    image_match = re.search(
+        r'<div className="tm-bg-image" style=\{bgLayerStyle\('
+        r'[^;]+?, bgDataUrl\)\} />', source,
+    )
+    mask = '<div className="tm-bg-dim" style={{ opacity: String(draftAp.dim) }} />'
+    assert wrapper in source, "Wallpaper wrapper must not have a filter or opacity"
+    assert image_match, "Static image filters must remain on the image"
+    image = image_match.group(0)
+    assert mask in source, "Mask opacity must remain independent of wallpaper filters"
+    assert source.index(wrapper) < source.index(image) < source.index(mask)
+    assert source.index(image) < source.index("<BackgroundVideo ") < source.index(mask)
+    media = (ROOT / "ui" / "media.tsx").read_text(encoding="utf-8")
+    assert "filter: layer.filter" in media
+    assert 'className="tm-bg-video"' in media
 
 
 def test_unready_wallpaper_retains_only_an_existing_gallery_image():
     source = PANEL.read_text(encoding="utf-8")
     assert "if (!requestedBgUrl) return" in source
-    assert 'image.decode().then(ready).catch(() => { console.warn("[forever_companion] decode panel background failed") })' in source
+    assert "if (image.decode) await image.decode()" in source
+    assert "prepare().catch((err) => {" in source
     assert "image.decode().then(ready).catch(ready)" not in source
-    assert "if (!alive) return" in source
-    assert "setReadyBg({ id: draftAp.bg_id, dataUrl: requestedBgUrl, theme })" in source
+    assert "if (!alive || mediaGeneration.current !== generation) return" in source
+    assert "setReadyBg({ id: draftAp.bg_id, dataUrl: themeSource, theme, media: currentMedia })" in source
     assert "alive = false" in source
     assert 'setReadyBg({ id: "", dataUrl: "", theme: null })' in source
     assert "galleryItems.some((item) => String(item.id || \"\") === readyBg.id)" in source
@@ -186,8 +196,13 @@ def test_unready_wallpaper_retains_only_an_existing_gallery_image():
 
 def test_wallpaper_and_cached_colors_share_the_decode_lifecycle():
     source = PANEL.read_text(encoding="utf-8")
-    assert "cached?.dataUrl === requestedBgUrl ? cached.theme : readWallpaperTheme(image)" in source
-    assert "setReadyBg({ id: draftAp.bg_id, dataUrl: requestedBgUrl, theme })" in source
+    assert "const themeSource = media ? media.poster : requestedBgUrl" in source
+    assert "cached?.dataUrl === themeSource ? cached.theme : readWallpaperTheme(image)" in source
+    assert "const latestMedia = videoCache.current[draftAp.bg_id]" in source
+    assert "latestMedia && latestMedia.url === media?.url ? latestMedia : media" in source
+    assert "setReadyBg({ id: draftAp.bg_id, dataUrl: themeSource, theme, media: currentMedia })" in source
+    assert 'setBackgroundError(currentMedia?.error || "")' in source
+    assert "if (!currentMedia?.loading) setBackgroundProgress" in source
     assert "bgDataUrl && readyBg.theme ? readyBg.theme : DEFAULT_THEME_COLORS" in source
     assert "themeColorVars(themeColors)" in source
     assert "delete themeCache.current[id]" in source

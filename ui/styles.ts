@@ -677,6 +677,7 @@ export const PANEL_STYLES = `
 /* Only the image is filtered; the independent dim layer must remain unaffected. */
 .tm-bg { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
 .tm-bg-image { position: absolute; inset: 0; background-repeat: no-repeat; }
+.tm-bg-video { display: block; max-width: none; border: 0; }
 .tm-bg-dim { position: absolute; inset: 0; background: #18181c; }
 .tm-statusbar, .tm-body, .tm-warnstrip { position: relative; z-index: 1; }
 /* 整体字体显示强度：只作用于正文继承链上的文字（按钮/徽标等自带色的组件不受影响）；
@@ -753,6 +754,45 @@ export const PANEL_STYLES = `
 }
 .tm-gallery-del:hover { background: var(--danger); opacity: 1; }
 .tm-gallery-del:focus-visible { outline-offset: 1px; opacity: 1; }
+.tm-gallery-video-mark {
+  position: absolute; right: 7px; bottom: 34px; width: 23px; height: 20px;
+  border-radius: 3px; background: rgba(28, 28, 32, 0.82); pointer-events: none;
+}
+.tm-gallery-video-mark::after {
+  content: ""; position: absolute; left: 9px; top: 6px;
+  border-left: 7px solid #fff; border-top: 4px solid transparent; border-bottom: 4px solid transparent;
+}
+.tm-media-import { display: grid; min-width: 0; gap: 10px; }
+.tm-media-import-busy .neko-image-upload { pointer-events: none; opacity: 0.6; }
+.tm-wallpaper-video-input, .tm-wallpaper-directory-input {
+  display: block; box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0;
+  padding: 6px; border: 1px solid var(--tm-border); border-radius: 4px;
+  color: var(--text); background: var(--tm-hover); font: inherit; font-size: 12px;
+}
+.tm-wallpaper-video-input::file-selector-button, .tm-wallpaper-directory-input::file-selector-button {
+  max-width: 100%; padding: 7px 9px; margin-right: 8px; border-radius: 4px;
+  border: 1px solid var(--tm-border); background: var(--tm-button-bg); color: var(--text);
+  font: inherit; white-space: normal; cursor: pointer;
+}
+.tm-wallpaper-video-input:focus-visible, .tm-wallpaper-directory-input:focus-visible {
+  outline: 2px solid var(--tm-focus); outline-offset: 2px;
+}
+.tm-video-progress { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.tm-wallpaper-candidates { display: grid; min-width: 0; gap: 7px; }
+.tm-wallpaper-candidate {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; min-width: 0; gap: 12px;
+  align-items: center; padding: 8px 0; border-bottom: 1px solid var(--tm-border);
+}
+.tm-wallpaper-candidate-name { display: grid; min-width: 0; gap: 3px; font-size: 12px; overflow-wrap: anywhere; }
+.tm-wallpaper-candidate-name span { color: var(--muted); font-size: 11px; }
+.tm-wallpaper-candidate .neko-button { max-width: 120px; white-space: normal; overflow-wrap: anywhere; }
+.tm-wallpaper-motion-label { display: flex; gap: 8px; align-items: center; font-size: 13px; cursor: pointer; }
+.tm-wallpaper-motion { width: 18px; height: 18px; flex: 0 0 18px; accent-color: var(--primary); }
+.tm-media-storage { display: grid; min-width: 0; gap: 8px; }
+.tm-media-policy { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
+.tm-media-policy label { display: grid; gap: 4px; min-width: 130px; color: var(--muted); font-size: 12px; }
+.tm-media-policy input { width: 100%; box-sizing: border-box; min-height: 32px; border: 1px solid var(--tm-border); border-radius: 5px; padding: 5px 7px; color: var(--text); background: var(--surface); }
+.tm-media-policy input:focus-visible { outline: 2px solid var(--tm-focus); outline-offset: 1px; }
 
 .tm-theme-colors { display: flex; align-items: center; flex-wrap: wrap; min-width: 0; gap: 10px 18px; }
 .tm-theme-source { color: var(--muted); font-size: 12px; flex: 0 1 auto; overflow-wrap: anywhere; }

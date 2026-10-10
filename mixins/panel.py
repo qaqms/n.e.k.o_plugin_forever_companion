@@ -28,7 +28,6 @@ from ..core.appearance import (
     gallery_img_key,
     gallery_next_id,
     gallery_normalize_index,
-    gallery_remove_item,
     legacy_to_gallery,
     parse_image_data_url,
 )
@@ -44,6 +43,7 @@ from ..core.cycle import (
     parse_anchor_date,
 )
 from ..core.journal import archive_brief, page_header
+from ..core.media import GalleryMediaError
 from ..core.onboarding import build_readiness, make_guide_record, wizard_pending
 from ..core.review import (
     elapsed_days as review_elapsed_days,
@@ -105,11 +105,14 @@ from ..core.stats import (
     summary_payload,
 )
 from ..services.tone_slot import _channel_mode, diagnose_slot_dormancy
+from .media import MediaGalleryMixin
 
 JsonObject = dict[str, Any]
+_MEDIA_ENTRY_TIMEOUT_SECONDS = 120.0
+_MEDIA_CLEANUP_ENTRY_TIMEOUT_SECONDS = 300.0
 
 
-class PanelEntriesMixin:
+class PanelEntriesMixin(MediaGalleryMixin):
     """全部用户/面板入口：dashboard 数据源、设置、周期操作、日记浏览、危险区。"""
 
     # ==========================================
@@ -1107,14 +1110,26 @@ class PanelEntriesMixin:
         name=tr("entries.get_panel_gallery.name", default="读取面板图库"),
         description=tr("entries.get_panel_gallery.description", default="读取面板图库索引与外观参数，并迁移旧版单图背景（面板内部用）。"),
         input_schema={"type": "object", "properties": {}},
+        timeout=_MEDIA_ENTRY_TIMEOUT_SECONDS,
         metadata={"result_kind": "event", "agent_hidden": True},
     )
     async def get_panel_gallery(self, **_: Any):
-        index = await self._gallery_index()
+        return await self._gallery_call(self._get_panel_gallery)
+
+    async def _get_panel_gallery(self):
+        await self._video_cleanup(reclaim_live=True)
+        index = await self._gallery_index_strict()
+        media_storage = await self._media_storage_summary(index)
         res = await self._store_read(_STORE_PANEL_APPEARANCE)
+        if not isinstance(res, Ok):
+            raise GalleryMediaError("gallery_update_failed")
         raw = res.value if isinstance(res, Ok) else None
         if isinstance(raw, dict):
-            return Ok({"items": index.get("items") or [], "appearance": clamp_appearance(raw), "migrated": False})
+            appearance = clamp_appearance(raw)
+            if appearance["bg_id"] and gallery_find(index, appearance["bg_id"]) is None:
+                appearance["bg_id"] = ""
+            return Ok({"items": index.get("items") or [], "appearance": appearance, "migrated": False,
+                       "media_storage": media_storage})
         # 外观参数从未建立 → 尝试旧版单图一次性迁移
         legacy_res = await self._store_read(_STORE_PANEL_BG)
         migrated = legacy_to_gallery(legacy_res.value if isinstance(legacy_res, Ok) else None)
@@ -1133,11 +1148,13 @@ class PanelEntriesMixin:
             if isinstance(save_res, Err):
                 return Err(SdkError("background_migrate_failed"))
             self.logger.info("legacy panel background migrated into gallery: id={}", gid)
-            return Ok({"items": index.get("items") or [], "appearance": appearance, "migrated": True})
-        return Ok({"items": index.get("items") or [], "appearance": appearance_defaults(), "migrated": False})
+            return Ok({"items": index.get("items") or [], "appearance": appearance, "migrated": True,
+                       "media_storage": await self._media_storage_summary(index)})
+        return Ok({"items": index.get("items") or [], "appearance": appearance_defaults(), "migrated": False,
+                   "media_storage": media_storage})
 
     @ui.action(
-        label=tr("actions.gallery_add.label", default="添加图片到图库"),
+        label=tr("actions.gallery_add.label", default="添加壁纸到图库"),
         tone="primary",
     )
     @plugin_entry(
@@ -1150,12 +1167,36 @@ class PanelEntriesMixin:
                 "data_url": {"type": "string", "description": tr("fields.galleryDataUrl", default="图片 data URL（base64）")},
                 "thumb": {"type": "string", "description": tr("fields.galleryThumb", default="缩略图 data URL（可空，面板稍后回填）")},
                 "name": {"type": "string", "description": tr("fields.galleryName", default="图片文件名")},
+                "op": {"type": "string", "enum": ["", "video_begin", "video_chunk", "video_status", "video_commit", "video_abort", "video_policy"]},
+                "mime": {"type": "string"},
+                "size": {"type": "integer"},
+                "poster": {"type": "string"},
+                "upload_id": {"type": "string"},
+                "chunk_index": {"type": "integer"},
+                "data_b64": {"type": "string"},
+                "single_limit_mib": {"type": "integer"},
+                "total_limit_mib": {"type": "integer"},
             },
-            "required": ["data_url"],
         },
+        timeout=_MEDIA_ENTRY_TIMEOUT_SECONDS,
         metadata={"agent_hidden": True},
     )
-    async def gallery_add(self, data_url: str = "", thumb: str = "", name: str = "", **_: Any):
+    async def gallery_add(
+        self, data_url: str = "", thumb: str = "", name: str = "", op: str = "",
+        mime: str = "", size: int = 0, poster: str = "", upload_id: str = "",
+        chunk_index: int = -1, data_b64: str = "", single_limit_mib: Any = None,
+        total_limit_mib: Any = None, **_: Any,
+    ):
+        if op != "":
+            return await self._gallery_call(
+                self._video_operation, op=op, name=name, mime=mime, size=size, thumb=thumb,
+                poster=poster, upload_id=upload_id, chunk_index=chunk_index, data_b64=data_b64,
+                single_limit_mib=single_limit_mib, total_limit_mib=total_limit_mib,
+            )
+        return await self._gallery_call(self._gallery_add_image, data_url=data_url, thumb=thumb, name=name)
+
+    async def _gallery_add_image(self, data_url: str, thumb: str, name: str):
+        await self._ensure_media_mutation_allowed()
         try:
             mime, size = parse_image_data_url(data_url)
             thumb_text = str(thumb or "").strip()
@@ -1167,7 +1208,7 @@ class PanelEntriesMixin:
         except ValueError as exc:  # 防御：未来新增的非码校验失败兜底
             self.logger.warning("gallery_add rejected image: {}", exc)
             return Err(SdkError("image_invalid"))
-        index = await self._gallery_index()
+        index = await self._gallery_index_strict()
         item = {
             "id": "",
             "name": str(name or "")[:80],
@@ -1188,13 +1229,26 @@ class PanelEntriesMixin:
         if isinstance(res, Err):
             return Err(SdkError("image_save_failed"))
         if not await self._gallery_save_index(index):
-            await self._store_delete(gallery_img_key(item["id"]), f"gallery image {item['id']} (rollback)")
+            image_key = gallery_img_key(item["id"])
+            removed = await self._store_delete(image_key, f"gallery image {item['id']} (rollback)")
+            if isinstance(removed, Err):
+                # Keep a durable tombstone when the rollback delete itself
+                # fails.  Clear/retry can reclaim the unindexed image even on
+                # SDKs that do not expose Store.keys().
+                try:
+                    registry = await self._file_registry()
+                    if image_key not in registry["key_deletions"]:
+                        registry["key_deletions"].append(image_key)
+                    registry["storage_reclaim_pending"] = True
+                    await self._save_file_registry(registry)
+                except GalleryMediaError:
+                    self.logger.warning("gallery image rollback journal failed: {}", image_key)
             return Err(SdkError("image_save_failed"))
         self.logger.info("gallery image added: id={} mime={} chars={}", item["id"], mime, size)
         return Ok({"id": item["id"], "items": index.get("items") or []})
 
     @ui.action(
-        label=tr("actions.gallery_remove.label", default="从图库删除图片"),
+        label=tr("actions.gallery_remove.label", default="从图库删除壁纸"),
         tone="danger",
     )
     @plugin_entry(
@@ -1205,24 +1259,33 @@ class PanelEntriesMixin:
             "type": "object",
             "properties": {
                 "item_id": {"type": "string", "description": tr("fields.galleryItemId", default="图库条目 id")},
+                "op": {"type": "string", "enum": ["", "clear_media"]},
+                "confirm": {"type": "boolean"},
             },
-            "required": ["item_id"],
+            "required": [],
         },
+        timeout=_MEDIA_CLEANUP_ENTRY_TIMEOUT_SECONDS,
         metadata={"agent_hidden": True},
     )
-    async def gallery_remove(self, item_id: str = "", **_: Any):
+    async def gallery_remove(self, item_id: str = "", op: str = "", confirm: Any = None, **_: Any):
+        if op == "clear_media":
+            return await self._gallery_call(self._media_clear, confirm=confirm)
+        return await self._gallery_call(self._gallery_remove, item_id=item_id)
+
+    async def _gallery_remove(self, item_id: str = ""):
         gid = str(item_id or "").strip()
         if not gid:
             return Err(SdkError("item_id_required"))
-        index = await self._gallery_index()
-        if gallery_find(index, gid) is None:
+        await self._ensure_media_mutation_allowed()
+        await self._video_cleanup()
+        index = await self._gallery_index_strict()
+        item = gallery_find(index, gid)
+        if item is None:
             return Err(SdkError("image_not_found"))
-        gallery_remove_item(index, gid)
-        # 图本体删除是 best-effort（索引先除名即可对用户不可见；写失败留痕，
-        # 残留 blob 无引用不致数据错乱）；统一删除出口在 P1 收编
-        await self._store_delete(gallery_img_key(gid), f"gallery image {gid}")
-        if not await self._gallery_save_index(index):
-            return Err(SdkError("gallery_update_failed"))
+        if item.get("kind") == "video":
+            await self._video_remove(index, item)
+        else:
+            await self._media_remove_image(index, item)
         appearance = await self._saved_appearance()
         if appearance.get("bg_id") == gid:
             # 解除对该图的引用（写失败不拦删除：悬空 bg_id 在读取与保存侧自愈）
@@ -1249,12 +1312,17 @@ class PanelEntriesMixin:
             },
             "required": ["item_id", "thumb"],
         },
+        timeout=_MEDIA_ENTRY_TIMEOUT_SECONDS,
         metadata={"agent_hidden": True},
     )
     async def gallery_set_thumb(self, item_id: str = "", thumb: str = "", **_: Any):
+        return await self._gallery_call(self._gallery_set_thumb, item_id=item_id, thumb=thumb)
+
+    async def _gallery_set_thumb(self, item_id: str = "", thumb: str = ""):
         gid = str(item_id or "").strip()
         if not gid:
             return Err(SdkError("item_id_required"))
+        await self._ensure_media_mutation_allowed()
         try:
             parse_image_data_url(thumb, _GALLERY_THUMB_MAX_CHARS)
         except ImageDataUrlError as exc:
@@ -1263,7 +1331,7 @@ class PanelEntriesMixin:
         except ValueError as exc:
             self.logger.warning("gallery_set_thumb rejected: {}", exc)
             return Err(SdkError("image_invalid"))
-        index = await self._gallery_index()
+        index = await self._gallery_index_strict()
         item = gallery_find(index, gid)
         if item is None:
             return Err(SdkError("image_not_found"))
@@ -1273,7 +1341,7 @@ class PanelEntriesMixin:
         return Ok({"items": index.get("items") or []})
 
     @ui.action(
-        label=tr("actions.get_gallery_image.label", default="读取图库原图"),
+        label=tr("actions.get_gallery_image.label", default="读取图库媒体"),
         tone="default",
     )
     @plugin_entry(
@@ -1284,19 +1352,47 @@ class PanelEntriesMixin:
             "type": "object",
             "properties": {
                 "item_id": {"type": "string", "description": tr("fields.galleryItemId", default="图库条目 id")},
+                "chunk_index": {"type": "integer"},
+                "chunk_count": {"type": "integer", "minimum": 1, "maximum": 4},
+                "prefer_direct": {"type": "boolean"},
             },
             "required": ["item_id"],
         },
+        timeout=_MEDIA_ENTRY_TIMEOUT_SECONDS,
         metadata={"result_kind": "event", "agent_hidden": True},
     )
-    async def get_gallery_image(self, item_id: str = "", **_: Any):
+    async def get_gallery_image(
+        self,
+        item_id: str = "",
+        chunk_index: int = -1,
+        chunk_count: int | None = None,
+        prefer_direct: bool = False,
+        **_: Any,
+    ):
+        return await self._gallery_call(
+            self._get_gallery_image,
+            item_id=item_id,
+            chunk_index=chunk_index,
+            chunk_count=chunk_count,
+            prefer_direct=prefer_direct,
+        )
+
+    async def _get_gallery_image(
+        self,
+        item_id: str = "",
+        chunk_index: int = -1,
+        chunk_count: int | None = None,
+        prefer_direct: bool = False,
+    ):
         gid = str(item_id or "").strip()
         if not gid:
             return Err(SdkError("item_id_required"))
-        index = await self._gallery_index()
+        index = await self._gallery_index_strict()
         item = gallery_find(index, gid)
         if item is None:
             return Err(SdkError("image_not_found"))
+        if item.get("kind") == "video":
+            return await self._video_get(item, chunk_index, chunk_count, prefer_direct)
         res = await self._store_read(gallery_img_key(gid))  # 读失败经统一出口留痕
         rec = res.value if isinstance(res, Ok) else None
         if not isinstance(rec, dict) or not str(rec.get("data_url") or ""):
@@ -1329,14 +1425,19 @@ class PanelEntriesMixin:
                 "glass": {"type": "number", "minimum": 0, "maximum": 40, "description": tr("fields.appearanceGlass", default="卡片毛玻璃强度（px）")},
                 "card_alpha": {"type": "number", "minimum": 0, "maximum": 100, "description": tr("fields.appearanceCardAlpha", default="卡片底色强度（%，100=不透明底色）")},
                 "text_weight": {"type": "number", "minimum": 40, "maximum": 100, "description": tr("fields.appearanceTextWeight", default="整体字体显示强度（%，越低越淡并自动描边）")},
+                "motion": {"type": "boolean"},
             },
         },
         metadata={"agent_hidden": True},
     )
     async def set_panel_appearance(self, **kwargs: Any):
+        return await self._gallery_call(self._set_panel_appearance, **kwargs)
+
+    async def _set_panel_appearance(self, **kwargs: Any):
+        await self._ensure_media_mutation_allowed()
         appearance = clamp_appearance(kwargs)
         if appearance.get("bg_id"):
-            index = await self._gallery_index()
+            index = await self._gallery_index_strict()
             if gallery_find(index, str(appearance["bg_id"])) is None:
                 # 悬空引用（图被别处删了）：静默解除，不炸保存
                 appearance["bg_id"] = ""

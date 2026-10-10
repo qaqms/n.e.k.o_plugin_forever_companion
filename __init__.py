@@ -679,6 +679,7 @@ class ForeverCompanionPlugin(
         #（tick 自动 / 面板队列 / 调试入口）并发跑模型，见 _maybe_write_review
         self._review_writing: set[str] = set()
         self._supervise_lock = threading.Lock()
+        self._init_media_gallery()
         self._last_tool_health_ts = 0.0
         # 调试模式（[tide].debug_mode）：活动快照覆写与调试入口注册水位；
         # 关闭时不注册任何调试入口，面向用户的表面零痕迹
@@ -891,6 +892,7 @@ class ForeverCompanionPlugin(
 
     @lifecycle(id="shutdown")
     async def shutdown(self, **_: Any):
+        await self._media_shutdown()
         if not self._state_trusted:
             # 本次启动没能在 store 通电后读到真实状态（见 _ensure_store_ready），
             # 内存里的分片是从"空"起步、混着本次会话改动的幻影。整体回写会把上一

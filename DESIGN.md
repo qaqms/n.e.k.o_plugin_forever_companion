@@ -453,6 +453,122 @@ CHANGELOG，契约性变化改本文件正文——两边各司其职，不再�
 - 无壁纸软色变量只在 CSS 命中该状态时生效，选择壁纸后自动退出，取色与材质继续
   沿用壁纸逻辑；无新增 API、配置、存储或语言键，不覆盖用户已保存外观。
 
+## 插件面板动态壁纸（正式版 1.3.8）
+
+- 只修改独立插件；宿主源码、Steam 安装及参考项目只读。壁纸层只覆盖自己的
+  Hosted TSX 面板，不注入宿主 DOM，不读取任意本地路径，不启动 Wallpaper Engine。
+- 沿用现有图片图库及 `panel_appearance`，增加严格布尔 `motion`（缺省为 true）。
+  图片和视频共用 24 项索引；导入不自动选择，外观草稿、还原和底部统一保存不变。
+- `ui/wallpaper_import.ts` 只解析用户通过目录选择器授权的文件。仅支持明确声明
+  `type=image/video` 的 `project.json.file` 主媒体，拒绝绝对路径、URL、路径越界
+  和重名歧义，不执行 web / application，不解包 scene.pkg。
+- 复用隐藏 UI 入口 `gallery_add` 的 `video_begin/video_chunk/video_commit/video_abort`
+  操作和 `get_gallery_image(item_id, chunk_index=-1)`：默认视频请求返回小型元信息和
+  静态封面，指定分块下标才返回对应 Base64，不通过上下文传回整段视频。
+- 新视频经公开 SDK `self.data_path("wallpapers")` 定位专用持久目录，
+  跟随宿主数据根解析，不固定驱动器、不写安装目录、不接收客户端路径。
+  原媒体二进制落盘，内部随机 ID 对应 `.part` 暂存和 `.bin` 已发布文件，
+  状态由独立 `gallery_files_v1` 登记；小块 RPC/Base64 只用作传输。
+  图片与小型索引继续走 Store 统一读写出口，旧 `gallery_video/<id>` 与
+  `gallery_video_chunk/<内部随机ID>/<下标>` 保持双读，不首启搬迁或删除旧库。
+- `gallery_video_file/<id>` 文件清单与 `gallery_files_v1` 登记使用明确的 version 1，
+  不将路径/URL 等未知字段塞进会剔除字段的旧图库索引。
+  未认识的更高清单版本使媒体写入 fail-closed，不能归一成空库后覆写。
+  代码与数据分别回滚：保留旧库以支持旧代码读取，不承诺旧代码播放新版文件视频。
+- 默认单视频 256 MiB、视频库预算 2 GiB；可调单视频 32..512 MiB、
+  总库 64..16,384 MiB；单次读取硬上限 512 MiB，原始块 768 KiB。
+  库存、上传预留、暂存与待回收文件均计入预算，目标卷额外保留 64 MiB。
+  缩小配额仅阻止新增，不自动删除已有文件。暂存有超时，图库操作跨事件循环串行。
+  面板打开或并行实例切换不会仅按 owner 不同回收仍存活的上传；只有 TTL 到期或所属进程
+  已结束才清理。恢复已发布记录时必须确认清单对应的 `.bin` 文件仍存在且大小匹配，
+  缺失时 fail-closed，保留索引与清单供人工清理或恢复，不把元数据静默当成成功。
+  未完成清理时，图片、视频、外观和容量策略写入一律拒绝，直到清理重试成功。
+  校验、文件提交和 Store 索引发布不是同一事务，需持久恢复记录与幂等清理；
+  取消、超时和重启恢复只能产生完整已发布文件或可回收的未发布素材。
+- 后端校验实际文件头、分块序列、长度、规范 Base64、逐块 SHA-256、内部 ID 和
+  PNG/JPEG/WebP 封面；实际编码可播放性由浏览器导入前解码确认，不引入编解码库。
+  Windows 底层 `os.open` 必须显式使用 `O_BINARY`；不能依赖后续 `fdopen` 的
+  二进制模式，因为 CRT 文本打开已可能截去现有文件末尾的 `0x1A`。
+  回归素材需包含全部字节值、不同分块内容和边界 `0x1A`，不能只用重复 ASCII。
+- 新上传通过 `video_begin.chunk_receipts=true` 协商只读确认能力。
+  原分块回包延迟时，前端可发一次 `video_status`，仅以同一上传 ID 的持久登记、
+  有效分块号和已登记摘要确认已接收；不以文件存在或长度猜测成功。
+  状态查询不写登记、不续期、不触发清理，已清空、过期或非上传状态不能确认。
+  探测失败不替代原请求结果；原回包与探测只能有一个推进进度，任务取消中止二者。
+  对重开面板的只读 `video_read`，单块或批量主请求等待 1 秒仍未返回时可发起一次
+  独立补读，补读限时 3 秒。补读必须复用同一媒体项、起始分块号和分块数，并逐块
+  通过与主读取相同的 Base64、序号和精确长度校验；任一合法结果获胜后取消另一请求。补读失败不改变主
+  请求的 20 秒超时和最多三次有限重试预算，且不跨面板缓存或并发不同分块。
+  未协商该能力时沿用原有有限重试，不依赖宿主私有 API 或额外媒体服务器。
+- 重开面板的只读 `video_read` 默认每次请求最多 4 个连续分块（由
+  `chunk_count=1..4` 明确表达），后端逐块返回并分别校验；最后一批可以少于 4 块。
+  旧后端忽略该参数或只返回一个分块时，前端按单块结果继续读取，不把兼容性失败
+  误判成媒体损坏。批量只减少 Hosted 往返，不改变持久格式，也不跨 iframe 保存
+  Blob 或分块缓存。
+- `ui/media.tsx` 使用原生 video DOM ref、静音循环、静态封面及浏览器 Blob URL。
+  固定封面用于主题取色。新素材准备完成后切换，失败保留旧可用背景或使用封面；
+  播放开关和系统减少动态偏好停用动态，文档或 iframe 隐藏时暂停，
+  五秒上下文刷新不重置播放，切换、删除和卸载释放资源。
+  未完成的播放请求去重；临时 AbortError 不标记永久故障，后续可见性检查恢复播放，
+  真正的播放拒绝或媒体解码错误仍停止播放、显示封面并上报错误。
+- 已成功提交的新视频在当前面板可复用用户选择的本地 File 和生成的封面。
+  不自动选中或保存壁纸，只保留一个待选择上传预览，避免无界持有大文件；
+  删除、清空、卸载或替换时释放其 Blob URL，不持久化本地 URL 或文件路径。
+  重开后优先协商下述直接读取；不支持时经动作读取持久媒体。无旧可用背景时先展示已验证格式的封面，
+  显示读取进度和播放准备状态，视频验证完成后再切换动态。
+  切换到另一视频失败时保留不同的旧可用背景；无旧或同一项时保留封面并显示错误。
+  读取日志记录元信息/分块序号、返回大小、耗时和状态，不记录内容、文件名或路径。
+- 视频缓存仅保留已显示项和正在准备项；读取按后端返回的容量/块数上限校验，
+  不保留原先固定 64 块的 48 MiB 隐性门槛。兼容路径仍全段组装 Blob 后播放，
+  不宣称有界浏览器解码内存。不注册原媒体或整个数据根，不新开生产服务、
+  不削弱 Hosted TSX iframe 沙箱，不依赖宿主私有接口，不持久化绝对资源 URL。
+- 1.3.8 的直接路径由 `get_gallery_image(prefer_direct=true)` 显式协商，
+  仅适用于已验证的 file-backed 视频。通过公开 `register_static_ui` 注册
+  SDK 数据根下独立的 `wallpaper_playback` 目录；其中只放空白 index 和
+  完整校验后原子发布的 `.mp4/.webm` 副本。暂存位于注册目录之外，原视频、
+  上传、配置与 Store 不可由该目录读取。文件名由 MIME、长度和分块摘要派生，
+  不包含原文件名、存储 ID 或用户路径；内容摘要不是访问凭证，沿用宿主静态资源
+  接口的访问边界，不提供额外鉴权或公开互联网媒体分享能力。
+- 播放副本最多两项、总计 512 MiB，同时受图库剩余配额和磁盘空间约束，
+  写副本时保留未完成上传预留及 64 MiB 磁盘余量，副本计入 `occupied_bytes`
+  并单列 `playback_cache_bytes`。完整复制在一次工作线程调度内用安全二进制
+  文件句柄执行，逐块校验原摘要、总长度和实际文件头，检查前后源文件签名；
+  未完成的副本不出现在静态目录中。后续元信息请求在原件和副本大小、mtime、
+  ctime、inode 签名仍匹配时复用副本，避免重复复制和编码。
+- 静态响应采用 `private, no-cache, max-age=0, must-revalidate`；
+  当前已检查的宿主 FileResponse 支持 Range，浏览器可直接按需读取。
+  跨面板复用指插件数据目录中的已验证副本，不承诺浏览器持久缓存、零磁盘读取、
+  原视频元素或播放位置跨 iframe 存活。宿主版本、媒体布局与编码仍影响首次播放。
+  删除、清空、开始上传、调整配额和插件 shutdown 回收播放副本；首次直接注册时
+  清理崩溃遗留副本。回收失败不能报告完整清理成功，不触碰原媒体以外的业务数据。
+- 前端只允许本插件固定静态路径及 64 位十六进制文件名，用公开 `props.host.origin`
+  构造临时地址，不从消息体接受任意绝对 URL。直接准备最多等待 3 秒，取消时
+  释放探测视频；失败或能力不可用转为现有 Blob 路径。正常直接路径不发分块动作、
+  不在 JS 中组装视频 Blob，已完成的直接探测不再重复执行面板的 Blob 解码探测。
+  实际背景视频随后发生错误时，当前有效选择最多尝试一次强制 Blob 恢复。
+- `get_panel_gallery.media_storage` 暴露版本、backend、容量、占用、暂存、
+  待回收和可用空间等小型摘要；`gallery_add(op="video_policy")` 调整配额，
+  `gallery_remove(op="clear_media", confirm=true)` 为需确认的全媒体清除。
+  面板协议固定为：
+  `schema_version=1, backend="files", single_limit_bytes, total_limit_bytes,
+  hard_single_limit_bytes=536870912, chunk_bytes=786432, video_bytes,
+  pending_bytes, reclaim_bytes, occupied_bytes, available_bytes, reserve_bytes=67108864,
+  uploads, storage_reclaim_pending, cleanup_pending, playback_mode="chunked_blob"`;
+  容量调整返回同一 `media_storage`，清除成功返回
+  `{cleared:true,items:[],appearance,media_storage,storage_reclaim_pending}`。
+  清除缺少字面量 `confirm=true` 时只返回 `video_clear_confirmation_required`，
+  不删除任何媒体。
+  清除旧 `panel_bg` 防止下次迁移复活，清图片/视频 Store 键、文件、封面、
+  暂存和删除墓碑，解除壁纸选择；其他日记、统计与设置不删。
+  前端同时取消在飞请求并释放媒体 URL、视频元素和本地缓存。
+  清理失败保留 `cleanup_pending` 并可重试；已逻辑删除旧 Store 媒体时的
+  `storage_reclaim_pending` 表示 SQLite 文件占用不保证立刻回收，不等同删除失败。
+  不声称 SQLite 空闲页、OS 缓存或物理介质内容已安全擦除。
+- 个人媒体只在运行时持久目录入库，不随 `.neko-plugin` 交付。
+  打包同时排除媒体后缀和 `data/wallpapers/temp/staging/backup/published` 等运行目录。
+  验收使用隔离 Store 与真实 opaque-origin iframe，
+  不启动宿主、不导入 Steam、不读取真实用户日记或聊天数据。
+
 ## Read Context Plan
 - 参考 `game_agent_minecraft`（push_message read 注入）、`memo_reminder`（store+timer）、
   `sts2_autoplay`（llm_tool+tr+ui.action）三个官方插件

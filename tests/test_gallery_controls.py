@@ -47,7 +47,11 @@ def gallery_controls():
                 };
             },
         };
-        const kit = { useState: initial => [initial, () => {}] };
+        const kit = {
+            useState: initial => [initial, () => {}],
+            useRef: initial => ({current: initial}),
+            useEffect: () => {},
+        };
         for (const name of ["Button", "Card", "Field", "ImageUpload", "SegmentedControl", "Slider"]) {
             kit[name] = "kit:" + name;
         }

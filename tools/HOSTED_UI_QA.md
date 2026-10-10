@@ -1,5 +1,107 @@
 # Isolated Hosted UI QA
 
+## 1.3.8 Release Numbering
+
+The official release consolidates the local 1.4.0 through 1.5.0 testing work
+under version 1.3.8, following the repository's published 1.3.7 release.
+Runtime and media formats are unchanged from the final 1.5.0 acceptance below;
+the older version numbers and report paths are preserved as test history.
+`plugin.toml`, `pyproject.toml`, `uv.lock` and current documentation use 1.3.8.
+
+## 1.5.0 Direct Playback Acceptance
+
+The 2026-10-10 plugin-only acceptance passed 808 Python tests with 38 explicit
+skips (historical Store writer cases and unavailable filesystem symlink cases).
+Ruff 0.12.4 and `git diff --check` passed. The unchanged host remains clean.
+
+The existing Blob and lifecycle regression run at
+`../dist/qa-playback-150-video/report.json` passed 61 checks and 31 screenshots.
+The direct run at `../dist/qa-playback-150-direct-final/report.json` passed
+15 checks and 2 screenshots. Both have zero check, render or layout failures.
+Host-supported typechecking and the hosted linker passed. The source hash is
+`9ce6f30bb92595c1dc7b2548b7726b94be03f918ad433b4654dff6d0371f4dd6`;
+31 runtime dependencies total 500,529 bytes, below the host limits.
+
+Run the new cases with:
+
+```powershell
+node tools/hosted_ui_harness.mjs --direct-only --typecheck --out ../dist/qa-direct
+```
+
+The direct probe extracts the host's unchanged `plugin_ui_file` and MIME
+functions without initializing its application, configuration, Store or
+lifecycle. Starlette FileResponse serves only a temporary QA directory through
+a loopback test adapter; this adapter is excluded from the package and is never
+started by the runtime plugin. Requests verify MIME, 206 Range, invalid-range
+416, traversal denial and the exact revalidation cache policy.
+
+A real 49-MiB moving WebM plays in the unchanged `sandbox="allow-scripts"`
+iframe without Blob assembly or chunk actions. Desktop and narrow contexts
+each destroy and recreate the actual iframe twice. Context refresh keeps the
+playing node; runtime direct-resource failure recovers through Blob. Missing
+endpoints and forbidden absolute paths fall back; reduced motion never
+requests direct preparation or video chunks. HTTP video correctly taints
+canvas in this sandbox, so moving-pixel checks compare browser screenshots
+and playback time without relaxing the sandbox or CORS.
+
+An optional `--actual-video <mp4-path>` case copies an explicitly supplied asset
+into the temporary test directory and removes it at completion. The author's
+198,941,764-byte / 3840x2160 MP4 passed direct playback and actual iframe
+recreation without chunk actions. Initial loading plus pixel checks measured
+1,836 ms; recreation plus pixel checks measured 1,203 ms. These measurements
+include a deliberate 470-ms observation interval and screenshots, exclude
+the production SDK registration/copy path, and are not Steam timings.
+No screenshots of the actual user video are persisted.
+
+`benchmark_playback.py --asset <path>` separately runs the real pure-core copy
+helper against a temporary SDK root, never a real Store. For that video,
+complete verification and publication measured 304.85 ms; four subsequent
+signature-checked reuses measured 19.42..20.22 ms. This excludes metadata RPC,
+browser decoding and Steam routing. Originals and production media remain
+unchanged; there is no transcoding or automatic migration.
+
+Backend cases additionally cover opt-in/legacy behavior, SDK failures,
+corruption before publishing, changed originals/copies, two-entry and byte
+limits, total library quota, pending upload reservations, disk exhaustion,
+reparse rejection, cleanup failure/retry, upload/policy cleanup and shutdown.
+The archive verifier excludes `wallpaper_playback` regardless of suffix.
+The real Steam SDK, decoder and import remain the author's acceptance step.
+
+## 1.4.9 Reopen Recovery Verification
+
+The 2026-10-10 run at `../dist/qa-video-reopen-149-full/report.json` passed
+61 interaction checks and 31 screenshots, with zero check, render or layout
+failures. Host-supported typechecking and the 32-module Hosted linker passed.
+The UI source hash is
+`1c552ce69c9374b2604f74e9f9a13a044b82d87daa8d0ef994e2ddf547c1d12b`;
+31 runtime dependencies total 499,315 bytes, within the host limits.
+
+The new lifecycle test destroys and creates the opaque iframe document twice,
+restores the saved video through the fixture backend, holds its first batched
+reply, and verifies recovery and moving pixels before releasing the late
+original reply. The playback test injects exactly one transient AbortError
+into an already-decoded video's play request, then verifies actual Chromium
+playback resumes without a permanent cover/error state. The injected
+interruption is not a claim of reproducing an operating-system transition.
+Existing real iframe CSS hiding, looping, 49-MiB downloads, resource cleanup,
+decoder failure, reduced motion, directory imports and eight locales pass.
+For only these two new checks, add `--video-recovery-only` to `--video-only`.
+
+The complete Python suite passed 790 tests with 37 explicit skips. Five new
+transport cases first failed on the previous implementation, then passed:
+lost batch reply recovery at the one-second duplicate delay, and malformed
+duplicates with wrong index, short bytes, excess chunks or an empty batch.
+All 43 transport cases now pass. Ruff 0.12.4 and `git diff --check` pass.
+
+A separate read-only probe of the author's saved 198,941,764-byte video used
+an isolated headless Edge opaque iframe and a complete Blob, matching the
+plugin's native decoder setup. It decoded at 3840x2160, duration 15 seconds,
+and advanced playback time. The file and production Store were not modified;
+no live host API, installation, settings, diaries or chat records were accessed.
+This rules out a decoder failure for that file in the tested browser, not in
+every Electron/Steam build. The real Steam import and routing test remains
+the author's final acceptance step.
+
 `hosted_ui_harness.mjs` renders the real plugin panel using the host's current
 Hosted TSX linker and UI Kit. It does not replace the panel with React or a
 mock component library. `hosted_ui_fixture.mjs` provides deterministic backend
@@ -324,3 +426,257 @@ The existing audited GitHub workflows remain pinned to host commit
 `9cdc4dfce7ae3203673ad4846a02ae1c7fbe8ad0`. Publication is limited to
 GitHub: no plugin-market registration, submission or notification is invoked,
 and no host source is changed.
+
+## 1.4.0 Dynamic Wallpaper Import Package
+
+This is a local import-test delivery, not a public release or Steam installation.
+Only the standalone plugin is changed. The host and reference checkouts remain
+read-only; fixture checks do not read or mutate production Store, diary or chat data.
+
+The frozen source hash is
+`abe416f2256f46edd4cd84add87cd29b4c5a22e503bd0772dfab8b0424ef5ca8`.
+There are 30 runtime dependencies / 477,656 bytes, within the host's 32-file /
+512-KiB budget. The 31-module linker, isolated Hosted TSX typecheck, Ruff,
+official strict source check and all 638 Python tests passed.
+
+The matching browser reports are `out/video-final/report.json` and
+`out/wallpaper-regression-final/report.json`: 23 video screenshots / 38 checks,
+plus 136 appearance report screenshots / 281 image/gallery/theme/compact and
+eight-locale appearance checks, with no check, render or layout failures.
+The latter run produces additional diagnostic PNG files beyond its report count.
+The final `out/video-verified/report.json` repeats the video suite at the same
+source hash and adds hard assertions for visible video opacity and coverage
+of all four iframe viewport edges. Its 23 screenshots / 38 checks also pass.
+
+Video QA uses Chromium canvas capture and MediaRecorder, not a fabricated
+video element or encoded still. The 2,076,500-byte / 101-frame stress WebM
+exercises three production-sized chunks and byte-level upload/download hashes.
+A separate 44,817-byte / 101-frame landscape fixture provides clear screenshots.
+Checks cover moving decoded pixels and playback time, looping, filters, save,
+revert, remount, five-second refresh without resetting the video node,
+document and real parent-iframe hiding, motion and reduced-motion changes,
+malformed acknowledgments, cancelled uploads, authorized WE folder selection,
+deletion and URL cleanup, actual decoder errors and poster/thumbnail fallback.
+Generated fixtures and screenshots are ignored and excluded from the package.
+
+Reproduce the isolated checks from the plugin directory:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m pytest tests -q
+ruff check .
+node tools/check_hosted_link.mjs .
+node tools/hosted_ui_harness.mjs --video-only --typecheck --out tools/out/video-final
+node tools/hosted_ui_harness.mjs --interactions-only --gallery --compact --theme --appearance --out tools/out/wallpaper-regression-final
+```
+
+`tools/build_import_package.py` uses the host's official builder and archive
+validators while routing runtime/config/log paths into a unique temporary tree.
+Its build-only `sitecustomize` prevents Windows Documents probes and automatic
+legacy migrations in both the parent and inherited metadata worker. It does not
+modify host files or run plugin lifecycle hooks. Existing output is never overwritten.
+
+The output is `../dist/forever_companion_1.4.0_dynamic_wallpaper.neko-plugin`
+(643,572 bytes / 79 entries). ZIP CRC and official payload hash verification
+passed, and all 74 packaged source files match the plugin workspace byte for byte.
+The generated handler metadata is present. Tests, tools, caches, databases and
+user media are absent.
+
+Package SHA-256:
+`a5ee40b19e4a9634c661e5f7f614b517804e70d72ab3e0a50486fbf7bd0f637c`.
+Payload SHA-256:
+`043fb2398c806bb7760fc12c66d6d7d69a3b1543974bb81a882730427c4094b7`.
+
+Actual Steam import, codec support for the user's specific MP4/WebM files and
+production persistence remain the author's manual acceptance step.
+
+## Chunk Receipt Recovery Checks
+
+The isolated video fixture advertises `chunk_receipts: true` and supports the
+read-only `video_status` operation. New browser checks write the first real
+768-KiB media chunk normally, then deliberately drop its ACK or deliver it
+after 3.5 seconds. They require the real frontend to query its receipt within
+three seconds, finish before the delayed ACK, cancel the primary waiting
+request, write each chunk once, and publish exactly one gallery item.
+Delivering the late ACK afterward must not advance or publish the upload again.
+
+Separate cancel and clear races delay an already accepted status response.
+After the real cancellation or clear confirmation, that late response must
+not send another chunk, commit the upload, or resurrect gallery data. Both the
+primary request and receipt probe must be cancelled. These checks preserve the
+existing upload, playback, resource-release, and locale/layout cases.
+
+This models a missing bridge reply, not its cause. It does not reproduce the
+compiled Steam host's IPC stack or establish why a production ACK disappears.
+
+## Video Playback And Local File Reuse Checks
+
+The isolated browser suite checks that first selection of a newly imported
+video performs zero `get_gallery_image` calls, including metadata: it must
+play the retained original File with real decoded moving pixels. The real
+49-MiB fixture is then saved and remounted, and must read every stored chunk,
+preserving full download coverage rather than bypassing it with the cache.
+
+For a saved video, the fixture holds the first read reply until the real
+metadata poster, loading status, enabled import control and clear-dialog
+cancellation have been inspected and captured. Releasing the reply must finish
+moving playback and dismiss progress. Switching to an image before release
+must neither resume old chunk requests nor revive the old background.
+
+Resource probes check that exactly one unselected imported File URL is kept.
+A second import must revoke its predecessor, while first selection of the
+newest pending File still uses zero host reads. Another wallpaper selection,
+clear, deletion and panel unmount must release owned URLs. Clear and unmount
+also receive a held old background reply after cancellation and must not
+resume its download or resurrect the background.
+
+These are isolated fixture assertions, not evidence of a Steam run, a
+production pass or codec support for every user's MP4/WebM. Browser report
+results must be recorded separately after the frozen production source run.
+
+## 1.4.6 Video Display Verification
+
+The frozen-source run completed on 2026-10-10 at
+`../dist/qa-media-146-verified/report.json`: 59 interaction checks and 29
+screenshots passed, with zero check, render or layout failures. The
+host-supported typecheck passed without changing the host. Python regression
+passed 776 tests with 37 explicit skips; Ruff and hosted linking passed.
+
+The six metadata, chunk-read and real decode failure cases require loading
+progress to disappear. When a different usable old background exists, they
+strictly require it to remain unchanged; without one, they require the known
+poster or thumbnail. Native import selection uses zero metadata/chunk reads.
+Pending File replacement, selection, clear and unmount release owned URLs;
+held late reads cannot continue or revive the background after cancellation.
+
+The source hash is
+`1a4245d2efcbb5c11eb4df04712eb67f90e1d4614ea91c85e6d195a9403e9dc8`.
+There are 31 dependencies / 495,652 bytes, within the host's 32-dependency /
+512-KiB limits. These are isolated browser and filesystem checks, not a Steam
+run. Reopening still assembles the complete video before playback; this is
+not streaming and does not guarantee every user's codec support.
+
+## 1.4.7 Video Read-Hedge Verification
+
+The frozen-source run completed on 2026-10-10 at
+`../dist/qa-video-reopen-147/report.json`: 59 interaction checks and 29
+screenshots passed, with zero check, render or layout failures. The
+host-supported typecheck passed and confirmed the host was untouched. The
+source hash is
+`33d5c4f68857e949b210bef9edc8f7019e18f6ef9d07f1100532c714ba5646f7`.
+There are 31 dependencies / 498,045 bytes, below the host limit.
+
+The Python regression suite passed 783 tests with 37 explicit skips; the
+focused video transport and timeout contracts passed 37 tests. These checks
+cover a delayed primary chunk response recovered by one same-chunk read after
+one second, strict validation and loser cancellation, bounded timeout/retry
+budgets, and cancellation races. The browser suite preserves the existing
+poster/progress, full-download, cleanup, playback and locale checks.
+
+This remains a bounded mitigation for a delayed Hosted response. It does not
+keep a Blob across a destroyed iframe, add streaming or Range requests, change
+the host, or guarantee every codec and production bridge condition.
+
+## 1.4.8 Video Batch-Read Verification
+
+The frozen-source run completed on 2026-10-10 at
+`../dist/qa-video-reopen-148-batch2/report.json`: 59 interaction checks and 29
+screenshots passed, with zero check, render or layout failures. The
+host-supported typecheck and 32-module hosted linker check passed; the source
+hash is
+`ac1fddf6b32fcebc7422b5ca214bc208d2c42913f502adf59d225ee65409338d`.
+There are 31 dependencies / 498,818 bytes, below the host limit.
+
+Reopening a saved video now requests at most four consecutive chunks per
+`get_gallery_image` call. The synthetic 49-MiB fixture verifies that all chunks
+are covered in bounded batches (17 calls for 66 chunks), including the final
+short batch, while the browser still reconstructs and decodes the complete
+Blob. The fixture also exercises the legacy single-chunk reply path, poster and
+loading state before a delayed reply, cancellation, cleanup, decoder failure,
+moving pixels, looping and all eight locales.
+
+The Python regression suite passed 785 tests with 37 explicit skips. This is
+still a Hosted round-trip reduction, not HTTP Range streaming or persistent
+cross-iframe caching; the first seconds after reopening may show the verified
+poster while the full Blob is assembled. Steam import and codec support for
+the author's files remain manual acceptance steps.
+
+## 1.4.2 Persistent Media Storage Acceptance
+
+This local import-test version moves only new videos to the plugin's SDK data
+directory (`self.data_path("wallpapers")`). Neither a C-drive path nor the plugin
+installation directory is a storage contract. Existing Store videos remain
+readable without an automatic first-start migration. The host and Steam are
+read-only throughout local acceptance.
+
+Default limits are 256 MiB per video and 2 GiB per video library; configurable
+ranges are 32..512 MiB and 64..16,384 MiB. Reads have a separate 512-MiB hard
+limit and use 768-KiB chunks. Inventory, in-progress reservations, staging and
+pending reclaim are accounted for, with 64 MiB reserved on the destination
+volume. Lowering a budget must not evict existing media.
+
+Playback still assembles a complete Blob through the existing Hosted actions.
+This version does not expose a static directory, add a media server, relax the
+opaque-origin sandbox or claim HTTP Range streaming. Large-video preparation
+time and browser memory remain manual acceptance considerations.
+
+Required isolated cases:
+
+- Read pre-update Store video, preserve old indexes and appearance, then read
+  and write file-backed video after repeated reloads without touching diaries.
+- Interrupt upload, file promotion, manifest publication and deletion; recover
+  only a complete published asset or a tracked, reclaimable unpublished file.
+- Open the panel from a second plugin instance while an upload is still owned by
+  a live process; the `.part` file and recovery record must remain available.
+  Simulate a dead owner or expired TTL separately and verify that cleanup reclaims it.
+- Remove a published `.bin` outside the plugin and verify startup fails closed with
+  `video_read_failed` while preserving the index, manifest and recovery metadata.
+- Reject invalid manifests, unknown future schema, path traversal and redirected
+  media roots without rewriting valid media state or escaping the data root.
+- Enforce actual policy after updates, malformed responses, disk exhaustion and
+  quota reduction; refuse oversized reads rather than loading without bounds.
+- Confirm and cancel full wallpaper cleanup. Confirmed cleanup removes gallery
+  media, legacy `panel_bg`, covers, upload staging and browser media cache;
+  other settings, diaries and relationship statistics remain unchanged.
+- Retain and display `cleanup_pending` when logical/file deletion fails.
+  Releasing a Windows file lock and retrying should finish cleanup.
+  `storage_reclaim_pending` separately explains that the SQLite file may retain
+  free pages after successful logical deletion; it must not falsely report an
+  undeleted wallpaper or ask users to close an application to shrink SQLite.
+  Do not claim free-page reclamation, OS-cache purge or secure physical erasure.
+- Preserve GIF / SVG and animated WebP / APNG instead of flattening through
+  Canvas. Run all eight locales with actual policy values and narrow layouts.
+- Verify package CRC, official payload hash and byte-for-byte source match.
+  Reject runtime `data/wallpapers/temp/staging/backup/published` paths as well as
+  media/database suffixes, even when a runtime file has an innocuous extension.
+
+## 1.4.2 Implementation Freeze
+
+The final 2026-10-04 local acceptance run passed 717 Python tests with 37
+explicit skips (one platform-specific filesystem case and historical
+Store-writer tests superseded by the file-backed suite). Ruff, `git diff
+--check`, the official strict source check, and the hosted-link check passed.
+
+The final video run is `tools/out/video-final-1_4_1/report.json`: 24
+screenshots and 45 interaction checks, including a real decodable WebM larger
+than 48 MiB and more than 64 chunks, policy updates, confirmation/cancellation
+cleanup, browser Blob URL release, animation-container preservation, and all
+eight locales. The appearance regression run is
+`tools/out/wallpaper-regression-final-1_4_1/report.json`: 136 screenshots and
+281 interaction checks. Both reports have zero check, render, and layout
+failures. The hosted UI source hash is
+`c4c086f7903dd215e7543d8cc485e005e75f5edbcb33847ab367453d48afd9a9`.
+The runtime graph contains 30 dependencies / 485,503 bytes, below the host
+limit of 32 dependency files / 512 KiB.
+
+The verified import package is
+`../dist/forever_companion_1.4.2_stability_patch.neko-plugin`
+(661,859 bytes / 80 entries). Official strict validation passed; ZIP CRC and
+payload hash verification passed; all 75 packaged source files matched the
+workspace byte-for-byte. Package SHA-256:
+`9189903d8f8384dfbaec7a37bd24141a20f4fc80a049382cc29814e0d09dc725`.
+Payload SHA-256:
+`6845e6f43f5cc69516f9c13710cad113dc1c8fa2a5b226e79b7e761d707015c4`.
+The archive contains no tests, tools, caches, databases, runtime media, or
+private user data. These remain isolated local checks; Steam import, the
+user's codec support, and production persistence are still the user's manual
+acceptance step.

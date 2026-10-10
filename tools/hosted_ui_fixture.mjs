@@ -76,8 +76,8 @@ function calendarMonth(year, month) {
   return { year, month, label: `${year} / ${String(month).padStart(2, "0")}`, cells }
 }
 
-export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", empty = false, wizard = false, intros = {} } = {}) {
-  const appearance = { bg_id: wallpaper === "none" ? "" : "qa-wallpaper", fill: "cover", position: "center", blur: 0, dim: 0.4, brightness: 100, saturate: 100, contrast: 100, glass: 0, card_alpha: 0, text_weight: 100 }
+export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", empty = false, wizard = false, intros = {}, video = null } = {}) {
+  const appearance = { bg_id: wallpaper === "none" ? "" : wallpaper === "video" ? "qa-video" : "qa-wallpaper", fill: "cover", position: "center", blur: 0, dim: 0.4, brightness: 100, saturate: 100, contrast: 100, glass: 0, card_alpha: 0, text_weight: 100, motion: true }
   const palettes = {
     olive: [[191, 185, 125], [125, 167, 191]],
     rose: [[201, 128, 157], [128, 167, 201]],
@@ -133,6 +133,22 @@ export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", em
     birthday: { date: "2000-10-02", set: true, keep_diary: true },
   }
   const translate = key => messages[locale]?.[key] || messages.en?.[key] || key
+  const gallery = Object.entries(images).map(([id, data], index) => ({ id, name: `qa-landscape-${"ABC"[index]}.png`, mime: "image/png", size: data.length, added_at: TODAY, thumb: data }))
+  const videos = {}
+  if (video) {
+    videos["qa-video"] = { ...video, name: "qa-motion.webm" }
+    gallery.push({ id: "qa-video", kind: "video", name: "qa-motion.webm", mime: video.mime, size: video.size, added_at: TODAY, thumb: video.thumb })
+  }
+  const mediaStorage = {
+    schema_version: 1, backend: "files",
+    single_limit_bytes: 256 * 1024 * 1024,
+    total_limit_bytes: 2 * 1024 * 1024 * 1024,
+    hard_single_limit_bytes: 512 * 1024 * 1024,
+    chunk_bytes: 768 * 1024,
+    video_bytes: 0, pending_bytes: 0, reclaim_bytes: 0, occupied_bytes: 0,
+    available_bytes: 32 * 1024 * 1024 * 1024,
+    storage_reclaim_pending: false, cleanup_pending: false,
+  }
   return {
     context: {
       plugin: { id: "forever_companion", name: "\u6c38\u8fdc\u7684\u966a\u4f34" },
@@ -141,8 +157,9 @@ export function makeFixture(messages, { locale = "zh-CN", wallpaper = "none", em
       entries: [], config: { schema: { type: "object", properties: {} }, value: {}, readonly: true }, warnings: [],
       locale, i18n: { locale, default_locale: "zh-CN", messages },
     },
-    appearance, image, images, gallery: Object.entries(images).map(([id, data], index) => ({ id, name: `qa-landscape-${"ABC"[index]}.png`, mime: "image/png", size: data.length, added_at: TODAY, thumb: data })),
+    appearance, image, images, gallery, videos, uploads: {}, videoSerial: 0,
     intros, journal, review, diary, reviewProgress: { turns: 32, turns_threshold: 50, days: 4, days_threshold: 7, span: "2026-09-28~2026-10-02", due: false },
+    mediaStorage,
     stats: { heatmap: { days: heatDays, start: "2026-04-01", end: "2026-10-01", years: [2026], year: 2026, months: [] }, months: ["2026-10", "2026-09", "2026-08"], month: { month: "2026-10", turns: 124, active_days: 2, busiest_day: TODAY, busiest_turns: 68, longest_streak: 2, cold_wars: 0, made_ups: 0, warm_moments: 3, tone: { happy: 72, neutral: 33, sad: 4 }, valence_avg: 0.24, voice: { ts: TODAY, mood: "warm", entry: SAMPLE.repeat(3) }, sealed: false } },
   }
 }
@@ -157,7 +174,113 @@ export function installFixtureBridge(fixture) {
   window.qaResults = {}
   window.qaDelays = {}
   window.qaResolved = []
+  window.qaFailVideoOp = ""
+  window.qaFailVideoChunk = -1
+  window.qaFailVideoReadChunk = -1
+  window.qaVideoCalls = []
+  window.qaVideoAckOverrides = {}
+  window.qaVideoWrites = []
+  window.qaDroppedReplies = {}
+  window.qaCancelledRequests = []
+  window.qaHoldReplies = {}
+  window.qaHeldReplies = {}
+  window.qaReleaseHeldReplies = key => {
+    window.qaHoldReplies[key] = false
+    const replies = window.qaHeldReplies[key] || []
+    delete window.qaHeldReplies[key]
+    replies.forEach(reply => reply())
+  }
   const clone = value => JSON.parse(JSON.stringify(value))
+  const chunkBytes = 768 * 1024
+  const videoBytes = () => fixture.gallery.reduce((sum, item) => sum + (item.kind === "video" ? item.size : 0), 0)
+  const mediaSummary = () => {
+    fixture.mediaStorage.video_bytes = videoBytes()
+    fixture.mediaStorage.occupied_bytes = videoBytes()
+    return clone(fixture.mediaStorage)
+  }
+  const validPoster = (value, maximum) => {
+    if (typeof value !== "string" || !value || value.length > maximum || !/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/.test(value)) return false
+    const [header, encoded] = value.split(",")
+    try {
+      const bytes = atob(encoded)
+      if (btoa(bytes) !== encoded) return false
+      if (header === "data:image/png;base64") return bytes.startsWith("\x89PNG\r\n\x1a\n")
+      if (header === "data:image/jpeg;base64") return bytes.startsWith("\xff\xd8\xff")
+      return bytes.startsWith("RIFF") && bytes.slice(8, 12) === "WEBP"
+    } catch { return false }
+  }
+  const decodeChunk = value => {
+    if (typeof value !== "string" || !/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length % 4) throw new Error("video_chunk_invalid")
+    try {
+      const bytes = atob(value)
+      if (btoa(bytes) !== value) throw new Error("video_chunk_invalid")
+      return bytes
+    } catch { throw new Error("video_chunk_invalid") }
+  }
+  const dispatchVideo = args => {
+    const op = args.op
+    window.qaVideoCalls.push(clone(args))
+    if (window.qaFailVideoOp === op && (window.qaFailVideoChunk < 0 || args.chunk_index === window.qaFailVideoChunk)) {
+      window.qaFailVideoOp = ""
+      window.qaFailVideoChunk = -1
+      throw new Error("video_save_failed")
+    }
+    if (op === "video_begin") {
+      if (!["video/mp4", "video/webm"].includes(args.mime)) throw new Error("video_type_unsupported")
+      if (!Number.isInteger(args.size) || args.size < 1) throw new Error("video_size_invalid")
+      if (args.size > fixture.mediaStorage.single_limit_bytes || args.size > fixture.mediaStorage.hard_single_limit_bytes) throw new Error("video_too_large")
+      if (fixture.gallery.length >= 24) throw new Error("gallery_full")
+      if (videoBytes() + args.size > fixture.mediaStorage.total_limit_bytes) throw new Error("video_storage_full")
+      if (!validPoster(args.thumb, 400000) || !validPoster(args.poster, 1000000)) throw new Error("video_poster_invalid")
+      const uploadId = `qa-session-${++fixture.videoSerial}`
+      fixture.uploads[uploadId] = { name: args.name, mime: args.mime, size: args.size, thumb: args.thumb, poster: args.poster, chunks: [], written: 0 }
+      return { upload_id: uploadId, chunk_bytes: chunkBytes, chunk_receipts: true }
+    }
+    const session = fixture.uploads[args.upload_id]
+    if (op === "video_abort") {
+      delete fixture.uploads[args.upload_id]
+      return { aborted: true }
+    }
+    if (!session) throw new Error("video_upload_not_found")
+    if (op === "video_status") {
+      if (!Number.isInteger(args.chunk_index) || args.chunk_index < 0
+        || args.chunk_index >= Math.ceil(session.size / chunkBytes)) throw new Error("video_chunk_invalid")
+      return { chunk_index: args.chunk_index, accepted: args.chunk_index < session.chunks.length }
+    }
+    if (op === "video_chunk") {
+      if (!Number.isInteger(args.chunk_index) || args.chunk_index < 0) throw new Error("video_chunk_invalid")
+      if (args.chunk_index < session.chunks.length) {
+        if (session.chunks[args.chunk_index] !== args.data_b64) throw new Error("video_chunk_invalid")
+        return { chunk_index: args.chunk_index, accepted: true }
+      }
+      if (args.chunk_index !== session.chunks.length) throw new Error("video_chunk_out_of_order")
+      const bytes = decodeChunk(args.data_b64)
+      if (bytes.length !== Math.min(chunkBytes, session.size - session.written)) throw new Error("video_chunk_invalid")
+      session.chunks.push(args.data_b64)
+      session.written += bytes.length
+      window.qaVideoWrites.push({ upload_id: args.upload_id, chunk_index: args.chunk_index, bytes: bytes.length })
+      return Object.hasOwn(window.qaVideoAckOverrides, args.chunk_index)
+        ? clone(window.qaVideoAckOverrides[args.chunk_index])
+        : { chunk_index: args.chunk_index, accepted: true }
+    }
+    if (op === "video_commit") {
+      if (session.written !== session.size) throw new Error("video_upload_incomplete")
+      const head = atob(session.chunks[0]).slice(0, 4096)
+      if (session.mime === "video/webm" && (!head.startsWith("\x1a\x45\xdf\xa3") || !head.includes("webm"))) throw new Error("video_signature_invalid")
+      if (session.mime === "video/mp4") {
+        const boxSize = [...head.slice(0, 4)].reduce((value, byte) => value * 256 + byte.charCodeAt(0), 0)
+        if (head.length < 16 || head.slice(4, 8) !== "ftyp" || boxSize < 16 || boxSize > session.size || head.slice(8, 12) === "\0\0\0\0") throw new Error("video_signature_invalid")
+      }
+      if (fixture.gallery.length >= 24) throw new Error("gallery_full")
+      if (videoBytes() + session.size > fixture.mediaStorage.total_limit_bytes) throw new Error("video_storage_full")
+      const id = `qa-video-upload-${++fixture.videoSerial}`
+      fixture.videos[id] = { ...clone(session), chunk_bytes: chunkBytes }
+      fixture.gallery.push({ id, kind: "video", name: session.name, mime: session.mime, size: session.size, added_at: "2026-10-04", thumb: session.thumb })
+      delete fixture.uploads[args.upload_id]
+      return { id, items: clone(fixture.gallery), media_storage: mediaSummary() }
+    }
+    throw new Error("video_operation_invalid")
+  }
   const dispatch = (action, args) => {
     const state = fixture.context.state
     if (window.qaFailNext === action) {
@@ -165,8 +288,33 @@ export function installFixtureBridge(fixture) {
       throw new Error("persist_failed")
     }
     if (Object.hasOwn(window.qaResults, action)) return clone(window.qaResults[action])
-    if (action === "get_panel_gallery") return { items: fixture.gallery, appearance: fixture.appearance }
-    if (action === "get_gallery_image") return { data_url: fixture.images[args.item_id] || fixture.image }
+    if (action === "get_panel_gallery") return { items: fixture.gallery, appearance: fixture.appearance, media_storage: mediaSummary() }
+    if (action === "get_gallery_image") {
+      const video = fixture.videos[args.item_id]
+      if (video) {
+        const index = args.chunk_index ?? -1
+        if (index === -1) return { kind: "video", mime: video.mime, size: video.size, name: video.name, chunk_count: video.chunks.length, chunk_bytes: chunkBytes, poster: video.poster,
+          ...(args.prefer_direct && video.playback_path ? { playback_path: video.playback_path } : {}) }
+        const requested = args.chunk_count ?? 1
+        if (window.qaFailVideoReadChunk >= index && window.qaFailVideoReadChunk < index + requested) {
+          window.qaFailVideoReadChunk = -1
+          throw new Error("video_read_failed")
+        }
+        if (!Number.isInteger(index) || index < 0 || index >= video.chunks.length) throw new Error("video_chunk_invalid")
+        if (!Number.isInteger(requested) || requested < 1 || requested > 4) throw new Error("video_chunk_invalid")
+        if (requested > 1) {
+          return {
+            chunks: video.chunks.slice(index, index + requested).map((data_b64, offset) => ({
+              chunk_index: index + offset,
+              data_b64,
+            })),
+          }
+        }
+        return { chunk_index: index, data_b64: video.chunks[index] }
+      }
+      if (!fixture.images[args.item_id]) throw new Error("image_not_found")
+      return { data_url: fixture.images[args.item_id] }
+    }
     if (action === "get_journal") return { pages: fixture.journal }
     if (action === "get_review") return { entries: fixture.review, progress: fixture.reviewProgress }
     if (action === "get_diary") return { items: fixture.diary.slice(Number(args.offset || 0)), has_more: false }
@@ -179,14 +327,34 @@ export function installFixtureBridge(fixture) {
     }
     if (action === "set_panel_appearance") { Object.assign(fixture.appearance, args); return { appearance: clone(fixture.appearance) } }
     if (action === "gallery_add") {
+      if (args.op === "video_policy") {
+        if (!Number.isInteger(args.single_limit_mib) || args.single_limit_mib < 32 || args.single_limit_mib > 512
+          || !Number.isInteger(args.total_limit_mib) || args.total_limit_mib < 64 || args.total_limit_mib > 16384) throw new Error("video_policy_invalid")
+        fixture.mediaStorage.single_limit_bytes = args.single_limit_mib * 1024 * 1024
+        fixture.mediaStorage.total_limit_bytes = args.total_limit_mib * 1024 * 1024
+        return { media_storage: mediaSummary() }
+      }
+      if (args.op) return dispatchVideo(args)
       const id = `qa-upload-${fixture.gallery.length}`
       fixture.images[id] = args.data_url
       fixture.gallery.push({ id, name: args.name || "qa-upload.png", mime: "image/png", size: args.data_url.length, added_at: "2026-10-02", thumb: args.thumb })
       return { id, items: clone(fixture.gallery) }
     }
     if (action === "gallery_remove") {
+      if (args.op === "clear_media") {
+        if (args.confirm !== true) throw new Error("video_clear_confirmation_required")
+        fixture.gallery = []
+        fixture.images = {}
+        fixture.videos = {}
+        fixture.uploads = {}
+        fixture.appearance.bg_id = ""
+        fixture.mediaStorage.pending_bytes = 0
+        fixture.mediaStorage.reclaim_bytes = 0
+        return { cleared: true, items: [], appearance: clone(fixture.appearance), media_storage: mediaSummary(), storage_reclaim_pending: false, cleanup_pending: false }
+      }
       fixture.gallery = fixture.gallery.filter(item => item.id !== args.item_id)
       delete fixture.images[args.item_id]
+      delete fixture.videos[args.item_id]
       if (fixture.appearance.bg_id === args.item_id) fixture.appearance.bg_id = ""
       return { items: clone(fixture.gallery), appearance: clone(fixture.appearance) }
     }
@@ -219,8 +387,12 @@ export function installFixtureBridge(fixture) {
     const frame = document.getElementById("hosted")
     if (event.source !== frame?.contentWindow || !message || typeof message !== "object") return
     if (message.type === "neko-hosted-surface-error" || message.type === "neko-hosted-surface-console") window.qaDiagnostics.push(message)
+    if (message.type === "neko-hosted-surface-cancel") {
+      window.qaCancelledRequests.push({ requestId: message.requestId, at: performance.now() })
+      return
+    }
     if (message.type !== "neko-hosted-surface-request") return
-    window.qaMessages.push(clone(message))
+    window.qaMessages.push({ ...clone(message), receivedAt: performance.now() })
     try {
       let result
       if (message.method === "refresh") { window.qaRefreshes += 1; result = clone(fixture.context) }
@@ -228,12 +400,24 @@ export function installFixtureBridge(fixture) {
         const actionId = message.payload.actionId
         result = { plugin_id: "forever_companion", action_id: actionId, result: clone(dispatch(actionId, message.payload.args || {})) }
       } else throw new Error(`Unsupported fixture method: ${message.method}`)
-      const imageId = message.method === "call" && message.payload.actionId === "get_gallery_image" ? message.payload.args.item_id : ""
-      const delay = Number(window.qaDelays[imageId] || 0)
-      setTimeout(() => {
-        window.qaResolved.push({ action: message.payload.actionId, imageId, at: performance.now() })
-        frame.contentWindow.postMessage({ type: "neko-hosted-surface-response", requestId: message.requestId, ok: true, result }, "*")
-      }, delay)
+      const actionId = message.method === "call" ? message.payload.actionId : message.method
+      const imageId = actionId === "get_gallery_image" ? message.payload.args.item_id : ""
+      const args = message.payload.args || {}
+      const delayKey = args.op ? `${actionId}:${args.op}:${args.chunk_index ?? ""}`
+        : imageId && Number.isInteger(args.chunk_index) ? `${actionId}:${imageId}:${args.chunk_index}`
+        : imageId || actionId
+      const delay = Number(window.qaDelays[delayKey] ?? window.qaDelays[imageId] ?? window.qaDelays[actionId] ?? 0)
+      if (window.qaDroppedReplies[delayKey]) return
+      const reply = () => {
+        const target = frame.contentWindow
+        if (!target) return
+        window.qaResolved.push({ action: actionId, imageId, args: clone(args), requestId: message.requestId, delayKey, at: performance.now() })
+        target.postMessage({ type: "neko-hosted-surface-response", requestId: message.requestId, ok: true, result }, "*")
+      }
+      if (window.qaHoldReplies[delayKey]) {
+        const replies = window.qaHeldReplies[delayKey] ||= []
+        replies.push(reply)
+      } else setTimeout(reply, delay)
     } catch (error) {
       frame.contentWindow.postMessage({ type: "neko-hosted-surface-response", requestId: message.requestId, ok: false, error: error.message }, "*")
     }

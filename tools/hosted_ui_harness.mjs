@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { createHash } from "node:crypto"
-import { createServer } from "node:http"
+import { createServer, request as httpRequest } from "node:http"
 import { createRequire } from "node:module"
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -11,6 +11,8 @@ import { installFixtureBridge, makeFixture } from "./hosted_ui_fixture.mjs"
 import { demoChecks } from "./hosted_ui_demo_checks.mjs"
 import { introChecks } from "./hosted_ui_intro_checks.mjs"
 import { appearanceChecks, expandAppearance } from "./hosted_ui_appearance_checks.mjs"
+import { videoChecks } from "./hosted_ui_video_checks.mjs"
+import { directChecks } from "./hosted_ui_direct_checks.mjs"
 
 const TOOL_ROOT = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_PLUGIN = resolve(TOOL_ROOT, "..")
@@ -125,7 +127,12 @@ window.__QA_INITIAL_TAB = ${JSON.stringify(initialTab)};
 }
 
 function parentDocument(sources, parameters, origin) {
-  const fixture = makeFixture(sources.messages, { ...parameters, intros: sources.intros, empty: parameters.empty === "true", wizard: parameters.wizard === "true" })
+  const fixture = makeFixture(sources.messages, { ...parameters, intros: sources.intros, empty: parameters.empty === "true", wizard: parameters.wizard === "true", video: parameters.video === "true" || parameters.wallpaper === "video" ? sources.qaVideoFixture : null })
+  if (parameters.direct && fixture.videos["qa-video"]) {
+    fixture.videos["qa-video"].playback_path = parameters.direct === "missing"
+      ? `/plugin/forever_companion/ui/${"0".repeat(64)}.webm`
+      : parameters.direct === "unsafe" ? "https://invalid.example/private.webm" : sources.qaDirectPath
+  }
   const child = documentFor(sources, fixture.context, origin, parameters.tab || "overview")
   return `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden}iframe{display:block;width:100vw;height:100vh;border:0}</style></head><body><iframe id="hosted" title="Isolated Hosted TSX QA" sandbox="allow-scripts"></iframe><script>
 const fixture = ${escapeScript(JSON.stringify(fixture))};
@@ -358,7 +365,7 @@ async function galleryChecks(browser, origin, output) {
     await check("upload-adds-to-gallery-without-selecting", async () => {
       const before = await background()
       const data = await page.evaluate(() => window.qaFixture.image.split(",")[1])
-      await frame.locator("input[type=file]").setInputFiles({ name: "qa-upload.png", mimeType: "image/png", buffer: Buffer.from(data, "base64") })
+      await frame.locator('input[type=file][accept="image/*"]').setInputFiles({ name: "qa-upload.png", mimeType: "image/png", buffer: Buffer.from(data, "base64") })
       await page.waitForFunction(() => window.qaFixture.gallery.length === 4)
       await page.waitForTimeout(150)
       assert.equal(await frame.locator(".tm-gallery-pick").count(), 5)
@@ -718,7 +725,8 @@ async function themeChecks(browser, origin, output) {
       await loaded.page.waitForTimeout(180)
       const calls = await loaded.page.evaluate(offset => window.qaMessages.slice(offset).filter(message => message.method === "call" && message.payload.actionId === "set_panel_appearance"), before)
       assert.equal(calls.length, 1)
-      assert.deepEqual(Object.keys(calls[0].payload.args).sort(), ["bg_id", "fill", "position", "blur", "dim", "brightness", "saturate", "contrast", "glass", "card_alpha", "text_weight"].sort())
+      assert.deepEqual(Object.keys(calls[0].payload.args).sort(), ["bg_id", "fill", "position", "blur", "dim", "brightness", "saturate", "contrast", "glass", "card_alpha", "text_weight", "motion"].sort())
+      assert.equal(calls[0].payload.args.motion, true, "Image appearance saves must preserve the default video-motion preference")
       assert.deepEqual(loaded.errors, [])
       return colors
     })
@@ -803,7 +811,7 @@ async function themeChecks(browser, origin, output) {
         window.qaFixture.gallery.push({ id: "qa-wallpaper-b", name: "qa-readded-B.png", thumb: image, mime: "image/png", size: image.length })
       })
       const upload = await deleted.page.evaluate(() => window.qaFixture.image.split(",")[1])
-      await deleted.frame.locator("input[type=file]").setInputFiles({ name: "qa-refresh-gallery.png", mimeType: "image/png", buffer: Buffer.from(upload, "base64") })
+      await deleted.frame.locator('input[type=file][accept="image/*"]').setInputFiles({ name: "qa-refresh-gallery.png", mimeType: "image/png", buffer: Buffer.from(upload, "base64") })
       await deleted.page.waitForFunction(() => window.qaFixture.gallery.length === 4)
       await deleted.frame.getByRole("button", { name: "qa-readded-B.png", exact: true }).click()
       await deleted.page.waitForTimeout(300)
@@ -1301,6 +1309,23 @@ async function main() {
     let origin
     const server = createServer((request, response) => {
       const url = new URL(request.url, origin)
+      if (sources.qaPlaybackPort && url.pathname.startsWith("/plugin/forever_companion/ui/")) {
+        const entry = { path: url.pathname, range: request.headers.range, bytes: 0, status: null }
+        sources.qaDirectRequests.push(entry)
+        const proxy = httpRequest({
+          hostname: "127.0.0.1", port: sources.qaPlaybackPort, path: url.pathname,
+          method: request.method, headers: request.headers,
+        }, upstream => {
+          entry.status = upstream.statusCode
+          upstream.on("data", chunk => { entry.bytes += chunk.length })
+          response.writeHead(upstream.statusCode, upstream.headers)
+          upstream.pipe(response)
+        })
+        proxy.on("error", () => { if (!response.headersSent) response.writeHead(502); response.end() })
+        response.on("close", () => proxy.destroy())
+        request.pipe(proxy)
+        return
+      }
       const parameters = Object.fromEntries(url.searchParams)
       response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" })
       response.end(parentDocument(sources, parameters, origin))
@@ -1314,7 +1339,7 @@ async function main() {
     let browser
     try {
       browser = await chromium.launch(launch)
-      if (!process.argv.includes("--interactions-only") && !process.argv.includes("--diagnostics-only") && !process.argv.includes("--compact-only") && !process.argv.includes("--theme-only") && !process.argv.includes("--copy-only") && !process.argv.includes("--demo-only") && !process.argv.includes("--intro-only") && !process.argv.includes("--appearance-only")) report.screenshots = await screenshotMatrix(browser, sources, origin, output)
+      if (!process.argv.includes("--interactions-only") && !process.argv.includes("--diagnostics-only") && !process.argv.includes("--compact-only") && !process.argv.includes("--theme-only") && !process.argv.includes("--copy-only") && !process.argv.includes("--demo-only") && !process.argv.includes("--intro-only") && !process.argv.includes("--appearance-only") && !process.argv.includes("--video-only") && !process.argv.includes("--direct-only")) report.screenshots = await screenshotMatrix(browser, sources, origin, output)
       if (process.argv.includes("--details")) report.screenshots.push(...await detailScreenshots(browser, origin, output))
       if (process.argv.includes("--calendar-diagnostics")) report.calendarDiagnostics = await calendarDiagnostics(browser, origin, output)
       if (process.argv.includes("--interactions") || process.argv.includes("--interactions-only")) {
@@ -1342,6 +1367,18 @@ async function main() {
         const appearance = await appearanceChecks(browser, sources, origin, output, { loadPage, inspectLayout })
         report.screenshots.push(...appearance.screenshots)
         report.interactions.push(...appearance.checks)
+      }
+      if (process.argv.includes("--video") || process.argv.includes("--video-only")) {
+        const video = await videoChecks(browser, sources, origin, output, { loadPage, inspectLayout, pluginRoot, loadDependency })
+        report.screenshots.push(...video.screenshots)
+        report.interactions.push(...video.checks)
+        report.videoFixture = video.fixture
+      }
+      if (process.argv.includes("--direct") || process.argv.includes("--direct-only")) {
+        const direct = await directChecks(browser, sources, origin, output, { loadPage, inspectLayout, pluginRoot, hostRoot })
+        report.screenshots.push(...direct.screenshots)
+        report.interactions.push(...direct.checks)
+        report.directPlayback = direct.measurements
       }
     } finally {
       if (browser) await browser.close()

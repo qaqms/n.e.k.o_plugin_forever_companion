@@ -130,7 +130,7 @@ def test_copy_update_does_not_reopen_completed_onboarding() -> None:
         ("actions.clear_review.confirm", ("当前角色", "我的日记", "归档", "素材")),
         ("actions.clear_stats.confirm", ("当前角色", "相处统计", "起点", "热力图", "月报")),
         ("actions.delete_diary_item.confirm", ("这条", "对话片段")),
-        ("actions.gallery_remove.confirm", ("图库", "这张图片", "壁纸")),
+        ("actions.gallery_remove.confirm", ("图库", "这项壁纸", "如果正在使用", "取消壁纸")),
         ("actions.prune_lanlan.confirm", ("角色", "残留数据", "周期", "情绪", "日记", "旧版周记")),
         (
             "actions.reset.confirm",

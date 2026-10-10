@@ -191,10 +191,11 @@ export const APPEARANCE_DEFAULTS: AppearanceDefaults = {
   bg_id: "", fill: "cover", position: "center",
   blur: 0, dim: 0.4, brightness: 100, saturate: 100, contrast: 100,
   glass: 0, card_alpha: 0, text_weight: 100,
+  motion: true,
 }
 
 // 类型别名绕开校验器：export const 注解里不能带泛型尖括号的逗号
-export type AppearanceDefaults = Record<string, string | number>
+export type AppearanceDefaults = Record<string, string | number | boolean>
 
 export const APPEARANCE_FILLS = ["cover", "contain", "repeat", "stretch"]
 export const APPEARANCE_POSITIONS = [
@@ -222,6 +223,7 @@ export function normAppearance(raw?: AppearanceDefaults | null): Appearance {
   out.fill = APPEARANCE_FILLS.indexOf(fill) >= 0 ? fill : "cover"
   const pos = String(src.position || "").trim().toLowerCase().replace(/\s+/g, " ")
   out.position = APPEARANCE_POSITIONS.indexOf(pos) >= 0 ? pos : "center"
+  out.motion = typeof src.motion === "boolean" ? src.motion : true
   const keys = Object.keys(APPEARANCE_NUMERIC)
   for (let i = 0; i < keys.length; i += 1) {
     const name = keys[i]
@@ -313,14 +315,51 @@ function drawScaled(img: any, edge: number, mime: string, quality: number): stri
 
 // 压缩管线：auto=限长边 2560 转 WebP（失败降 JPEG，仍不划算则用原图）+ 256px 缩略图；
 // raw=原样入册（仅补缩略图）；thumb=只生成缩略图（旧迁移图回填用）。
-// GIF/SVG 不转码（动图/矢量语义）：auto 对它们等同 raw；SVG 画进 canvas 会污染
+// Animation containers retain their bytes; only their thumbnail uses a frame.
+function preservesAnimation(dataUrl: string, mime: string): boolean {
+  if (mime === "image/gif" || mime === "image/svg+xml") return true
+  if (mime !== "image/webp" && mime !== "image/png") return false
+  try {
+    const encoded = dataUrl.slice(dataUrl.indexOf(",") + 1)
+    // Bound inspection to the image import cap. Walk container chunk headers,
+    // rather than matching marker text that may occur inside compressed pixels.
+    if (encoded.length > 6000000) return true
+    const bytes = atob(encoded)
+    const u32 = (offset: number, little: boolean) => little
+      ? bytes.charCodeAt(offset) + bytes.charCodeAt(offset + 1) * 256 + bytes.charCodeAt(offset + 2) * 65536 + bytes.charCodeAt(offset + 3) * 16777216
+      : bytes.charCodeAt(offset) * 16777216 + bytes.charCodeAt(offset + 1) * 65536 + bytes.charCodeAt(offset + 2) * 256 + bytes.charCodeAt(offset + 3)
+    if (mime === "image/webp") {
+      if (bytes.slice(0, 4) !== "RIFF" || bytes.slice(8, 12) !== "WEBP") return true
+      for (let offset = 12; offset + 8 <= bytes.length;) {
+        const kind = bytes.slice(offset, offset + 4)
+        const size = u32(offset + 4, true)
+        if (offset + 8 + size > bytes.length) return true
+        if (kind === "ANIM" || kind === "ANMF" || (kind === "VP8X" && size >= 1 && (bytes.charCodeAt(offset + 8) & 2) !== 0)) return true
+        offset += 8 + size + size % 2
+      }
+    } else {
+      if (bytes.slice(0, 8) !== "\x89PNG\r\n\x1a\n") return true
+      for (let offset = 8; offset + 12 <= bytes.length;) {
+        const size = u32(offset, false)
+        if (offset + 12 + size > bytes.length) return true
+        const kind = bytes.slice(offset + 4, offset + 8)
+        if (kind === "acTL") return true
+        if (kind === "IDAT" || kind === "IEND") return false
+        offset += 12 + size
+      }
+    }
+    return false
+  } catch { return true }
+}
+
+// GIF/SVG and detected WebP/APNG animations are not transcoded. SVG may taint
 // toDataURL（SecurityError），缩略图尽力而为、失败留空由面板以占位样式呈现。
 export function compressImageDataUrl(
   dataUrl: string,
   mime: string,
   mode: string,
 ): Promise<{ dataUrl: string; thumb: string; skipped: boolean }> {
-  const animated = mime === "image/gif" || mime === "image/svg+xml"
+  const animated = preservesAnimation(dataUrl, mime)
   return loadImageElement(dataUrl).then((img) => {
     let out = dataUrl
     let skipped = false

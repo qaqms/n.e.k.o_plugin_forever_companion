@@ -125,11 +125,28 @@ export type ToneSlotOption = { value?: string; model?: string }
 // thumb 为面板生成并回填的小缩略图 data URL（旧图迁移后短暂为空，随后补齐）
 export type GalleryItem = {
   id?: string
+  kind?: string
   name?: string
   mime?: string
   size?: number
   added_at?: string
   thumb?: string
+}
+
+export type MediaStorage = {
+  schema_version: number
+  backend: string
+  single_limit_bytes: number
+  total_limit_bytes: number
+  hard_single_limit_bytes: number
+  chunk_bytes: number
+  video_bytes: number
+  pending_bytes: number
+  reclaim_bytes: number
+  occupied_bytes: number
+  available_bytes: number | null
+  storage_reclaim_pending: boolean
+  cleanup_pending: boolean
 }
 
 // 面板外观参数（与后端 panel_appearance 记录同构）：draft=编辑中实时预览，
@@ -146,6 +163,7 @@ export type Appearance = {
   glass: number
   card_alpha: number
   text_weight: number
+  motion: boolean
 }
 
 // 我的日记素材快照（1.3.0）：成文时随正文固化进篇目的「本卷依据」——
