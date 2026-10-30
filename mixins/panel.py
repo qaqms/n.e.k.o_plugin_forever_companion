@@ -68,6 +68,8 @@ from ..core.state import (
     _CHANNEL_TRANSPORT_HOST,
     _FRAGMENT_DEFAULT_MODE,
     _FRAGMENT_DEFAULT_SLOT,
+    _FRAGMENT_MAX_DAILY_LIMIT,
+    _FRAGMENT_MIN_DAILY_LIMIT,
     _GALLERY_THUMB_MAX_CHARS,
     _REVIEW_DEFAULT_MODE,
     _REVIEW_DEFAULT_SLOT,
@@ -251,6 +253,9 @@ class PanelEntriesMixin(MediaGalleryMixin):
                 "entry": item.get("entry"),
                 "quote": item.get("quote"),
                 "note": item.get("note"),
+                # 生命周期状态（写入后治理）：缺省 active，与 recall_fragments 同口径。
+                # 面板用它区分现行碎片与已被更新的旧记录。
+                "status": str(item.get("status") or "active"),
             }
 
         auto_count = sum(1 for item in shard.diary if str(item.get("source") or "self") == "auto")
@@ -487,6 +492,7 @@ class PanelEntriesMixin(MediaGalleryMixin):
         "tone_phase_sensitivity_enabled", "tone_phase_sensitivity",
         "tone_slot",
         "fragments_enabled", "fragments_slot", "fragments_mode",
+        "fragments_daily_limit",
         "review_enabled", "review_slot", "review_mode",
         "review_turns_threshold", "review_days_threshold",
         "agent_daily_budget",
@@ -533,6 +539,10 @@ class PanelEntriesMixin(MediaGalleryMixin):
             "fragments_enabled": bool(self._fragments_cfg.get("enabled", True)),
             "fragments_slot": str(self._fragments_cfg.get("slot") or _FRAGMENT_DEFAULT_SLOT),
             "fragments_mode": _channel_mode(self._fragments_cfg),
+            # 碎片日限（[fragments].daily_limit，1.5.0 起面板可调）：这条闸保的是
+            # "用户自己的花费"——槽位切到付费档后 agent 日预算与 300 秒地板双双失效，
+            # 它是唯一剩下的次数上限，所以必须让用户自己拧
+            "fragments_daily_limit": self._fragments_daily_limit(),
             "review_enabled": bool(self._review_cfg.get("enabled", True)),
             "review_slot": str(self._review_cfg.get("slot") or _REVIEW_DEFAULT_SLOT),
             "review_mode": _channel_mode(self._review_cfg),
@@ -597,6 +607,17 @@ class PanelEntriesMixin(MediaGalleryMixin):
                     "enum": ["summary", "conversation", "correction", "vision", "agent"],
                 },
                 "fragments_mode": {"type": "string", "enum": [_CHANNEL_MODE_HOST, _CHANNEL_MODE_CUSTOM]},
+                # 碎片日限（[fragments].daily_limit）：上下界与 _fragments_daily_limit()
+                # 的钳制同源；0 是合法值（= 今天不分析，等价关闭捕获）
+                "fragments_daily_limit": {
+                    "type": "integer",
+                    "minimum": _FRAGMENT_MIN_DAILY_LIMIT,
+                    "maximum": _FRAGMENT_MAX_DAILY_LIMIT,
+                    "description": tr(
+                        "fields.fragments_daily_limit",
+                        default="碎片提取每天最多分析几次（0~500）",
+                    ),
+                },
                 "review_enabled": {"type": "boolean"},
                 "review_slot": {
                     "type": "string",
@@ -735,6 +756,20 @@ class PanelEntriesMixin(MediaGalleryMixin):
                     self.logger.warning("invalid fragments_slot: {}", slot)
                     return Err(SdkError("invalid_fragments_slot"))
                 frag_patch["slot"] = slot
+            if "fragments_daily_limit" in updates:
+                # 与 agent_daily_budget 的"拒收"不同，这里按钳制处理：越界钳到
+                # 0~500 与读数口 _fragments_daily_limit() 同一把尺子，不会出现
+                # "填了 600、读回 500、再报错"三重态；非数值才拒（前端 NumberInput
+                # 出不来这种值，只会从 API 直调进来）
+                try:
+                    limit = int(updates["fragments_daily_limit"])
+                except (TypeError, ValueError):
+                    self.logger.warning("invalid fragments_daily_limit: not a number")
+                    return Err(SdkError("invalid_fragments_daily_limit"))
+                frag_patch["daily_limit"] = max(
+                    _FRAGMENT_MIN_DAILY_LIMIT,
+                    min(_FRAGMENT_MAX_DAILY_LIMIT, limit),
+                )
             if "fragments_mode" in updates:
                 # 空串回落出厂默认（不是回落 host）：碎片出厂是 custom，写死 host 会把
                 # 一次空提交变成"替用户改回会被服务端拒的那条路"

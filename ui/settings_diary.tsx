@@ -24,9 +24,28 @@ export function DiarySettingsCard(props: {
         onChange={(value: boolean) => updateForm({ fragments_enabled: value })}
       />
       {form.fragments_enabled ? (
-        <div className="tm-derived">
-          {t("panel.settings.fragmentsHint", { defaultValue: "用户消息会交给配置的模型分析，片段保存在本地，供角色检索。模型可能遗漏或误判，可在时光日记中查看和删除。" })}
-        </div>
+        <>
+          <div className="tm-derived">
+            {t("panel.settings.fragmentsHint", { defaultValue: "用户消息会交给配置的模型分析，片段保存在本地，供角色检索。模型可能遗漏或误判，可在时光日记中查看和删除。" })}
+          </div>
+          {/* 碎片日限（1.5.0）：这条闸保的是"你自己的花费"——槽位切到付费模型后，
+              agent 日上限与 300 秒间隔地板双双失效，就只剩它管"一天总共几次"。
+              0 是合法值（= 今天不分析）；上下界与后端 _FRAGMENT_MIN/MAX_DAILY_LIMIT
+              同源，由 test_ui_fragments_limit_range_matches_backend_bounds 钉住 */}
+          <Field
+            className="tm-reserve-help"
+            label={t("panel.settings.fragmentsDailyLimit", { defaultValue: "每天最多分析次数" })}
+            help={t("panel.settings.fragmentsDailyLimitHelp", { defaultValue: "设 0 表示今天不分析（等于暂停自动保存，已存片段仍可检索）。用付费模型时可调低以控制花费。" })}
+          >
+            <NumberInput
+              value={form.fragments_daily_limit}
+              min={0}
+              max={500}
+              step={1}
+              onChange={(v: number | string) => updateForm({ fragments_daily_limit: typeof v === "number" ? v : 60 })}
+            />
+          </Field>
+        </>
       ) : null}
 
       <div className="tm-review-settings">

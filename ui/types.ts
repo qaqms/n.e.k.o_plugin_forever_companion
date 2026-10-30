@@ -59,6 +59,7 @@ export type Settings = {
   fragments_enabled?: boolean
   fragments_slot?: string
   fragments_mode?: string
+  fragments_daily_limit?: number
   review_enabled?: boolean
   review_slot?: string
   review_mode?: string
@@ -77,6 +78,7 @@ export type AgentTierUsage = { used?: number; budget?: number }
 export type DiaryItem = {
   ts?: string
   source?: string
+  status?: string
   kind?: string
   mood?: string
   entry?: string
@@ -407,6 +409,7 @@ export type FormValues = {
   fragments_enabled: boolean
   fragments_slot: string
   fragments_mode: string
+  fragments_daily_limit: number
   review_enabled: boolean
   review_slot: string
   review_mode: string

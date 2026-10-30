@@ -515,6 +515,11 @@ function DiaryRow(props: { key?: string; t: TFunc; item: DiaryItem; onDelete: (t
           <span className="tm-tl-badge" data-kind={item.kind || "important"}>
             {t(fragmentKindKey(item.kind), { defaultValue: String(item.kind || "") })}
           </span>
+          {String(item.status || "active") === "superseded" ? (
+            <span className="tm-tl-status">
+              {t("panel.diary.superseded", { defaultValue: "已被更新" })}
+            </span>
+          ) : null}
           <span className="tm-tl-ts">{fmtTs(item.ts)}</span>
           <span className="tm-tl-spacer" />
           <button className="tm-tl-delete" type="button" onClick={() => onDelete(String(item.ts || ""))}>

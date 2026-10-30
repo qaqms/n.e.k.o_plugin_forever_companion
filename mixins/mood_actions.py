@@ -1,4 +1,4 @@
-"""情绪引擎 + 十二个 @llm_tool 情绪动作/记录工具（LLM 的契约面集中于此）。
+"""情绪引擎 + 十三个 @llm_tool 情绪动作/记录/自检工具（LLM 的契约面集中于此）。
 
 拆分自 __init__.py（方法逐字搬移，仅换文件与导入）；经 Mixin 组合回
 ForeverCompanionPlugin——SDK 的工具发现遍历 type(self)（collect_llm_tool_methods），
@@ -6,7 +6,7 @@ ForeverCompanionPlugin——SDK 的工具发现遍历 type(self)（collect_llm_t
 
 内容：情绪系统开关与查询、连续心情（valence/arousal）积分与极端邀请、
 行为参考推送、动作应用与限时解除、到期记录同步、监督循环、
-12 个模型可调用工具（冷战/已读不回/敷衍/风暴/求安抚/涟漪/暖流/满潮/转晴/手记/日记/检索）。
+13 个模型可调用工具（冷战/已读不回/敷衍/风暴/求安抚/涟漪/暖流/满潮/转晴/手记/日记/检索/自检）。
 """
 
 from __future__ import annotations
@@ -17,15 +17,23 @@ from typing import Any
 from plugin.sdk.plugin import Err, Ok, Result, SdkError, llm_tool
 
 from ..core.affect import _MOOD_AFFECT_IMPULSES, _apply_affect_impulse, _current_affect
-from ..core.fragments import recall_fragments
+from ..core.fragments import build_review_prompt, parse_review_response, recall_fragments
 from ..core.journal import assemble_journal_entry, has_journal_content, journal_write, normalize_journal_title
 from ..core.state import (
     _ACTION_DEFAULT_MINUTES,
+    _CHANNEL_BUDGET_REASON,
     _COLD_ACTIONS,
+    _FRAGMENT_DEFAULT_SLOT,
+    _FRAGMENT_REVIEW_DEFAULT_ITEMS,
+    _FRAGMENT_REVIEW_MAX_ITEMS,
+    _FRAGMENT_REVIEW_MIN_INTERVAL_SEC,
+    _HOST_LLM_MAX_TOKENS_REVIEW,
+    _HOST_LLM_TIMEOUT_REVIEW_SEC,
     _MOOD_ACTION_DEFAULT_LABELS,
     _MOOD_ACTION_LABEL_KEYS,
     _PROACTIVE_PAUSE_ACTIONS,
     _TIMED_ACTIONS,
+    _channel_route,
     _LanlanShard,
     _MoodState,
     _now_utc,
@@ -988,6 +996,103 @@ class MoodActionsMixin:
                 "这些是你心里记着的、关于他的片段。用不用、怎么说，由你自己决定。"
                 if items
                 else "这本日记里还没有匹配的记录。"
+            ),
+        })
+
+    @llm_tool(
+        name="mood_check_memory",
+        description=(
+            "记忆自检：回头看看记着他的那些片段，有没有已经过时的、彼此矛盾的、"
+            "或者同一件事记了两遍的。只返回建议，不会动你的日记本——"
+            "要不要处理、怎么处理，由你自己决定。"
+            "想清理旧账、或觉得某件事自己记岔了的时候用。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "检查最近多少条（默认 20，最多 30）",
+                },
+            },
+        },
+        timeout=45.0,
+    )
+    async def tool_check_memory(
+        self, limit: int = _FRAGMENT_REVIEW_DEFAULT_ITEMS, **kwargs: Any
+    ):
+        lanlan = await self._attribution_lanlan(kwargs)
+        shard = await self._ensure_shard(lanlan)
+        if not self._mood_enabled(shard):
+            return Err(SdkError("情绪系统未开启"))
+        if not self._fragments_enabled(shard):
+            return Err(SdkError("碎片记录未开启"))
+        now = time.time()
+        if now - shard.last_fragment_review_ts < _FRAGMENT_REVIEW_MIN_INTERVAL_SEC:
+            return Err(SdkError("刚查过没多久，过一会儿再想吧"))
+        try:
+            want = max(2, min(_FRAGMENT_REVIEW_MAX_ITEMS, int(limit)))
+        except (TypeError, ValueError):
+            want = _FRAGMENT_REVIEW_DEFAULT_ITEMS
+        items = recall_fragments(shard.diary, limit=want)
+        if len(items) < 2:
+            return Ok({
+                "checked": len(items),
+                "findings": [],
+                "hint": "日记里还没有足够的片段可比对。",
+            })
+        resolved, slot, _core_cfg = await self._resolve_channel_endpoint(
+            self._fragments_cfg, default_slot=_FRAGMENT_DEFAULT_SLOT
+        )
+        if resolved is None:
+            return Err(SdkError("模型通道暂时不可用（槽位没配模型）"))
+        route = _channel_route(slot, resolved)
+        if self._channel_break_open(lanlan, "memory_review", route):
+            return Err(SdkError("记忆自检通道暂时停用，请调整模型配置或重启插件后再试"))
+        # ignore_pace=True：这是她**主动**触发的低频动作，与成文同例——300 秒地板防的是
+        # 碎片那种自动节拍，不该让她点一下还要干等。日预算照管（那是当天总账）。
+        if self._agent_tier_gate(shard, slot, ignore_pace=True) == _CHANNEL_BUDGET_REASON:
+            return Err(SdkError("今天的模型额度已经用完了，明天再试"))
+        await self._agent_tier_spend(lanlan, shard, slot)
+        raw = await self._channel_chat(
+            resolved,
+            build_review_prompt(items),
+            timeout_sec=_HOST_LLM_TIMEOUT_REVIEW_SEC,
+            max_completion_tokens=_HOST_LLM_MAX_TOKENS_REVIEW,
+            call_type="plugin_memory_review",
+        )
+        self._channel_break_note(
+            # Keep on-demand memory review failures separate from the automatic
+            # fragment capture breaker.
+            lanlan, "memory_review", route, ok=raw is not None
+        )
+        if raw is None:
+            return Err(SdkError("这次没连上模型，稍后再试"))
+        findings = parse_review_response(raw)
+        if findings is None:
+            # 解析失败不改任何状态、不占节流位：这次等于没发生，她可以再试
+            return Err(SdkError("模型这次的回答读不懂，没有改动任何记录"))
+        result: list[JsonObject] = []
+        for item in findings:
+            index = int(item["index"])
+            if not 1 <= index <= len(items):
+                continue  # 编号越界：只丢这条建议，不影响其他发现
+            target = items[index - 1]
+            result.append({
+                "ts": target.get("ts"),
+                "kind": target.get("kind"),
+                "quote": target.get("quote"),
+                "issue": item["issue"],
+                "reason": item["reason"],
+            })
+        shard.last_fragment_review_ts = now
+        return Ok({
+            "checked": len(items),
+            "findings": result,
+            "hint": (
+                "以上只是建议。要不要处理、怎么处理，由你自己决定。"
+                if result
+                else "这些片段看起来都还说得上话，没发现明显过时或矛盾的地方。"
             ),
         })
 

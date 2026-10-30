@@ -190,6 +190,7 @@ _UI_FORM_DEFAULTS = {
     "review_slot": ("review", "slot", str),
     "review_mode": ("review", "mode", str),
     "agent_daily_budget": ("agent_tier", "daily_budget", int),
+    "fragments_daily_limit": ("fragments", "daily_limit", int),
 }
 
 
@@ -241,3 +242,26 @@ def test_ui_budget_input_range_matches_backend_bounds(tm) -> None:
     bounds = dict(re.findall(r"(min|max)=\{(\d+)\}", window))
     assert int(bounds.get("min", -1)) == tm._AGENT_TIER_MIN_BUDGET, bounds
     assert int(bounds.get("max", -1)) == tm._AGENT_TIER_MAX_BUDGET, bounds
+
+
+def test_ui_fragments_limit_range_matches_backend_bounds() -> None:
+    """碎片日限数字框的 0/500 必须与 _FRAGMENT_MIN/MAX_DAILY_LIMIT 同源（1.5.0）。
+
+    与 agent 预算那道门同理，但这里的失败症状更隐蔽：前端写小了，用户以为能设
+    500 却只能到 300；前端写大了，用户填的值会被后端静默钳回边界，而面板读回
+    后又像是"自己改了"。常量分散在 core/state.py 与 ui/settings_diary.tsx 两处，
+    机器门比记忆可靠。
+    """
+    from forever_companion.core.state import (
+        _FRAGMENT_MAX_DAILY_LIMIT,
+        _FRAGMENT_MIN_DAILY_LIMIT,
+    )
+
+    src = (PLUGIN_ROOT / "ui" / "settings_diary.tsx").read_text(encoding="utf-8")
+    anchor = src.find("value={form.fragments_daily_limit}")
+    assert anchor >= 0, "ui/settings_diary.tsx 里找不到碎片日限输入框"
+    window = src[anchor:anchor + 260]
+
+    bounds = dict(re.findall(r"(min|max)=\{(\d+)\}", window))
+    assert int(bounds.get("min", -1)) == _FRAGMENT_MIN_DAILY_LIMIT, bounds
+    assert int(bounds.get("max", -1)) == _FRAGMENT_MAX_DAILY_LIMIT, bounds

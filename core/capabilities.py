@@ -148,9 +148,9 @@ CAPABILITY_SPECS: dict[str, CapabilitySpec] = {
             depends=("mood_engine",),
             config=("fragments", "enabled", True),
             llm="direct",
-            # 检索工具温和模式下始终在位（日记关只停"捕获"），
+            # 检索与自检工具在温和模式下始终在位（日记关只停"捕获"），
             # 高级隐藏模式随本能力摘挂
-            tools=("mood_recall_fragments",),
+            tools=("mood_recall_fragments", "mood_check_memory"),
         ),
         CapabilitySpec(
             id="journal",

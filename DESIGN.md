@@ -28,7 +28,7 @@
 - capabilities:
   - callable entries：周期设置/查询/快进/重置、情绪状态查询与解除、日记查看与清空、
     碎片删除、个人日记翻阅、开关
-  - LLM tools：12 个情绪与记录工具，模型在对话中自主调用
+  - LLM tools：13 个情绪/记录/自检工具，模型在对话中自主调用
   - timer（tide_tick）：每 10 秒轮询用户消息总线 + 检查情绪动作到期自动解除
   - timer（diary_write_tick）：每 2 秒轮询手动日记队列；慢请求在独立宿主定时线程执行
   - message injection：`push_message(visibility=[], ai_behavior="read")` 把身体感受送入上下文，
@@ -242,6 +242,77 @@
   独立 key、上限 104 卷再满才真删；清空/角色删除/prune 一并清）；
   调试入口 `debug_review`（素材统计 + 资格判定 + force 成文）、
   `debug_review_fill`（假卷宗注入/还原，entries 可给 53~60 走真实落盘链验溢出搬家）
+
+## 记忆治理（1.4.3）：写入后治理
+
+碎片是"她记住的东西"，1.4.2 以前只有**写入前**治理（17 道门控：值不值得记），
+写入之后没有任何治理——记重复了没人合并、记错了没人纠正、记满了没人整理。
+本版补三件事，全部落在"不动原有调用次数"的前提上。
+
+### 一、生命周期 status（active / superseded）
+
+- 落盘即 `status=active`；`recall_fragments` 在 source 过滤之后加生命周期闸，
+  只把现行事实递给她。
+- 判"更新了某条"时**不删旧条**：旧条转 `superseded`、新条记 `supersedes=<旧ts>`。
+  旧条内容原样留在时间线上（面板仍可翻到、可单条删除），只是退出检索。
+- **为什么不是删除**：误标 superseded 是不可逆损害（一条正确记忆从此消失且无人察觉），
+  而"退出检索"已经达到治理目的；内容留着，用户才能在面板上发现并纠正。
+- 兼容 1.4.2 存量：缺 `status` 的旧条目一律按 active 处理，检索结果与旧版一致。
+
+### 二、提取时带已有记忆（new / duplicate / supersede）
+
+- `build_fragment_prompt(user, her, existing)`：最近 10 条现行片段排成
+  `[N] [kind] quote` 清单拼进 prompt，空列表显式写「（无）」——不写"（无）"时
+  模型会以为清单被截断而乱用编号。
+- 回复字段从 5 扩到 7（+`relation`/`target`）。`relation` 未知/缺失按 `new`；
+  `target` 只在 supersede 时解析，类型坏归 0，**越界一律按 new**。
+- `recall_fragments` 返回**时间倒序**（`[1]` = 最新），prompt 里必须写明，
+  否则模型会把"谁更新谁"判反。
+- **坏 JSON 不计熔断**：熔断账只记请求层失败。模型答散文属输出质量问题，
+  计进去会让两次坏回复永久熔掉一条本来通畅的通道（解除只有改配置或重启）。
+
+### 三、记忆自检 `mood_check_memory`（只给建议，不改数据）
+
+- 一次 20 条（上限 30），30 分钟节流，`ignore_pace=True`（不受语气节流节拍约束）。
+- 只返建议，不写任何数据；单条 finding 坏只丢那一条，不作废整次自检。
+- **为什么只给建议**：自动合并/删除是不可逆的，模型判错的代价远高于
+  "用户/她自己看到建议后动手"。这是"不替她做决定"的代码化。
+- 命名避坑：方法名与入口名都不得含 `review`（`test_review_not_exposed_to_llm_tools`
+  守着，"我的日记不暴露任何工具"是硬契约）。
+
+### 四、`[fragments].daily_limit` 接线并可面板调整
+
+- 1.4.2 里这是**死代码**（`fragment_capture_used/spend/left` 从未被调用）。
+  1.4.3 接进提取门控链：位置在"宿主通道确认可用"之后、"真正发请求"之前；
+  超限时推进水位 + 打时间戳，**不调 `_channel_break_note`**（限流不是通道故障，
+  记进去会误熔断）。
+- 两本账分工：`[agent_tier].daily_budget=20` 保宿主免费额度（500 次/天与宿主
+  agent 功能共用），`[fragments].daily_limit=60` 保用户自己的花费——槽位切到付费档后
+  agent 预算与 300 秒地板双双失效，它是**唯一剩下的次数闸**。
+- 面板「设置 · 日记」页可调（0~500，0 = 今天不分析），走 `update_settings` 的
+  `fragments_daily_limit`，与读取口 `_fragments_daily_limit()` **同一把钳制尺子**。
+- 越界**钳制**而非拒收（与 `agent_daily_budget` 拒收口径不同）：那条花的是公共池子，
+  笔误代价是一整天的额度流失；这条花自己的钱，钳成边界值更好预期。非数值回稳定码
+  `invalid_fragments_daily_limit`。
+
+### 五、碎片与语气感知的轮次水位隔离（1.4.3）
+
+- 症状：真机首跑，总开关打开、语气感知一切正常，但**碎片一条都不落**，日志里连
+  `fragment capture dormant` 都没有——整条链路静默。
+- 根因：两者共用 `shard.last_turn_marker`（"我读到第几轮了"）。tick 里语气感知排在
+  碎片**之前**，且每轮通过门控就推进该水位（`services/emotion_sense.py:392`）；
+  碎片随后调 `_poll_recent_turns(advance=False)`，而那道判定正是
+  `if marker == shard.last_turn_marker: return None`（`emotion_sense.py:359`）
+  → 碎片永远判"没有新轮"。默认配置（`[emotion_sense].enabled=true`、
+  `check_rate=1.0`）下等于碎片从未真正工作过。
+- 修法：碎片改用 `peek=True`——只取最新一轮、**完全不参与水位判定**；本轮是否"新"
+  由碎片自己的 `last_fragment_marker` 判（`mixins/senses.py` 里那套基线/比较）。
+  `peek=True` 本就是本仓既有用法（`_collect_review_sample_turns` 成文摘样，
+  注释写明"peek 不动水位"）。
+- 纪律：**谁需要"这轮是不是新的"，谁就自己记水位**。共用一条水位必然互相吞轮，
+  而且失败是静默的——本次就是靠"读了 store 却没有条目"才反查出来。
+- 回归测试 `test_capture_still_gets_turn_after_tone_advanced_watermark` 必须用
+  真实的 `_poll_recent_turns` 驱动：把轮询 stub 掉，这个坑会被桩挡道而测不出来。
 
 ## 生日轻语（1.3.1）
 

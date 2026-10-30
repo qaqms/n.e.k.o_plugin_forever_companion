@@ -259,6 +259,12 @@ _DIARY_MAX_ENTRIES = 120
 _FRAGMENT_KINDS = frozenset({"like", "dislike", "important", "overstep"})
 # 重度负面情绪生效期间值得轻语提醒她"你记得吗"的碎片类型
 _FRAGMENT_NUDGE_KINDS = frozenset({"overstep", "dislike"})
+# 碎片条目的生命周期状态（写入后治理）：只有 active 会被 mood_recall_fragments 翻出来。
+# superseded = 同一话题上被后来的记录取代（例：先说"最喜欢咖啡"，后来"心悸戒了"），
+# 旧条留在时间线上可追溯、但不再当作现行事实递给她。
+# 兼容：0.7.0~1.4.2 的旧记录没有 status 字段，一律按 active 处理（零迁移）。
+_FRAGMENT_STATUS_ACTIVE = "active"
+_FRAGMENT_STATUS_SUPERSEDED = "superseded"
 # 碎片提取的默认模型槽位与置信度门槛：**agent 槽**（与成文同档，1.3.3 修订轮定）。
 # 为什么不是语义上更贴的 summary（与宿主记忆抽取同层级）：免费路由只放行 agent 档，
 # summary/conversation/correction 都落在 `free-model`，从插件调用一律被服务端拒——
@@ -268,10 +274,15 @@ _FRAGMENT_NUDGE_KINDS = frozenset({"overstep", "dislike"})
 # 用满即休眠到次日，两条通道合记一本账。
 _FRAGMENT_DEFAULT_SLOT = "agent"
 # 碎片这条自己的每日上限（与 [agent_tier] 的角色总账分开记，见 day_counter_used）：
-# 主人给的口径是"每天 10 次左右"。为什么不用 min_interval_sec 表达——那是"隔多久"，
-# 聊得密的日子里同样能把一天摊满；日限才是"每天最多几次"的直接说法。取不到/非法一律
-# 回落出厂值，越界钳到边界（这是只进配置文件的旋钮，面板上只给读数，所以没有拒收码）
-_FRAGMENT_DEFAULT_DAILY_LIMIT = 10
+# **两本账保护的东西不同**——[agent_tier] 保的是"宿主官方给的免费额度"（500 次/天，
+# 与宿主自己的 agent 功能共用同一个池子），所以只给 20；本条保的是"用户自己的钱包"
+# （槽位切到付费服务商后，agent 档的日预算与 300 秒地板双双失效，这是唯一剩下的
+# 次数闸），所以给足。出厂 60 的依据：免费用户被 [agent_tier] 的 20 先拦下，这个值
+# 对他们等于不存在；付费用户则拿到"约每 24 分钟分析一次"的正常节奏（10 次/天对
+# "记住重要的话"这个核心功能偏紧）。用户可自行上调，硬顶 500。
+# 为什么不用 min_interval_sec 表达——那是"隔多久"，聊得密的日子里同样能把一天摊满；
+# 日限才是"每天最多几次"的直接说法。取不到/非法一律回落出厂值，越界钳到边界。
+_FRAGMENT_DEFAULT_DAILY_LIMIT = 60
 _FRAGMENT_MIN_DAILY_LIMIT = 0          # 0 = 这条今天一次都不发（等价关闭）
 _FRAGMENT_MAX_DAILY_LIMIT = 500        # 与宿主 agent 日配额同量级，再高就是自己刷自己
 _FRAGMENT_DEFAULT_CONFIDENCE = 0.6
@@ -282,7 +293,7 @@ _FRAGMENT_DEFAULT_NUDGE_GAP_MIN = 30
 # 碎片提取 prompt（直连槽位 chat completion）：只记用户对猫娘说的有分量的话，
 # 必须 quote 原话摘录；玩笑/日常寒暄不记（capture=false）。只返回 JSON
 _FRAGMENT_EXTRACTION_PROMPT = """你是猫娘的私人记忆助手。下面是主人对猫娘说的一句话（附猫娘当时的回复作语境）。请判断这句话是否值得猫娘记进心里的日记本：主人明确表达了自己的喜好或厌恶、说了有特殊含义或承诺性质的话、或者对猫娘有过分/伤害性的言行。
-- 值得记：返回 {"capture": true, "kind": "...", "quote": "...", "note": "...", "confidence": 0~1}
+- 值得记：返回 {"capture": true, "kind": "...", "quote": "...", "note": "...", "confidence": 0~1, "relation": "..."}
 - 不值得记（日常寒暄、玩笑、聊天接龙）：返回 {"capture": false, "confidence": 0~1}
 
 kind 只能是这四种之一：
@@ -293,11 +304,56 @@ kind 只能是这四种之一：
 
 quote 必须从主人原话里摘录最核心的那句（保留原文，不要改写，30 字以内）；
 note 用第三人称简短记录这件事（如"他说最喜欢她做的饭"，25 字以内）。
-判断规则：只有明确表达才记，别过度解读玩笑和反话；confidence 是"值得记"的把握。
+
+判断规则：
+- 只有明确表达才记，别过度解读玩笑和反话；confidence 是"值得记"的把握。
+- 再看下面「已有记忆」里有没有说同一件事的（编号 1 是最近一条，按时间倒序）：
+  · 结论相同（同一个喜好/厌恶/约定又提了一遍）→ relation 填 "duplicate"，不要重复记；
+  · 结论相反或已更新（原先喜欢、现在不喜欢了；旧约定改了）→ relation 填 "supersede"，
+    并把那条的编号填进 target；
+  · 说的是另一件事 → relation 填 "new"。
+- 「已有记忆」为空，或里面没有对应条目，一律填 "new"。
+- 拿不准就填 "new"：宁可多记一条，也不能错删一条旧记忆。
 
 只返回 JSON，不要附加任何解释文本。
+"""
 
-主人的话：
+# 关系判定的闭集（写入后治理）：new = 与已有记忆无关；duplicate = 同一结论又提一遍，
+# 不新增条目；supersede = 同一话题上被这句更新/推翻，旧条改标 superseded。
+# 未知取值一律按 new 处理——主体内容（kind/quote）合法时不该因关系字段坏了整条丢弃。
+_FRAGMENT_RELATIONS = frozenset({"new", "duplicate", "supersede"})
+# 塞进提取 prompt 的「已有记忆」条数。为什么是 10 而不是全量：碎片上限 120 条，全塞
+# 会让 prompt 膨胀十倍（每条 quote+note 至多 120 字），单次 token 成本与模型注意力都被
+# 摊薄；"又被提了一遍""改了"这类冲突几乎都发生在最近若干次记忆之间，10 条覆盖即可。
+# 拿不准的冲突宁可漏判（多记一条重复），也不要为了判全而把 prompt 撑爆。
+_FRAGMENT_RECALL_FOR_PROMPT = 10
+
+# ---- 记忆自检（mood_review_memory，写入后治理第二阶段）----
+# 问题类型闭集：stale = 已过时（临时约定过期、季节性安排过去了）；conflict = 两条互相
+# 矛盾；duplicate = 两条说的是同一件事。
+_FRAGMENT_REVIEW_ISSUES = frozenset({"stale", "conflict", "duplicate"})
+# 一次自检看多少条：默认 20、上限 30（与 recall 工具的 limit 钳制同量级）。再多下去
+# 清单就要占满 prompt，成本与模型注意力都不划算。
+_FRAGMENT_REVIEW_DEFAULT_ITEMS = 20
+_FRAGMENT_REVIEW_MAX_ITEMS = 30
+# 两次自检的最小间隔（秒）。为什么必须节流：这是她**可以主动调用**的工具，一旦进入
+# 复读节奏就会连烧配额；30 分钟够她"想起来整理一下"，又不至于让她觉得点了没反应。
+_FRAGMENT_REVIEW_MIN_INTERVAL_SEC = 1800.0
+# 自检 prompt：只挑客观问题，不评价"该不该存在"——删不删、改不改永远是她的事。
+_FRAGMENT_REVIEW_PROMPT = """你是猫娘的记忆整理助手。下面是她的时光日记里最近的碎片（编号 + 类型 + 日期 + 他当时的原话）。
+编号 1 是最近的一条，按时间倒序排列。
+请检查有没有这三类客观问题：
+- stale：已经过时（临时约定早就过期了、季节性的安排过去了、明显不再成立）
+- conflict：两条互相矛盾（同一件事得出相反结论）
+- duplicate：两条说的是同一件事（同一结论记了两遍）
+
+只列有问题的条目，每条给一句话理由；没有问题就返回空数组。
+不要评价这些记忆"该不该存在"，也不要替她决定删哪条——只指出客观问题。
+
+只返回 JSON，不要附加任何解释文本：
+{"findings": [{"index": 3, "issue": "conflict", "reason": "第3条说戒了咖啡，第7条说最喜欢咖啡"}]}
+
+碎片清单：
 """
 # 用户原话/备注在碎片记录里的截断长度
 _FRAGMENT_QUOTE_MAX_CHARS = 60
@@ -794,6 +850,7 @@ class _LanlanShard:
         "last_fragment_marker",
         "last_fragment_analysis_ts",
         "last_fragment_nudge_ts",
+        "last_fragment_review_ts",
         "affect_extreme_since",
         "affect_extreme_side",
         "last_extreme_invite_ts",
@@ -856,6 +913,9 @@ class _LanlanShard:
         self.last_fragment_marker = ""  # "" = 尚未建立基线（首趟只记水位不分析历史）
         self.last_fragment_analysis_ts = 0.0
         self.last_fragment_nudge_ts = 0.0
+        # 记忆自检（mood_review_memory）的节流位：只放内存，重启清零无副作用——
+        # 它是"她主动想清理"的低频动作，不需要跨进程严格的冷却保证
+        self.last_fragment_review_ts = 0.0
         # 持续极端心情邀请（[mood] extreme_invite_*）：首次进入极端档的时刻
         # （0 = 不在极端档，恢复常态即清零）、当前侧别（-1 低落 / 1 高涨，换侧重计时）
         # 与上次邀请节流；内存即可，重启最多重邀一次

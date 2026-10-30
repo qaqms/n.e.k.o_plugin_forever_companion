@@ -83,9 +83,10 @@ def test_capability_tools_grouping():
     assert "mood_ebb_tide" in hideable
     assert "mood_journal_write" in hideable and "mood_recall_fragments" in hideable
     assert on == set()
-    # 声明表覆盖 12 个工具且与装饰器清单一致
+    # 声明表覆盖 13 个工具且与装饰器清单一致（12 个情绪/记录工具 + 记忆自检）
     all_tools = {t for s in CAPABILITY_SPECS.values() for t in s.tools}
-    assert len(all_tools) == 12
+    assert "mood_check_memory" in all_tools
+    assert len(all_tools) == 13
 
 
 # ---------- 运行面：判定与收编等价 ----------

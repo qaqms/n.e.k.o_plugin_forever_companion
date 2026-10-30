@@ -82,7 +82,7 @@ class BackupMixin:
     async def _backup_defaults(self) -> dict:
         def load():
             defaults = tomllib.loads((Path(__file__).resolve().parents[1] / "plugin.toml").read_text(encoding="utf-8"))
-            defaults["fragments"].setdefault("daily_limit", 10)
+            defaults["fragments"].setdefault("daily_limit", 60)
             # Older panels persisted this option; keep their backups readable.
             defaults["capabilities"].setdefault("motion", "auto")
             for phase in defaults["tide"]["phases"].values():

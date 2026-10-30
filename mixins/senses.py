@@ -54,9 +54,14 @@ from ..core.state import (
     _CORE_CONFIG_CACHE_TTL,
     _CYCLE_AGENT_BUDGET_LAST_TS,
     _FRAGMENT_DEFAULT_CONFIDENCE,
+    _FRAGMENT_DEFAULT_DAILY_LIMIT,
     _FRAGMENT_DEFAULT_MIN_INTERVAL_SEC,
     _FRAGMENT_DEFAULT_NUDGE_GAP_MIN,
     _FRAGMENT_DEFAULT_SLOT,
+    _FRAGMENT_MAX_DAILY_LIMIT,
+    _FRAGMENT_MIN_DAILY_LIMIT,
+    _FRAGMENT_RECALL_FOR_PROMPT,
+    _FRAGMENT_STATUS_SUPERSEDED,
     _HOST_LLM_MAX_TOKENS_FRAGMENT,
     _HOST_LLM_MAX_TOKENS_REVIEW,
     _HOST_LLM_TIMEOUT_FRAGMENT_SEC,
@@ -71,6 +76,8 @@ from ..core.state import (
     _channel_route,
     _LanlanShard,
     _now_utc,
+    fragment_capture_left,
+    fragment_capture_spend,
     tier_budget_left,
     tier_budget_spend,
 )
@@ -479,6 +486,31 @@ class SensesMixin:
         except (TypeError, ValueError):
             return default
 
+    def _fragments_daily_limit(self) -> int:
+        """[fragments].daily_limit：这条链路今天最多真正分析几次（钳在 0~500）。
+
+        两本账保护的东西不同，默认值因此也不同：
+
+        - [agent_tier].daily_budget 保的是"宿主官方给的免费额度"（500 次/天，与宿主
+          自己的 agent 功能共用同一个池子），所以只给 20——免费用户会先撞上那道闸，
+          本条给的 60 对他们等于不存在；
+        - 本条保的是"用户自己的花费"（槽位走第三方付费服务商时，每次分析都真金白银），
+          默认 60，约每 24 分钟一次。
+
+        为什么必须有这一条：_agent_tier_gate 首行按槽位短路（slot != "agent" 即放行），
+        槽位切到付费档后 agent 日预算与 300 秒地板双双失效，只剩 min_interval_sec
+        一道闸——间隔管的是"隔多久"（理论上一天还能发 1440 次），管不住"一天总共几次"。
+
+        0 = 今天一次都不分析（等价关闭捕获；检索工具照常可用）。取不到/非法一律
+        回落出厂值，越界钳到边界。1.5.0 起这个旋钮在面板「日记」设置卡上可调，
+        写回走 update_settings 的 fragments_daily_limit（钳制口径与这里同一把尺子）。
+        """
+        try:
+            raw = int(self._fragments_cfg.get("daily_limit", _FRAGMENT_DEFAULT_DAILY_LIMIT))
+        except (TypeError, ValueError):
+            return _FRAGMENT_DEFAULT_DAILY_LIMIT
+        return max(_FRAGMENT_MIN_DAILY_LIMIT, min(_FRAGMENT_MAX_DAILY_LIMIT, raw))
+
     def _fragments_enabled(self, shard: _LanlanShard | None = None) -> bool:
         """碎片捕获开关（1.2.7 起走能力中心）：总开关 ∧ 情绪引擎 ∧
         [fragments].enabled ∧ 用户否决，依赖链在声明表里显式化。"""
@@ -502,8 +534,13 @@ class SensesMixin:
         )
         if now - shard.last_fragment_analysis_ts < max(0.0, min_interval):
             return False
-        # advance=False：这轮是否"新"由碎片自己的水位判定（语气感知的抽样/门控不牵连）
-        turn = await self._poll_recent_turns(shard, lanlan=lanlan, advance=False)
+        # peek=True：只读最新一轮，不参与"有没有新轮"的水位判定。为什么不能用
+        # advance=False：那道判定比较的是 shard.last_turn_marker，而语气感知在 tick 里
+        # 排在碎片**之前**且每轮都会推进它——碎片后跑就永远判"没有新轮"，静默跳过
+        # （1.5.0 真机实测：语气感知开着时碎片一条都不落，日志里连 dormant 都没有）。
+        # 本轮是否"新"交给碎片自己的 last_fragment_marker 判定（下面 543-547 行那套
+        # 基线/比较），两本水位各记各的，互不吞轮。
+        turn = await self._poll_recent_turns(shard, lanlan=lanlan, peek=True)
         if turn is None:
             return False
         user_text, her_text = turn
@@ -516,6 +553,14 @@ class SensesMixin:
         user_text = (user_text or "").strip()
         if not user_text:
             shard.last_fragment_marker = marker
+            return False
+        # 碎片日限（[fragments].daily_limit）：放在这里而不是更早，是因为此时已确认
+        # 有真实新轮与非空文本（不白拉一次 recent HTTP），且还没解析端点（超限时连
+        # 端点解析都省掉）。超限推进水位：今天不会再分析，不推进就每 10 秒空转到次日。
+        day = str(self._today_str())
+        if fragment_capture_left(shard.cycle, day, self._fragments_daily_limit()) <= 0:
+            shard.last_fragment_marker = marker
+            shard.last_fragment_analysis_ts = now
             return False
         resolved, slot, core_cfg = await self._resolve_channel_endpoint(
             self._fragments_cfg, default_slot=_FRAGMENT_DEFAULT_SLOT
@@ -552,10 +597,19 @@ class SensesMixin:
             return False
         shard.last_fragment_marker = marker
         shard.last_fragment_analysis_ts = now
+        # 碎片日限与档位同口径：发出请求即记，不论成败（服务端两次都算）。
+        # 先记账再走档位，agent 槽那次落盘就带上本计数；非 agent 槽 _agent_tier_spend
+        # 首行即返回、不落盘，所以最后这次落盘才是它唯一一次（agent 槽会写两遍
+        # 内容相同的 cycle，几十字节，换"不依赖别的函数替我落盘"这条清晰性）
+        fragment_capture_spend(shard.cycle, day)
         await self._agent_tier_spend(lanlan, shard, slot)
+        await self._save_shard_cycle(lanlan, shard)
+        # 已有记忆：recall_fragments 只给现行事实（status=active），最近 N 条带编号进
+        # prompt 供模型判"重复 / 取代"。空日记时是空列表，prompt 里明写「（无）」。
+        existing = recall_fragments(shard.diary, limit=_FRAGMENT_RECALL_FOR_PROMPT)
         raw = await self._channel_chat(
             resolved,
-            build_fragment_prompt(user_text, her_text),
+            build_fragment_prompt(user_text, her_text, existing),
             timeout_sec=_HOST_LLM_TIMEOUT_FRAGMENT_SEC,
             max_completion_tokens=_HOST_LLM_MAX_TOKENS_FRAGMENT,
             call_type="plugin_fragment_capture",
@@ -571,7 +625,35 @@ class SensesMixin:
                 parsed.get("kind"), parsed.get("confidence") or 0.0, threshold,
             )
             return False
-        record = fragment_record(_now_utc().isoformat(timespec="seconds"), self._last_phase_name(shard), parsed)
+        # 写入后治理：模型判"同一结论又提一遍"就不新增（时间线与配额都不该被重复占）；
+        # 判"更新了某条"则新增并把旧条切到 superseded（旧条留在时间线上可追溯，只是不再
+        # 当作现行事实被检索出来）。编号越界一律按 new 处理——宁可多记一条重复，也不能
+        # 因为模型回了一个坏编号就把一条正确记忆标成失效。
+        relation = str(parsed.get("relation") or "new")
+        supersedes_ts = ""
+        if relation == "duplicate":
+            self.logger.info(
+                "fragment duplicate skipped: lanlan={} kind={}", lanlan, parsed.get("kind"),
+            )
+            return False
+        if relation == "supersede":
+            try:
+                target = int(parsed.get("target") or 0)
+            except (TypeError, ValueError):
+                target = 0
+            if 1 <= target <= len(existing):
+                supersedes_ts = str(existing[target - 1].get("ts") or "")
+        record = fragment_record(
+            _now_utc().isoformat(timespec="seconds"),
+            self._last_phase_name(shard),
+            parsed,
+            supersedes=supersedes_ts,
+        )
+        if supersedes_ts:
+            for item in shard.diary:
+                if str(item.get("ts") or "") == supersedes_ts:
+                    item["status"] = _FRAGMENT_STATUS_SUPERSEDED
+                    break
         shard.diary.append(record)
         # 我的日记素材：碎片原话是"他说话方式"的最硬例证（含过激言行）
         self._feed_review_fragment(shard, record)

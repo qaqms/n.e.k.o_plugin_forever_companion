@@ -199,6 +199,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     settings.fragments_enabled,
     settings.fragments_slot,
     settings.fragments_mode,
+    settings.fragments_daily_limit,
     settings.review_enabled,
     settings.review_slot,
     settings.review_mode,

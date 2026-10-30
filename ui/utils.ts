@@ -427,6 +427,9 @@ export function settingsToForm(settings: Settings): FormValues {
     fragments_enabled: settings.fragments_enabled !== false,
     fragments_slot: String(settings.fragments_slot || "agent"),
     fragments_mode: String(settings.fragments_mode || "host"),
+    // 兜底值镜像 [fragments].daily_limit（出厂 60）：只在快照未到的第一帧用得上，
+    // 真值永远由后端 settings 快照覆盖；漂移由 test_ui_form_fallbacks_match_shipped_defaults 钉死
+    fragments_daily_limit: Number(settings.fragments_daily_limit ?? 60),
     review_enabled: settings.review_enabled !== false,
     review_slot: String(settings.review_slot || "agent"),
     review_mode: String(settings.review_mode || "host"),

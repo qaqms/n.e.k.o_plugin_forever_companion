@@ -24,6 +24,28 @@ export async function diaryChecks(browser, sources, origin, output, { loadPage, 
         await frame.evaluate(next => window.__NekoRefreshHostedPayload(next), payload)
       }
       try {
+        await check(`timeline-${locale}-${width}-superseded-status`, async () => {
+          await page.evaluate(() => {
+            const items = window.qaFixture.context.state.diary_recent.filter(item => item.source === "auto")
+            items[0].status = "superseded"
+            items[1].status = "active"
+            delete items[2].status
+          })
+          await refresh()
+          const rows = frame.locator('.tm-tl-row[data-source="auto"]')
+          await rows.first().locator(".tm-tl-status").waitFor()
+          assert.equal(await rows.first().locator(".tm-tl-status").innerText(), text["panel.diary.superseded"])
+          assert.equal(await rows.nth(1).locator(".tm-tl-status").count(), 0)
+          assert.equal(await rows.nth(2).locator(".tm-tl-status").count(), 0)
+          const path = join(output, `timeline-status-${locale}-${width}.png`)
+          await page.screenshot({ path, animations: "disabled" })
+          const layout = await inspectLayout(frame)
+          assert.equal(layout.documentOverflow, 0)
+          assert.equal(layout.contentOverflow, 0)
+          assert.deepEqual(layout.issues, [])
+          screenshots.push({ id: `timeline-status-${locale}-${width}`, path, layout, errors: [...errors], diagnostics: [] })
+          assert.deepEqual(errors, [])
+        })
         for (const kind of ["journal", "review"]) {
           await check(`${kind}-${locale}-${width}-fixed-date-above-title`, async () => {
             await frame.getByRole("button", { name: text[kind === "journal" ? "panel.journal.tabJournal" : "panel.review.tabReview"], exact: true }).click()

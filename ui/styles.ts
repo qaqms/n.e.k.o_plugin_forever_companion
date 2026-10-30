@@ -595,6 +595,7 @@ export const PANEL_STYLES = `
 .tm-tl-badge[data-kind="dislike"] { background: rgba(250, 204, 21, 0.20); }
 .tm-tl-badge[data-kind="like"] { background: rgba(103, 194, 58, 0.15); }
 .tm-tl-mood { color: var(--muted); font-size: 12px; font-weight: 650; }
+.tm-tl-status { color: var(--muted); font-size: 11px; line-height: 1.6; }
 .tm-tl-ts { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .tm-tl-spacer { margin-left: auto; }
 .tm-tl-delete {
