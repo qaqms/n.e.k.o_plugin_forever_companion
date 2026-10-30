@@ -759,9 +759,18 @@ def test_shipped_channel_defaults_are_agent_and_host(plugin_factory, tm) -> None
     shipped = tomllib.loads(toml_path.read_text(encoding="utf-8"))
     assert (shipped["fragments"]["slot"], shipped["fragments"]["mode"]) == ("agent", "host")
     assert (shipped["review"]["slot"], shipped["review"]["mode"]) == ("agent", "host")
-    # 预算在场且落在推荐带内（出厂 20）；地板也得真在
+    assert shipped["agent_tier"]["daily_budget"] == 100
+    # 预算在场且落在可调整范围内；地板也得真在
     assert tm._AGENT_TIER_MIN_BUDGET <= shipped["agent_tier"]["daily_budget"] <= tm._AGENT_TIER_MAX_BUDGET
     assert tm._AGENT_TIER_MIN_INTERVAL_SEC >= 60.0
+
+
+def test_missing_settings_use_agent_and_100_daily_requests(plugin_factory) -> None:
+    p = plugin_factory()
+    snapshot = p._settings_snapshot()
+    assert snapshot["review_slot"] == "agent"
+    assert snapshot["agent_daily_budget"] == 100
+    assert p._agent_tier_budget() == 100
 
 
 # ---------------------------------------------------------------------------
@@ -900,6 +909,60 @@ def test_budget_math_rolls_over_by_day(tm) -> None:
     assert tm.tier_budget_left(cycle, "2026-09-22", 3) == 1
     assert tm.tier_budget_used(cycle, "2026-09-23") == 0  # 次日归零，不需要谁去清
     assert tm.tier_budget_left(cycle, "2026-09-23", 3) == 3
+
+
+def test_exhausted_budget_recovers_across_days_without_restart(plugin_factory, monkeypatch, tm) -> None:
+    from datetime import date
+
+    today = [date(2026, 10, 30)]
+    seen_zones = []
+
+    def local_today(zone):
+        seen_zones.append(zone)
+        return today[0]
+
+    monkeypatch.setattr(tm, "resolve_today", local_today)
+    p = plugin_factory(tide_extra={"timezone": "Asia/Shanghai"})
+    shard, calls = _agent_setup(p, budget=100)
+    for day in (date(2026, 10, 30), date(2026, 10, 31), date(2026, 11, 2)):
+        today[0] = day
+        payload = run(p.dashboard())
+        assert payload["agent_tier_usage"] == {"used": 0, "budget": 100}
+        assert payload["channel_status"]["review"]["dormant_reason"] != "budget"
+        assert p._agent_tier_gate(shard, "agent", ignore_pace=True) == ""
+        assert run(p._maybe_capture_fragments("default", shard)) is True
+        assert run(p.dashboard())["agent_tier_usage"]["used"] == 1
+        assert p.store.data["cycle@default"]["agent_budget_date"] == day.isoformat()
+        _prime_budget(p, shard, 100)
+        assert run(p._maybe_capture_fragments("default", shard)) is False
+        assert run(p.dashboard())["channel_status"]["review"]["dormant_reason"] == "budget"
+        assert p._agent_tier_gate(shard, "agent", ignore_pace=True) == "budget"
+    assert len(calls) == 3  # 每个新日期恢复一次请求，耗尽后的重试均被拦截。
+    assert not p._channel_break
+    assert set(seen_zones) == {"Asia/Shanghai"}
+
+
+def test_exhausted_budget_survives_restart_and_refreshes_next_day(plugin_factory_full, monkeypatch, tm) -> None:
+    from copy import deepcopy
+    from datetime import date
+
+    today = [date(2026, 10, 30)]
+    monkeypatch.setattr(tm, "resolve_today", lambda _: today[0])
+    p = plugin_factory_full()
+    shard, _ = _agent_setup(p, budget=100)
+    _prime_budget(p, shard, 99)
+    run(p._agent_tier_spend("default", shard, "agent"))
+    for day, used in ((date(2026, 10, 30), 100), (date(2026, 10, 31), 0)):
+        today[0] = day
+        restarted = plugin_factory_full(store_initial=deepcopy(p.store.data))
+        restored = restarted._current_shard()
+        assert run(restarted.dashboard())["agent_tier_usage"] == {"used": used, "budget": 100}
+        assert restarted._agent_tier_gate(restored, "agent", ignore_pace=True) == ("budget" if used else "")
+        if used == 0:
+            run(restarted._agent_tier_spend("default", restored, "agent"))
+            again = plugin_factory_full(store_initial=deepcopy(restarted.store.data))
+            assert run(again.dashboard())["agent_tier_usage"] == {"used": 1, "budget": 100}
+            assert again.store.data["cycle@default"]["agent_budget_date"] == "2026-10-31"
 
 
 def test_update_settings_validates_agent_budget(plugin_factory, tm) -> None:

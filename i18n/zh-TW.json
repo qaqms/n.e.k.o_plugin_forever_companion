@@ -925,7 +925,7 @@
   "panel.settings.activeDayN": "活躍日 第 {n} 天",
   "panel.settings.activeWindowN": "活躍窗口 ±{n} 天",
   "panel.settings.agentBudget": "agent 模型每日呼叫上限",
-  "panel.settings.agentBudgetHelp": "對話片段和我的日記使用 agent 模型時，共享此上限，按角色分別計數；用完後次日恢復。可設為 5～150 次，建議 5～50 次。呼叫間隔至少 300 秒，宿主服務還可能有額外額度限制。",
+  "panel.settings.agentBudgetHelp": "對話片段和我的日記使用 agent 模型時，共享此上限，按角色分別計數；用完後次日恢復。預設 100 次，可設為 5～150 次。呼叫間隔至少 300 秒，宿主服務還可能有額外額度限制。",
   "panel.settings.agentBudgetUsed": "今日已用 {used}/{budget} 次",
   "panel.settings.autoDerive": "自動計算階段參數",
   "panel.settings.channelFragments": "對話片段擷取",

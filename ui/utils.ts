@@ -438,7 +438,7 @@ export function settingsToForm(settings: Settings): FormValues {
     // 兜底值镜像 [agent_tier].daily_budget：只在快照未到的第一帧用得上，真值永远由
     // 后端 settings 快照覆盖。这类"前端另抄一份默认"的漂移由
     // test_ui_form_fallbacks_match_shipped_defaults 钉死
-    agent_daily_budget: Number(settings.agent_daily_budget ?? 20),
+    agent_daily_budget: Number(settings.agent_daily_budget ?? 100),
     anniversary_inject: (settings as Record<string, any>).anniversary_inject !== false,
     debug_mode: settings.debug_mode === true,
   }

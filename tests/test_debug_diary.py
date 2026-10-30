@@ -170,7 +170,7 @@ def test_full_backup_roundtrip_retains_restore_payload(plugin_factory_full):
     plugin = prepared(plugin_factory_full)
     real = copy.deepcopy(plugin._get_shard("Alice").diary)
     run(plugin._debug_diary_fill())
-    data = copy.deepcopy(plugin.store.data)
+    data = run(plugin._backup_snapshot())
     data["gallery_index"] = {"next": 1, "items": []}
     archive, _ = backup.make_archive(data, "1.4.1")
     records, _ = backup.read_archive(archive)

@@ -68,6 +68,8 @@ JsonObject = dict[str, Any]
 _STORE_READY_ATTEMPTS = 3
 _STORE_READY_RETRY_S = 0.2
 _STORE_READY_PROBE_TIMEOUT_S = 2.0
+# 安装级标记，不随便携备份恢复回退，避免恢复后再次覆盖用户选择。
+_STORE_AGENT_DEFAULTS_MIGRATION = "migration_agent_defaults_100_v1"
 
 
 class ShardsMixin:
@@ -574,6 +576,7 @@ class ShardsMixin:
             caps_res.value if isinstance(caps_res, Ok) else None
         )
         await self._migrate_legacy_state_if_needed()
+        await self._migrate_agent_defaults_if_needed()
         # 载入所有已知角色的 shard：主动搭话引用计数要看全量生效情绪，
         # 只载当前角色会把"别的角色还在冷战"漏算
         for lanlan in list(self._lanlan_index):
@@ -635,6 +638,34 @@ class ShardsMixin:
         # 迁移改过水位（prev 搬入/paused_by 标记）：走脏检查出口，成功后同步快照
         await self._persist_proactive_state()
         self.logger.info("legacy single-character state migrated to shard {}", lanlan)
+
+    async def _migrate_agent_defaults_if_needed(self) -> None:
+        """首次升级统一成文模型与预算；完成后用户的手动调整永久优先。"""
+        if not self._state_trusted or not self._store_ready:
+            return
+        marker = await self._store_read(_STORE_AGENT_DEFAULTS_MIGRATION)
+        if not isinstance(marker, Ok) or marker.value is True:
+            return
+        # 重新读取 legacy 迁移后的完整设置；读失败不能按空配置整包覆写。
+        settings = await self._store_read(_STORE_SETTINGS)
+        if not isinstance(settings, Ok):
+            return
+        if settings.value is not None and not isinstance(settings.value, dict):
+            self.logger.warning("agent defaults migration deferred: settings is not an object")
+            return
+        overrides = dict(settings.value or {})
+        overrides["review"] = {**_cfg_section(overrides.get("review")), "slot": "agent"}
+        overrides["agent_tier"] = {**_cfg_section(overrides.get("agent_tier")), "daily_budget": 100}
+        if not self._store_ready:
+            return
+        result = await self._store_write(_STORE_SETTINGS, overrides, "agent defaults settings")
+        if not isinstance(result, Ok) or not self._store_ready:
+            return
+        self._settings_override = overrides
+        # 两项设置落盘后再记完成；中断或写失败留待下次可信载入重试。
+        result = await self._store_write(_STORE_AGENT_DEFAULTS_MIGRATION, True, "agent defaults migration")
+        if isinstance(result, Ok) and self._store_ready:
+            self.logger.info("agent defaults migrated once: review.slot=agent, agent_tier.daily_budget=100")
 
     # ==========================================
     # 落盘统一出口（1.2.2 批次2）：_store_write / _store_read

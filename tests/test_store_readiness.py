@@ -220,6 +220,27 @@ def test_ready_probe_treats_missing_enabled_attr_as_ready(tm, boot_factory):
     assert p._enabled(p._get_shard("灵")) is True
 
 
+def test_agent_defaults_migration_waits_for_store_and_reloads_real_settings(tm, boot_factory):
+    from forever_companion.mixins.shards import _STORE_AGENT_DEFAULTS_MIGRATION
+
+    p, store = _boot(tm, boot_factory, enabled=False, never_wakes=True)
+    store.data["settings"] = {
+        "review": {"slot": "conversation", "turns_threshold": 80},
+        "agent_tier": {"daily_budget": 20},
+        "birthday": {"date": "06-12"},
+    }
+    run(p.startup())
+    assert _STORE_AGENT_DEFAULTS_MIGRATION not in store.data
+    assert store.data["settings"]["review"]["slot"] == "conversation"
+    store.enabled = True
+    run(p._ensure_shard("灵"))
+    assert p._settings_snapshot()["review_slot"] == "agent"
+    assert p._settings_snapshot()["agent_daily_budget"] == 100
+    assert store.data["settings"]["review"]["turns_threshold"] == 80
+    assert store.data["settings"]["birthday"] == {"date": "06-12"}
+    assert store.data[_STORE_AGENT_DEFAULTS_MIGRATION] is True
+
+
 # ============================================================
 # 1.2.2 追加：中途通电重载入门控（幻影覆写）与 shutdown 补刷 stats/review
 # ============================================================

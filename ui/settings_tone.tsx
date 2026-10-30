@@ -115,10 +115,10 @@ export function ChannelSettingsCard(props: {
       {/* agent 档节流（1.3.3 修订轮）：碎片与成文只要走 agent 槽就合记一份当日计数
           （按角色分账），用完休眠到次日。这里给的是全局预算旋钮 + 当前角色的已用读数；
           300 秒间隔地板刻意不开放配置（它防的是自动节拍砸配额，用户没有调它的理由），
-          只在说明里讲清"还有一道在代码里"。5/150/20 三个字面量与后端同值，
+          只在说明里讲清"还有一道在代码里"。5/150/100 三个字面量与后端同值，
           由 test_ui_budget_input_range_matches_backend_bounds / 出厂值同源门钉住 */}
       <div className="tm-derived">
-        {t("panel.settings.agentBudgetHelp", { defaultValue: "对话片段和我的日记使用 agent 模型时，共享此上限，按角色分别计数；用完后次日恢复。可设为 5～150 次，建议 5～50 次。调用间隔至少 300 秒，宿主服务还可能有额外额度限制。" })}
+        {t("panel.settings.agentBudgetHelp", { defaultValue: "对话片段和我的日记使用 agent 模型时，共享此上限，按角色分别计数；用完后次日恢复。默认 100 次，可设为 5～150 次。调用间隔至少 300 秒，宿主服务还可能有额外额度限制。" })}
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <span>{t("panel.settings.agentBudget", { defaultValue: "agent 模型每日调用上限" })}</span>
@@ -127,7 +127,7 @@ export function ChannelSettingsCard(props: {
           min={5}
           max={150}
           step={1}
-          onChange={(v: number | string) => updateForm({ agent_daily_budget: typeof v === "number" ? v : 20 })}
+          onChange={(v: number | string) => updateForm({ agent_daily_budget: typeof v === "number" ? v : 100 })}
         />
         <span>
           {t("panel.settings.agentBudgetUsed", {

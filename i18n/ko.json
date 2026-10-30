@@ -925,7 +925,7 @@
   "panel.settings.activeDayN": "활발일 {n}일차",
   "panel.settings.activeWindowN": "활발 창 ±{n}일",
   "panel.settings.agentBudget": "agent 모델 일일 호출 한도",
-  "panel.settings.agentBudgetHelp": "대화 발췌와 내 일기가 agent 모델을 사용할 때 이 한도를 공유하며 캐릭터별로 계산합니다. 한도를 다 쓰면 다음 날 재개합니다. 5~150회로 설정할 수 있으며 권장은 5~50회입니다. 호출 간격은 최소 300초이고 호스트 서비스에도 추가 한도가 있을 수 있습니다.",
+  "panel.settings.agentBudgetHelp": "대화 발췌와 내 일기가 agent 모델을 사용할 때 이 한도를 공유하며 캐릭터별로 계산합니다. 한도를 다 쓰면 다음 날 재개합니다. 기본값은 100회이며 5~150회로 설정할 수 있습니다. 호출 간격은 최소 300초이고 호스트 서비스에도 추가 한도가 있을 수 있습니다.",
   "panel.settings.agentBudgetUsed": "오늘 {used}/{budget} 회 사용",
   "panel.settings.autoDerive": "단계 설정값 자동 계산",
   "panel.settings.channelFragments": "대화 발췌 추출",

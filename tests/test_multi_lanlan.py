@@ -190,11 +190,11 @@ def test_legacy_proactive_prev_migrates_to_proactive_state(plugin_factory_full, 
     assert not hasattr(p._get_shard("YUI").mood, "proactive_prev")
 
 
-def test_fresh_install_writes_no_migration(plugin_factory_full, tm) -> None:
+def test_fresh_install_has_no_legacy_state(plugin_factory_full, tm) -> None:
     p = plugin_factory_full(http=_HostHttp(current="YUI"))
-    # 全新安装：无旧 key、无 settings 残留，索引只含当前角色
+    # 全新安装：无旧 key，只固定本次升级默认值，索引只含当前角色。
     assert "cycle_state" not in p.store.data
-    assert p._settings_override == {}
+    assert p._settings_override == {"review": {"slot": "agent"}, "agent_tier": {"daily_budget": 100}}
     assert p._lanlan_index == ["YUI"]
 
 

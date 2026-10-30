@@ -925,7 +925,7 @@
   "panel.settings.activeDayN": "Peak day: day {n}",
   "panel.settings.activeWindowN": "Peak window ±{n} days",
   "panel.settings.agentBudget": "Agent model daily request limit",
-  "panel.settings.agentBudgetHelp": "Conversation Excerpts and My Diary share this limit when using the agent model, counted separately for each character. Requests resume the next day after the limit is reached. Set 5 to 150 requests; 5 to 50 is recommended. Requests are at least 300 seconds apart. The host service may apply additional limits.",
+  "panel.settings.agentBudgetHelp": "Conversation Excerpts and My Diary share this limit when using the agent model, counted separately for each character. Requests resume the next day after the limit is reached. The default is 100 requests, adjustable from 5 to 150. Requests are at least 300 seconds apart. The host service may apply additional limits.",
   "panel.settings.agentBudgetUsed": "Used today {used}/{budget}",
   "panel.settings.autoDerive": "Calculate phase settings automatically",
   "panel.settings.channelFragments": "Conversation excerpt extraction",

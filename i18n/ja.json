@@ -925,7 +925,7 @@
   "panel.settings.activeDayN": "活発日 第{n}日",
   "panel.settings.activeWindowN": "活発ウィンドウ ±{n}日",
   "panel.settings.agentBudget": "agentモデルの1日呼び出し上限",
-  "panel.settings.agentBudgetHelp": "会話の抜粋と私の日記がagentモデルを使う場合、この上限を共有し、キャラクターごとに数えます。上限に達すると翌日再開します。5～150回に設定でき、推奨は5～50回です。呼び出し間隔は最低300秒で、ホストサービス側にも追加の上限がある場合があります。",
+  "panel.settings.agentBudgetHelp": "会話の抜粋と私の日記がagentモデルを使う場合、この上限を共有し、キャラクターごとに数えます。上限に達すると翌日再開します。既定は100回で、5～150回に設定できます。呼び出し間隔は最低300秒で、ホストサービス側にも追加の上限がある場合があります。",
   "panel.settings.agentBudgetUsed": "本日は {used}/{budget} 回使用",
   "panel.settings.autoDerive": "段階の設定値を自動計算",
   "panel.settings.channelFragments": "会話の抜粋の抽出",

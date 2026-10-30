@@ -59,6 +59,8 @@ def test_clear_removes_files_staging_legacy_and_preserves_diaries(file_plugin_fa
     }
     initial.update(unrelated)
     plugin = file_plugin_factory(initial)
+    assert plugin.store.data["settings"]["private"] == "retain"
+    unrelated["settings"] = copy.deepcopy(plugin.store.data["settings"])
     image_id = run(plugin, "gallery_add", data_url=IMAGE).value["id"]
     video_id = add_video(plugin).value["id"]
     run(plugin, "set_panel_appearance", bg_id=video_id, motion=False)

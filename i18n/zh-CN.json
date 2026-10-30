@@ -925,7 +925,7 @@
   "panel.settings.activeDayN": "活跃日 第 {n} 天",
   "panel.settings.activeWindowN": "活跃窗口 ±{n} 天",
   "panel.settings.agentBudget": "agent 模型每日调用上限",
-  "panel.settings.agentBudgetHelp": "对话片段和我的日记使用 agent 模型时，共享此上限，按角色分别计数；用完后次日恢复。可设为 5～150 次，建议 5～50 次。调用间隔至少 300 秒，宿主服务还可能有额外额度限制。",
+  "panel.settings.agentBudgetHelp": "对话片段和我的日记使用 agent 模型时，共享此上限，按角色分别计数；用完后次日恢复。默认 100 次，可设为 5～150 次。调用间隔至少 300 秒，宿主服务还可能有额外额度限制。",
   "panel.settings.agentBudgetUsed": "今日已用 {used}/{budget} 次",
   "panel.settings.autoDerive": "自动计算阶段参数",
   "panel.settings.channelFragments": "对话片段提取",

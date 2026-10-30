@@ -79,6 +79,25 @@ def test_archive_roundtrip_and_identity():
     assert actual["summary"] == {"roles": ["Alice", "Old @ role"], "diary": 2, "journal": 2, "review": 2, "images": 1}
 
 
+def test_restore_does_not_repeat_completed_agent_defaults_migration(plugin_factory_full, tmp_path):
+    from forever_companion.mixins.shards import _STORE_AGENT_DEFAULTS_MIGRATION
+
+    plugin = attached(plugin_factory_full, tmp_path)
+    source = records()
+    source["settings"].update(review={"slot": "conversation"}, agent_tier={"daily_budget": 20})
+    content, _ = backup.make_archive(source, "1.4.3")
+    uid, preview = stage(plugin, content)
+    result = value(run(plugin.data_backup(op="apply", upload_id=uid, token=preview["token"], confirm=True)))
+    assert result["restored"] is True
+    assert plugin._settings_snapshot()["review_slot"] == "conversation"
+    assert plugin._settings_snapshot()["agent_daily_budget"] == 20
+    assert plugin.store.data[_STORE_AGENT_DEFAULTS_MIGRATION] is True
+    assert _STORE_AGENT_DEFAULTS_MIGRATION not in run(plugin._backup_snapshot())
+    restarted = plugin_factory_full(current_lanlan="Alice", store_initial=copy.deepcopy(plugin.store.data))
+    assert restarted._settings_snapshot()["review_slot"] == "conversation"
+    assert restarted._settings_snapshot()["agent_daily_budget"] == 20
+
+
 def test_141_backup_remains_readable_and_reexports_without_record_changes():
     original = records()
     original.pop("pre_debug@diary@Alice")

@@ -146,6 +146,28 @@ def test_budget_exhaustion_rejected_at_click_before_queue(plugin_factory_full, m
     assert not calls and not shard.pending_review_write and shard.pending_journal_write is None
 
 
+@pytest.mark.parametrize("entry", ["journal", "review"])
+def test_manual_writing_resumes_after_exhausted_day(plugin_factory_full, monkeypatch, entry):
+    from datetime import date
+
+    plugin, shard, calls = prepare(plugin_factory_full, monkeypatch)
+    today = [date(2026, 10, 30)]
+    monkeypatch.setattr(plugin, "_today_str", lambda *_: today[0])
+    plugin._agent_tier_cfg["daily_budget"] = 100
+    shard.cycle.update(agent_budget_date=today[0].isoformat(), agent_budget_used=100)
+    action = plugin.invite_journal if entry == "journal" else plugin.write_review_now
+    drain = plugin._drain_pending_journal_writes if entry == "journal" else plugin._drain_pending_review_writes
+    assert run(action()).value["accepted"] is False
+    assert not calls
+    today[0] = date(2026, 10, 31)
+    assert run(action()).value["accepted"] is True
+    run(drain())
+    assert len(calls) == 1
+    assert len(shard.journal if entry == "journal" else shard.review) == 1
+    assert plugin.store.data["cycle@灵"]["agent_budget_date"] == "2026-10-31"
+    assert plugin.store.data["cycle@灵"]["agent_budget_used"] == 1
+
+
 def test_retry_cannot_spend_beyond_remaining_budget(plugin_factory_full, monkeypatch):
     plugin, shard, calls = prepare(plugin_factory_full, monkeypatch, replies=[None])
     plugin._review_cfg["slot"] = "agent"

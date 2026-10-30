@@ -925,7 +925,7 @@
   "panel.settings.activeDayN": "Día pico: {n}",
   "panel.settings.activeWindowN": "Ventana activa ±{n} días",
   "panel.settings.agentBudget": "Límite diario de llamadas al modelo agent",
-  "panel.settings.agentBudgetHelp": "Los fragmentos y Mi Diario comparten este límite al usar agent, con un contador por personaje. Se restablece al día siguiente. Admite entre 5 y 150 llamadas; se recomiendan entre 5 y 50. El intervalo mínimo es de 300 segundos. NEKO puede aplicar cuotas adicionales.",
+  "panel.settings.agentBudgetHelp": "Los fragmentos y Mi Diario comparten este límite al usar agent, con un contador por personaje. Se restablece al día siguiente. El valor predeterminado es de 100 llamadas y se puede ajustar entre 5 y 150. El intervalo mínimo es de 300 segundos. NEKO puede aplicar cuotas adicionales.",
   "panel.settings.agentBudgetUsed": "Hoy: {used}/{budget}",
   "panel.settings.autoDerive": "Calcular parámetros de fase automáticamente",
   "panel.settings.channelFragments": "Extracción de fragmentos",
