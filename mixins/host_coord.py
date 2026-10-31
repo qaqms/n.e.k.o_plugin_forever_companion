@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+import urllib.request
 from typing import Any
 
 from plugin.sdk.plugin import Err, Ok, Result
@@ -24,6 +25,12 @@ from ..core.state import _PROACTIVE_PAUSE_ACTIONS as _PROACTIVE_PAUSE_ACTIONS
 from ..core.state import _snapshot_proactive
 
 JsonObject = dict[str, Any]
+
+# 本机回环专用 opener：显式空代理表。默认 urlopen 会读系统代理（Windows 注册表 /
+# HTTP(S)_PROXY），用户开着 Clash/v2rayN 且例外列表没含 127.0.0.1 时，访问宿主的
+# 请求会被转给代理而静默失败（主动搭话暂停/恢复、工具巡检全断）。
+# 只用于 127.0.0.1；直连远端服务商（tone_slot）仍走默认 opener，保留用户代理。
+_LOOPBACK_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 class HostCoordMixin:
@@ -58,7 +65,6 @@ class HostCoordMixin:
         返回解析后的 JSON dict；任何失败返回 None（调用方按 best-effort 处理）。
         """
         import json as _json
-        import urllib.request
 
         url = f"{self._proactive_api_base()}{path}"
         data = _json.dumps(body).encode("utf-8") if body is not None else None
@@ -73,7 +79,7 @@ class HostCoordMixin:
         )
 
         def _do() -> JsonObject:
-            with urllib.request.urlopen(req, timeout=4.0) as resp:
+            with _LOOPBACK_OPENER.open(req, timeout=4.0) as resp:
                 payload = _json.loads(resp.read().decode("utf-8"))
                 return payload if isinstance(payload, dict) else {}
 
@@ -147,9 +153,7 @@ class HostCoordMixin:
         if isinstance(settings, dict) and "proactiveChatEnabled" in settings:
             return bool(settings["proactiveChatEnabled"])
         # HTTP 失败时尝试官方协调入口兜底
-        state_res = await self.plugins.call_entry_json(
-            "proactive_controller:get_state", timeout=3.0
-        )
+        state_res = await self.plugins.call_entry_json("proactive_controller:get_state", timeout=3.0)
         if isinstance(state_res, Ok) and isinstance(state_res.value, dict):
             settings = state_res.value.get("settings")
             if isinstance(settings, dict) and "proactiveChatEnabled" in settings:

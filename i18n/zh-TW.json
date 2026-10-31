@@ -601,7 +601,7 @@
   "panel.capintro.mood_engine.action.sea_fog": "暫時不想接目前話題，可簡短回應、換話題或稍後接回，不代表真實已讀回條。限時記錄，預設 10 分鐘，可在設定中調整；期間暫停主動訊息。",
   "panel.capintro.mood_engine.action.shallow_reef": "不太想展開交流，但必要的問題仍可認真回答，不強制使用短句。限時記錄，預設 10 分鐘，可在設定中調整；期間暫停主動訊息。",
   "panel.capintro.mood_engine.action.storm_surge": "想表達目前對話裡的強烈感受，表達方式由她決定，不要求持續爆發。限時記錄，預設 10 分鐘，可在設定中調整；期間暫停主動訊息。",
-  "panel.capintro.mood_engine.action.seek_harbor": "希望被關心或理解，可以直接表達需要，也可以暫時不說。由後續選擇或手動結束，另有預設 120 分鐘的備援解除，可在設定中調整或關閉；期間暫停主動訊息。",
+  "panel.capintro.mood_engine.action.seek_harbor": "希望被關心或理解，可以直接表達需要，也可以暫時不說。由後續選擇或手動結束，另有預設 20 分鐘的備援解除，可在設定中調整或關閉；期間暫停主動訊息。",
   "panel.capintro.mood_engine.action.ripple": "一點在意或彆扭，不等於強烈衝突。預設記錄 15 分鐘，不暫停主動訊息；是否釋懷由她決定。",
   "panel.capintro.mood_engine.action.warm_current": "想親近或陪伴，表達沿用自身性格，不強制撒嬌。預設記錄 30 分鐘，不暫停主動訊息；與低落時想被安撫不同。",
   "panel.capintro.mood_engine.action.spring_tide": "記錄當下的開心或興奮，可以分享好事，也可安靜享受。預設記錄 30 分鐘，不暫停主動訊息；與結束舊狀態不同。",

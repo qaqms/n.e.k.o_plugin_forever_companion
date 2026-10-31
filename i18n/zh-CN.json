@@ -601,7 +601,7 @@
   "panel.capintro.mood_engine.action.sea_fog": "暂时不想接当前话题，可简短回应、换话题或稍后接回，不代表真实已读回执。限时记录，默认 10 分钟，可在设置中调整；期间暂停主动消息。",
   "panel.capintro.mood_engine.action.shallow_reef": "不太想展开交流，但必要的问题仍可认真回答，不强制使用短句。限时记录，默认 10 分钟，可在设置中调整；期间暂停主动消息。",
   "panel.capintro.mood_engine.action.storm_surge": "想表达当前对话里的强烈感受，表达方式由她决定，不要求持续爆发。限时记录，默认 10 分钟，可在设置中调整；期间暂停主动消息。",
-  "panel.capintro.mood_engine.action.seek_harbor": "希望被关心或理解，可以直接表达需要，也可以暂时不说。由后续选择或手动结束，另有默认 120 分钟的兜底解除，可在设置中调整或关闭；期间暂停主动消息。",
+  "panel.capintro.mood_engine.action.seek_harbor": "希望被关心或理解，可以直接表达需要，也可以暂时不说。由后续选择或手动结束，另有默认 20 分钟的兜底解除，可在设置中调整或关闭；期间暂停主动消息。",
   "panel.capintro.mood_engine.action.ripple": "一点在意或别扭，不等于强烈冲突。默认记录 15 分钟，不暂停主动消息；是否释怀由她决定。",
   "panel.capintro.mood_engine.action.warm_current": "想亲近或陪伴，表达沿用自身性格，不强制撒娇。默认记录 30 分钟，不暂停主动消息；与低落时想被安抚不同。",
   "panel.capintro.mood_engine.action.spring_tide": "记录当下的开心或兴奋，可以分享好事，也可安静享受。默认记录 30 分钟，不暂停主动消息；与结束旧状态不同。",

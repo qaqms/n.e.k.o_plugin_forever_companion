@@ -81,6 +81,7 @@ from ..core.state import (
     _TONE_SLOT_OPTIONS_CACHE_TTL,
     _TONE_SLOT_PREFIXES,
     _caps_key,
+    _cfg_int,
     _cfg_section,
     _channel_route,
     _cycle_key,
@@ -141,9 +142,7 @@ class PanelEntriesMixin(MediaGalleryMixin):
             payload = await self._proactive_http("GET", "/api/config/core_api")
             if isinstance(payload, dict):
                 for opt in options[1:]:
-                    model = str(
-                        payload.get(f"{_TONE_SLOT_PREFIXES[str(opt['value'])]}ModelId") or ""
-                    ).strip()
+                    model = str(payload.get(f"{_TONE_SLOT_PREFIXES[str(opt['value'])]}ModelId") or "").strip()
                     opt["model"] = model
                 self._tone_slot_options_cache = (options, time.monotonic())
         except Exception as exc:  # noqa: BLE001 - best-effort，静态兜底已可用
@@ -177,14 +176,16 @@ class PanelEntriesMixin(MediaGalleryMixin):
             },
         }
         if mood_active:
-            mood_payload.update({
-                "action": shard.mood.action,
-                "action_label": self._action_label(shard.mood.action),
-                "reason": shard.mood.reason,
-                "origin": shard.mood.origin,
-                "started_at": shard.mood.started_at,
-                "expires_at": shard.mood.expires_at or None,
-            })
+            mood_payload.update(
+                {
+                    "action": shard.mood.action,
+                    "action_label": self._action_label(shard.mood.action),
+                    "reason": shard.mood.reason,
+                    "origin": shard.mood.origin,
+                    "started_at": shard.mood.started_at,
+                    "expires_at": shard.mood.expires_at or None,
+                }
+            )
         # 潮汐日历：当前月前后各一个月的逐日推算（委婉显示，一律以"潮汐"代称）。
         # 结果按（角色, 当天日期, 周期参数指纹）缓存：面板 5s 轮询，同日同参数直接复用；
         # 改参数/锚点/快进、跨天、切角色都会改变 key 自然失效，无需显式清理
@@ -232,15 +233,18 @@ class PanelEntriesMixin(MediaGalleryMixin):
                 item_phase = "error"
             except Exception:  # noqa: BLE001 - 摘要尽力而为，单角色异常不拖垮面板
                 item_phase = ""
-            lanlan_list.append({
-                "name": name,
-                "enabled": self._enabled(item_shard),
-                "phase": item_phase,
-                "mood_active": self._mood_enabled(item_shard) and item_shard.mood.is_active(),
-                # 动作 id 一并下发：面板管理区徽标按语气分色（正面 success/其余 warning）
-                "mood_action": item_shard.mood.action if item_shard.mood.is_active() else "",
-                "orphan": bool(known is not None and name not in known),
-            })
+            lanlan_list.append(
+                {
+                    "name": name,
+                    "enabled": self._enabled(item_shard),
+                    "phase": item_phase,
+                    "mood_active": self._mood_enabled(item_shard) and item_shard.mood.is_active(),
+                    # 动作 id 一并下发：面板管理区徽标按语气分色（正面 success/其余 warning）
+                    "mood_action": item_shard.mood.action if item_shard.mood.is_active() else "",
+                    "orphan": bool(known is not None and name not in known),
+                }
+            )
+
         # 时光日记时间线（混排她的手记与自动碎片，按时间倒序）：碎片仅截 12 条防膨胀；
         # source 缺省按 self 处理（0.6.x 旧数据零迁移）
         def _diary_view(item: JsonObject) -> JsonObject:
@@ -269,19 +273,23 @@ class PanelEntriesMixin(MediaGalleryMixin):
                 "dormant_reason": "",
                 # 语气没有 mode 旋钮：槽位留空/emotion = 经宿主端点，选了别的槽才是直连
                 "transport": (
-                    _CHANNEL_TRANSPORT_DIRECT
-                    if tone_slot and tone_slot != "emotion"
-                    else _CHANNEL_TRANSPORT_HOST
+                    _CHANNEL_TRANSPORT_DIRECT if tone_slot and tone_slot != "emotion" else _CHANNEL_TRANSPORT_HOST
                 ),
             },
             "fragments": await self._channel_dormancy(
-                self._fragments_enabled(shard), self._fragments_cfg,
-                default_slot=_FRAGMENT_DEFAULT_SLOT, lanlan=lanlan, channel="fragments",
+                self._fragments_enabled(shard),
+                self._fragments_cfg,
+                default_slot=_FRAGMENT_DEFAULT_SLOT,
+                lanlan=lanlan,
+                channel="fragments",
                 shard=shard,
             ),
             "review": await self._channel_dormancy(
-                self._review_enabled(shard), self._review_cfg,
-                default_slot=_REVIEW_DEFAULT_SLOT, lanlan=lanlan, channel="review",
+                self._review_enabled(shard),
+                self._review_cfg,
+                default_slot=_REVIEW_DEFAULT_SLOT,
+                lanlan=lanlan,
+                channel="review",
                 shard=shard,
             ),
         }
@@ -362,15 +370,15 @@ class PanelEntriesMixin(MediaGalleryMixin):
             "onboarding": {
                 "wizard_pending": wizard_pending(self._guide),
                 "guide": dict(self._guide),
-                "readiness": build_readiness({
-                    "rhythm": self._enabled(shard),
-                    "anchor": bool(
-                        str(shard.cycle.get("anchor_date") or self._tide_cfg.get("anchor_date") or "")
-                    ),
-                    "mood": self._cap_config_on("mood_engine", lanlan),
-                    "channels": self._channels_any_live(channel_status),
-                    "together": bool(shard.stats.get("first_seen")),
-                }),
+                "readiness": build_readiness(
+                    {
+                        "rhythm": self._enabled(shard),
+                        "anchor": bool(str(shard.cycle.get("anchor_date") or self._tide_cfg.get("anchor_date") or "")),
+                        "mood": self._cap_config_on("mood_engine", lanlan),
+                        "channels": self._channels_any_live(channel_status),
+                        "together": bool(shard.stats.get("first_seen")),
+                    }
+                ),
             },
         }
 
@@ -443,16 +451,10 @@ class PanelEntriesMixin(MediaGalleryMixin):
                 "enabled": True,
                 "dormant_reason": _CHANNEL_BUDGET_REASON,
                 "transport": (
-                    _CHANNEL_TRANSPORT_DIRECT
-                    if _channel_mode(cfg) == _CHANNEL_MODE_CUSTOM
-                    else _CHANNEL_TRANSPORT_HOST
+                    _CHANNEL_TRANSPORT_DIRECT if _channel_mode(cfg) == _CHANNEL_MODE_CUSTOM else _CHANNEL_TRANSPORT_HOST
                 ),
             }
-        host = (
-            await self._resolve_host_slot(slot)
-            if _channel_mode(cfg) != _CHANNEL_MODE_CUSTOM
-            else None
-        )
+        host = await self._resolve_host_slot(slot) if _channel_mode(cfg) != _CHANNEL_MODE_CUSTOM else None
         if host is not None:
             if channel and self._channel_break_open(lanlan, channel, _channel_route(slot, host)):
                 return {
@@ -463,9 +465,7 @@ class PanelEntriesMixin(MediaGalleryMixin):
             return {"enabled": True, "dormant_reason": "", "transport": _CHANNEL_TRANSPORT_HOST}
         reason = diagnose_slot_dormancy(await self._aload_core_config(), slot)
         # 直连侧同理：诊断说"这端点能拼出来"之后，还要看真发出去的请求有没有被拒
-        if not reason and channel and self._channel_break_open(
-            lanlan, channel, _channel_route(slot, None)
-        ):
+        if not reason and channel and self._channel_break_open(lanlan, channel, _channel_route(slot, None)):
             reason = _CHANNEL_BREAK_REASON
         return {"enabled": True, "dormant_reason": reason, "transport": _CHANNEL_TRANSPORT_DIRECT}
 
@@ -484,25 +484,51 @@ class PanelEntriesMixin(MediaGalleryMixin):
         return count
 
     _EDITABLE_SETTINGS = (
-        "enabled", "auto_derive", "cycle_length", "period_length",
-        "ovulation_day", "ovulation_window", "inject_mode", "inject_interval_n",
-        "phase_openers", "timezone", "activity_context", "debug_mode",
-        "mood_enabled", "default_action_minutes", "open_action_timeout_minutes",
-        "emotion_sense_enabled", "tone_min_interval_sec", "tone_check_rate",
-        "tone_phase_sensitivity_enabled", "tone_phase_sensitivity",
+        "enabled",
+        "auto_derive",
+        "cycle_length",
+        "period_length",
+        "ovulation_day",
+        "ovulation_window",
+        "inject_mode",
+        "inject_interval_n",
+        "phase_openers",
+        "timezone",
+        "activity_context",
+        "debug_mode",
+        "mood_enabled",
+        "default_action_minutes",
+        "open_action_timeout_minutes",
+        "emotion_sense_enabled",
+        "tone_min_interval_sec",
+        "tone_check_rate",
+        "tone_phase_sensitivity_enabled",
+        "tone_phase_sensitivity",
         "tone_slot",
-        "fragments_enabled", "fragments_slot", "fragments_mode",
+        "fragments_enabled",
+        "fragments_slot",
+        "fragments_mode",
         "fragments_daily_limit",
-        "review_enabled", "review_slot", "review_mode",
-        "review_turns_threshold", "review_days_threshold",
+        "review_enabled",
+        "review_slot",
+        "review_mode",
+        "review_turns_threshold",
+        "review_days_threshold",
         "agent_daily_budget",
         "anniversary_inject",
-        "birthday_enabled", "birthday_keep_diary", "birthday_date",
+        "birthday_enabled",
+        "birthday_keep_diary",
+        "birthday_date",
     )
 
     # per-character 字段：写当前角色 shard 的 enabled / params；其余为全局字段（写 settings 覆盖层）
     _PER_CHAR_SETTINGS = (
-        "enabled", "auto_derive", "cycle_length", "period_length", "ovulation_day", "ovulation_window",
+        "enabled",
+        "auto_derive",
+        "cycle_length",
+        "period_length",
+        "ovulation_day",
+        "ovulation_window",
     )
 
     def _settings_snapshot(self, shard: _LanlanShard | None = None) -> JsonObject:
@@ -516,24 +542,18 @@ class PanelEntriesMixin(MediaGalleryMixin):
             "ovulation_day": int(effective["ovulation_day"]),
             "ovulation_window": int(effective["ovulation_window"]),
             "inject_mode": str(self._tide_cfg.get("inject_mode") or "every_user_message"),
-            "inject_interval_n": int(self._tide_cfg.get("inject_interval_n") or 3),
+            "inject_interval_n": _cfg_int(self._tide_cfg, "inject_interval_n", 3, lo=1, hi=50),
             "phase_openers": bool(self._tide_cfg.get("phase_openers", True)),
             "timezone": str(self._tide_cfg.get("timezone") or "auto"),
             "activity_context": bool(self._tide_cfg.get("activity_context", True)),
             "debug_mode": bool(self._tide_cfg.get("debug_mode", False)),
             "mood_enabled": bool(self._mood_cfg.get("enabled", True)),
-            "default_action_minutes": int(self._mood_cfg.get("default_action_minutes") or 10),
-            "open_action_timeout_minutes": int(
-                self._mood_cfg.get("open_action_timeout_minutes")
-                if self._mood_cfg.get("open_action_timeout_minutes") is not None
-                else 120
-            ),
+            "default_action_minutes": _cfg_int(self._mood_cfg, "default_action_minutes", 10, lo=1, hi=720),
+            "open_action_timeout_minutes": _cfg_int(self._mood_cfg, "open_action_timeout_minutes", 20, lo=0, hi=1440),
             "emotion_sense_enabled": bool(self._emotion_sense_cfg.get("enabled", True)),
             "tone_min_interval_sec": self._tone_int_cfg("min_interval_sec", 20),
             "tone_check_rate": self._tone_float_cfg("check_rate", 1.0),
-            "tone_phase_sensitivity_enabled": bool(
-                self._emotion_sense_cfg.get("phase_sensitivity_enabled", True)
-            ),
+            "tone_phase_sensitivity_enabled": bool(self._emotion_sense_cfg.get("phase_sensitivity_enabled", True)),
             "tone_phase_sensitivity": self._tone_float_cfg("phase_sensitivity", 0.15),
             "tone_slot": str(self._emotion_sense_cfg.get("slot") or ""),
             "fragments_enabled": bool(self._fragments_cfg.get("enabled", True)),
@@ -651,8 +671,12 @@ class PanelEntriesMixin(MediaGalleryMixin):
         # Validate before any per-character writes; do not truncate fractional input.
         if "tone_min_interval_sec" in updates:
             interval = updates["tone_min_interval_sec"]
-            if (isinstance(interval, bool) or not isinstance(interval, (int, float))
-                    or not 10 <= interval <= 3600 or int(interval) != interval):
+            if (
+                isinstance(interval, bool)
+                or not isinstance(interval, (int, float))
+                or not 10 <= interval <= 3600
+                or int(interval) != interval
+            ):
                 return Err(SdkError("settings_value_invalid"))
         lanlan, shard = await self._current_shard_async()
         # 本入口的两处落盘（cycle@<角色> 与全局 settings）：任一 Err 最后回 Err
@@ -729,7 +753,9 @@ class PanelEntriesMixin(MediaGalleryMixin):
             if "default_action_minutes" in updates:
                 mood_patch["default_action_minutes"] = max(1, min(720, int(updates["default_action_minutes"])))
             if "open_action_timeout_minutes" in updates:
-                mood_patch["open_action_timeout_minutes"] = max(0, min(1440, int(updates["open_action_timeout_minutes"])))
+                mood_patch["open_action_timeout_minutes"] = max(
+                    0, min(1440, int(updates["open_action_timeout_minutes"]))
+                )
             # ---- 语气感知（[emotion_sense]），全局 ----
             if "emotion_sense_enabled" in updates:
                 es_patch["enabled"] = bool(updates["emotion_sense_enabled"])
@@ -830,8 +856,16 @@ class PanelEntriesMixin(MediaGalleryMixin):
 
             # Store 为权威存储（Steam 上配置文件写常超时，Store 稳定且重启不丢）；
             # 配置文件同步放后台，不阻塞保存响应
-            if (tide_patch or mood_patch or es_patch or frag_patch or review_patch
-                    or agent_tier_patch or stats_patch or birthday_patch):
+            if (
+                tide_patch
+                or mood_patch
+                or es_patch
+                or frag_patch
+                or review_patch
+                or agent_tier_patch
+                or stats_patch
+                or birthday_patch
+            ):
                 overrides = self._settings_override
                 if tide_patch:
                     overrides["tide"] = {**_cfg_section(overrides.get("tide")), **tide_patch}
@@ -841,32 +875,38 @@ class PanelEntriesMixin(MediaGalleryMixin):
                     self._mood_cfg.update(mood_patch)
                 if es_patch:
                     overrides["emotion_sense"] = {
-                        **_cfg_section(overrides.get("emotion_sense")), **es_patch,
+                        **_cfg_section(overrides.get("emotion_sense")),
+                        **es_patch,
                     }
                     self._emotion_sense_cfg.update(es_patch)
                 if frag_patch:
                     overrides["fragments"] = {
-                        **_cfg_section(overrides.get("fragments")), **frag_patch,
+                        **_cfg_section(overrides.get("fragments")),
+                        **frag_patch,
                     }
                     self._fragments_cfg.update(frag_patch)
                 if review_patch:
                     overrides["review"] = {
-                        **_cfg_section(overrides.get("review")), **review_patch,
+                        **_cfg_section(overrides.get("review")),
+                        **review_patch,
                     }
                     self._review_cfg.update(review_patch)
                 if agent_tier_patch:
                     overrides["agent_tier"] = {
-                        **_cfg_section(overrides.get("agent_tier")), **agent_tier_patch,
+                        **_cfg_section(overrides.get("agent_tier")),
+                        **agent_tier_patch,
                     }
                     self._agent_tier_cfg.update(agent_tier_patch)
                 if stats_patch:
                     overrides["stats"] = {
-                        **_cfg_section(overrides.get("stats")), **stats_patch,
+                        **_cfg_section(overrides.get("stats")),
+                        **stats_patch,
                     }
                     self._stats_cfg.update(stats_patch)
                 if birthday_patch:
                     overrides["birthday"] = {
-                        **_cfg_section(overrides.get("birthday")), **birthday_patch,
+                        **_cfg_section(overrides.get("birthday")),
+                        **birthday_patch,
                     }
                     self._birthday_cfg.update(birthday_patch)
                 res_settings = await self._save_settings()
@@ -887,10 +927,12 @@ class PanelEntriesMixin(MediaGalleryMixin):
         try:
             phase = self._current_phase_state(shard)
         except TideConfigError as exc:
-            return Ok({
-                **self._settings_snapshot(shard),
-                "warning": f"已保存，但当前参数组合不合法：{exc}",
-            })
+            return Ok(
+                {
+                    **self._settings_snapshot(shard),
+                    "warning": f"已保存，但当前参数组合不合法：{exc}",
+                }
+            )
         return Ok({**self._settings_snapshot(shard), "phase": phase.phase})
 
     @ui.action(
@@ -914,16 +956,20 @@ class PanelEntriesMixin(MediaGalleryMixin):
         except TideConfigError as exc:
             self.logger.warning("invalid tide config: {}", exc)
             return Err(SdkError("invalid_tide_config"))
-        return Ok({
-            **build_status_payload(phase, enabled=self._enabled(shard)),
-            "lanlan": lanlan,
-            "anchor_date": str(shard.cycle.get("anchor_date") or self._tide_cfg.get("anchor_date") or ""),
-            "advance_days": int(shard.cycle.get("advance_days") or 0),
-        })
+        return Ok(
+            {
+                **build_status_payload(phase, enabled=self._enabled(shard)),
+                "lanlan": lanlan,
+                "anchor_date": str(shard.cycle.get("anchor_date") or self._tide_cfg.get("anchor_date") or ""),
+                "advance_days": int(shard.cycle.get("advance_days") or 0),
+            }
+        )
 
     @ui.action(
         label=tr("actions.set_anchor.label", default="设置周期起点"),
-        confirm=tr("actions.set_anchor.confirm", default="确定设置新的周期起点吗？快进天数会清零，并重新计算当前阶段。"),
+        confirm=tr(
+            "actions.set_anchor.confirm", default="确定设置新的周期起点吗？快进天数会清零，并重新计算当前阶段。"
+        ),
         refresh_context=True,
     )
     @plugin_entry(
@@ -964,12 +1010,14 @@ class PanelEntriesMixin(MediaGalleryMixin):
             return persist_err
         phase = self._current_phase_state(shard)
         self.logger.info("anchor set to {} for {} (advance_days cleared)", anchor_iso, lanlan)
-        return Ok({
-            **build_status_payload(phase, enabled=self._enabled(shard)),
-            "lanlan": lanlan,
-            "anchor_date": anchor_iso,
-            "advance_days": 0,
-        })
+        return Ok(
+            {
+                **build_status_payload(phase, enabled=self._enabled(shard)),
+                "lanlan": lanlan,
+                "anchor_date": anchor_iso,
+                "advance_days": 0,
+            }
+        )
 
     def _cycle_params_for_validation(self, anchor: Any, shard: _LanlanShard | None = None) -> None:
         from datetime import date as _date
@@ -1027,7 +1075,9 @@ class PanelEntriesMixin(MediaGalleryMixin):
     @plugin_entry(
         id="advance_days",
         name=tr("entries.advance_days.name", default="快进天数"),
-        description=tr("entries.advance_days.description", default="把她的身体时钟往前拨 N 天（可为负数回退，作用于当前角色）。"),
+        description=tr(
+            "entries.advance_days.description", default="把她的身体时钟往前拨 N 天（可为负数回退，作用于当前角色）。"
+        ),
         input_schema={
             "type": "object",
             "properties": {
@@ -1047,11 +1097,13 @@ class PanelEntriesMixin(MediaGalleryMixin):
         if persist_err is not None:
             return persist_err
         phase = self._current_phase_state(shard)
-        return Ok({
-            **build_status_payload(phase, enabled=self._enabled(shard)),
-            "lanlan": lanlan,
-            "advance_days": new_value,
-        })
+        return Ok(
+            {
+                **build_status_payload(phase, enabled=self._enabled(shard)),
+                "lanlan": lanlan,
+                "advance_days": new_value,
+            }
+        )
 
     @ui.action(
         label=tr("actions.toggle.label", default="开/关模拟"),
@@ -1074,16 +1126,21 @@ class PanelEntriesMixin(MediaGalleryMixin):
         persist_err = self._persist_error(res_cycle)
         if persist_err is not None:
             return persist_err
-        return Ok({
-            **build_status_payload(self._current_phase_state(shard), enabled=self._enabled(shard)),
-            "lanlan": lanlan,
-            "enabled": self._enabled(shard),
-        })
+        return Ok(
+            {
+                **build_status_payload(self._current_phase_state(shard), enabled=self._enabled(shard)),
+                "lanlan": lanlan,
+                "enabled": self._enabled(shard),
+            }
+        )
 
     @ui.action(
         label=tr("actions.reset.label", default="重置状态与记录"),
         tone="danger",
-        confirm=tr("actions.reset.confirm", default="确定清空当前角色的状态与记录吗？快进天数、情绪状态、三本日记（时光日记、个人日记、我的日记）、全部归档、累计素材和相处统计都会清空，待写任务会取消，且无法恢复。模拟开关恢复默认设置；周期起点、参数、全局设置、壁纸和其他角色的数据保留。"),
+        confirm=tr(
+            "actions.reset.confirm",
+            default="确定清空当前角色的状态与记录吗？快进天数、情绪状态、三本日记（时光日记、个人日记、我的日记）、全部归档、累计素材和相处统计都会清空，待写任务会取消，且无法恢复。模拟开关恢复默认设置；周期起点、参数、全局设置、壁纸和其他角色的数据保留。",
+        ),
         refresh_context=True,
     )
     @plugin_entry(
@@ -1126,23 +1183,38 @@ class PanelEntriesMixin(MediaGalleryMixin):
         results = [res_cycle, res_mood, res_diary, res_journal, res_review, res_stats]
         for key in (_journal_archive_key(lanlan), _review_archive_key(lanlan), _weekly_key(lanlan)):
             results.append(await self._store_write(key, [], f"reset {key}"))
-        results.append(await self._store_write(
-            _review_stats_key(lanlan), {}, f"reset legacy review stats for {lanlan}",
-        ))
-        results.append(await self._store_delete(
-            _debug_backup_key("diary", lanlan), f"reset diary debug backup for {lanlan}",
-        ))
+        results.append(
+            await self._store_write(
+                _review_stats_key(lanlan),
+                {},
+                f"reset legacy review stats for {lanlan}",
+            )
+        )
+        results.append(
+            await self._store_delete(
+                _debug_backup_key("diary", lanlan),
+                f"reset diary debug backup for {lanlan}",
+            )
+        )
         for kind, data_key in (
-            ("journal", _journal_key(lanlan)), ("review", _review_key(lanlan)), ("stats", _stats_key(lanlan)),
+            ("journal", _journal_key(lanlan)),
+            ("review", _review_key(lanlan)),
+            ("stats", _stats_key(lanlan)),
         ):
-            results.append(await self._store_delete(
-                _debug_backup_key(kind, lanlan), f"reset {kind} debug backup for {lanlan}",
-            ))
+            results.append(
+                await self._store_delete(
+                    _debug_backup_key(kind, lanlan),
+                    f"reset {kind} debug backup for {lanlan}",
+                )
+            )
             # A suffix can also belong to a real role; never delete its records.
             if f"{lanlan}|pre-debug" not in self._lanlan_index:
-                results.append(await self._store_delete(
-                    _legacy_debug_backup_key(data_key), f"reset legacy {kind} debug backup for {lanlan}",
-                ))
+                results.append(
+                    await self._store_delete(
+                        _legacy_debug_backup_key(data_key),
+                        f"reset legacy {kind} debug backup for {lanlan}",
+                    )
+                )
         # 重置清空了情绪动作：同步解除暂停，水位写结果一并聚合（1.2.2 审查轮 P2）
         res_pause = await self._maybe_sync_proactive_pause()
         # 多键写入：任一 Err 即向用户报错（前面的写不回滚，保持简单；
@@ -1151,11 +1223,13 @@ class PanelEntriesMixin(MediaGalleryMixin):
         if persist_err is not None:
             return persist_err
         self.logger.info("character records reset: lanlan={} diaries=all archives=all stats=cleared", lanlan)
-        return Ok({
-            **build_status_payload(self._current_phase_state(shard), enabled=self._enabled(shard)),
-            "lanlan": lanlan,
-            "reset": True,
-        })
+        return Ok(
+            {
+                **build_status_payload(self._current_phase_state(shard), enabled=self._enabled(shard)),
+                "lanlan": lanlan,
+                "reset": True,
+            }
+        )
 
     # ---- 面板外观（1.2.0）：图片图库 + 可调背景（全局一份，与角色无关） ----
     # 每张原图一条 key（gallery_img/<id>），索引与外观参数都是小记录；
@@ -1196,19 +1270,30 @@ class PanelEntriesMixin(MediaGalleryMixin):
     @plugin_entry(
         id="get_panel_gallery",
         name=tr("entries.get_panel_gallery.name", default="读取面板图库"),
-        description=tr("entries.get_panel_gallery.description", default="读取面板图库索引与外观参数，并迁移旧版单图背景（面板内部用）。"),
-        input_schema={"type": "object", "properties": {
-            "include_background": {"type": "boolean"},
-            "prefer_direct": {"type": "boolean"},
-        }},
+        description=tr(
+            "entries.get_panel_gallery.description",
+            default="读取面板图库索引与外观参数，并迁移旧版单图背景（面板内部用）。",
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "include_background": {"type": "boolean"},
+                "prefer_direct": {"type": "boolean"},
+            },
+        },
         timeout=_MEDIA_ENTRY_TIMEOUT_SECONDS,
         metadata={"result_kind": "event", "agent_hidden": True},
     )
     async def get_panel_gallery(
-        self, include_background: bool = False, prefer_direct: bool = False, **_: Any,
+        self,
+        include_background: bool = False,
+        prefer_direct: bool = False,
+        **_: Any,
     ):
         return await self._gallery_call(
-            self._get_panel_gallery, include_background=include_background, prefer_direct=prefer_direct,
+            self._get_panel_gallery,
+            include_background=include_background,
+            prefer_direct=prefer_direct,
         )
 
     async def _get_panel_gallery(self, include_background: bool = False, prefer_direct: bool = False):
@@ -1217,14 +1302,20 @@ class PanelEntriesMixin(MediaGalleryMixin):
         media_storage = await self._media_storage_summary(index)
 
         async def snapshot(appearance: JsonObject, migrated: bool):
-            payload = {"items": index.get("items") or [], "appearance": appearance,
-                       "migrated": migrated, "media_storage": media_storage}
+            payload = {
+                "items": index.get("items") or [],
+                "appearance": appearance,
+                "migrated": migrated,
+                "media_storage": media_storage,
+            }
             item = gallery_find(index, appearance["bg_id"]) if include_background is True else None
             if item is not None:
                 try:
                     if item.get("kind") == "video":
                         result = await self._video_get(
-                            item, -1, prefer_direct=prefer_direct is True and appearance["motion"],
+                            item,
+                            -1,
+                            prefer_direct=prefer_direct is True and appearance["motion"],
                             storage_summary=media_storage,
                         )
                     else:
@@ -1258,7 +1349,9 @@ class PanelEntriesMixin(MediaGalleryMixin):
                 if not await self._gallery_save_index(index):
                     return Err(SdkError("background_migrate_failed"))
             save_res = await self._store_write(
-                _STORE_PANEL_APPEARANCE, appearance, "panel appearance (migrated)",
+                _STORE_PANEL_APPEARANCE,
+                appearance,
+                "panel appearance (migrated)",
             )
             if isinstance(save_res, Err):
                 return Err(SdkError("background_migrate_failed"))
@@ -1274,14 +1367,34 @@ class PanelEntriesMixin(MediaGalleryMixin):
     @plugin_entry(
         id="gallery_add",
         name=tr("entries.gallery_add.name", default="添加图片到图库"),
-        description=tr("entries.gallery_add.description", default="把一张图片（data URL，≤4MB）连同缩略图加入面板图库（面板内部用）。"),
+        description=tr(
+            "entries.gallery_add.description",
+            default="把一张图片（data URL，≤4MB）连同缩略图加入面板图库（面板内部用）。",
+        ),
         input_schema={
             "type": "object",
             "properties": {
-                "data_url": {"type": "string", "description": tr("fields.galleryDataUrl", default="图片 data URL（base64）")},
-                "thumb": {"type": "string", "description": tr("fields.galleryThumb", default="缩略图 data URL（可空，面板稍后回填）")},
+                "data_url": {
+                    "type": "string",
+                    "description": tr("fields.galleryDataUrl", default="图片 data URL（base64）"),
+                },
+                "thumb": {
+                    "type": "string",
+                    "description": tr("fields.galleryThumb", default="缩略图 data URL（可空，面板稍后回填）"),
+                },
                 "name": {"type": "string", "description": tr("fields.galleryName", default="图片文件名")},
-                "op": {"type": "string", "enum": ["", "video_begin", "video_chunk", "video_status", "video_commit", "video_abort", "video_policy"]},
+                "op": {
+                    "type": "string",
+                    "enum": [
+                        "",
+                        "video_begin",
+                        "video_chunk",
+                        "video_status",
+                        "video_commit",
+                        "video_abort",
+                        "video_policy",
+                    ],
+                },
                 "mime": {"type": "string"},
                 "size": {"type": "integer"},
                 "poster": {"type": "string"},
@@ -1296,16 +1409,35 @@ class PanelEntriesMixin(MediaGalleryMixin):
         metadata={"agent_hidden": True},
     )
     async def gallery_add(
-        self, data_url: str = "", thumb: str = "", name: str = "", op: str = "",
-        mime: str = "", size: int = 0, poster: str = "", upload_id: str = "",
-        chunk_index: int = -1, data_b64: str = "", single_limit_mib: Any = None,
-        total_limit_mib: Any = None, **_: Any,
+        self,
+        data_url: str = "",
+        thumb: str = "",
+        name: str = "",
+        op: str = "",
+        mime: str = "",
+        size: int = 0,
+        poster: str = "",
+        upload_id: str = "",
+        chunk_index: int = -1,
+        data_b64: str = "",
+        single_limit_mib: Any = None,
+        total_limit_mib: Any = None,
+        **_: Any,
     ):
         if op != "":
             return await self._gallery_call(
-                self._video_operation, op=op, name=name, mime=mime, size=size, thumb=thumb,
-                poster=poster, upload_id=upload_id, chunk_index=chunk_index, data_b64=data_b64,
-                single_limit_mib=single_limit_mib, total_limit_mib=total_limit_mib,
+                self._video_operation,
+                op=op,
+                name=name,
+                mime=mime,
+                size=size,
+                thumb=thumb,
+                poster=poster,
+                upload_id=upload_id,
+                chunk_index=chunk_index,
+                data_b64=data_b64,
+                single_limit_mib=single_limit_mib,
+                total_limit_mib=total_limit_mib,
             )
         return await self._gallery_call(self._gallery_add_image, data_url=data_url, thumb=thumb, name=name)
 
@@ -1368,7 +1500,10 @@ class PanelEntriesMixin(MediaGalleryMixin):
     @plugin_entry(
         id="gallery_remove",
         name=tr("entries.gallery_remove.name", default="从图库删除图片"),
-        description=tr("entries.gallery_remove.description", default="删除图库中的一张图片；若它正被用作背景则一并解除（面板内部用）。"),
+        description=tr(
+            "entries.gallery_remove.description",
+            default="删除图库中的一张图片；若它正被用作背景则一并解除（面板内部用）。",
+        ),
         input_schema={
             "type": "object",
             "properties": {
@@ -1405,7 +1540,9 @@ class PanelEntriesMixin(MediaGalleryMixin):
             # 解除对该图的引用（写失败不拦删除：悬空 bg_id 在读取与保存侧自愈）
             appearance["bg_id"] = ""
             await self._store_write(
-                _STORE_PANEL_APPEARANCE, appearance, f"panel appearance (unref {gid})",
+                _STORE_PANEL_APPEARANCE,
+                appearance,
+                f"panel appearance (unref {gid})",
             )
         self.logger.info("gallery image removed: id={}", gid)
         return Ok({"items": index.get("items") or [], "appearance": appearance})
@@ -1417,12 +1554,18 @@ class PanelEntriesMixin(MediaGalleryMixin):
     @plugin_entry(
         id="gallery_set_thumb",
         name=tr("entries.gallery_set_thumb.name", default="回填图库缩略图"),
-        description=tr("entries.gallery_set_thumb.description", default="为图库条目补存缩略图（面板生成后回填；旧版迁移图与无缩略图片用）。"),
+        description=tr(
+            "entries.gallery_set_thumb.description",
+            default="为图库条目补存缩略图（面板生成后回填；旧版迁移图与无缩略图片用）。",
+        ),
         input_schema={
             "type": "object",
             "properties": {
                 "item_id": {"type": "string", "description": tr("fields.galleryItemId", default="图库条目 id")},
-                "thumb": {"type": "string", "description": tr("fields.galleryThumb", default="缩略图 data URL（可空，面板稍后回填）")},
+                "thumb": {
+                    "type": "string",
+                    "description": tr("fields.galleryThumb", default="缩略图 data URL（可空，面板稍后回填）"),
+                },
             },
             "required": ["item_id", "thumb"],
         },
@@ -1461,7 +1604,9 @@ class PanelEntriesMixin(MediaGalleryMixin):
     @plugin_entry(
         id="get_gallery_image",
         name=tr("entries.get_gallery_image.name", default="读取图库原图"),
-        description=tr("entries.get_gallery_image.description", default="按条目 id 拉取图库原图 data URL（面板按需加载背景用）。"),
+        description=tr(
+            "entries.get_gallery_image.description", default="按条目 id 拉取图库原图 data URL（面板按需加载背景用）。"
+        ),
         input_schema={
             "type": "object",
             "properties": {
@@ -1511,11 +1656,13 @@ class PanelEntriesMixin(MediaGalleryMixin):
         rec = res.value if isinstance(res, Ok) else None
         if not isinstance(rec, dict) or not str(rec.get("data_url") or ""):
             return Err(SdkError("image_not_found"))
-        return Ok({
-            "data_url": str(rec.get("data_url")),
-            "mime": str(rec.get("mime") or ""),
-            "name": str(item.get("name") or ""),
-        })
+        return Ok(
+            {
+                "data_url": str(rec.get("data_url")),
+                "mime": str(rec.get("mime") or ""),
+                "name": str(item.get("name") or ""),
+            }
+        )
 
     @ui.action(
         label=tr("actions.set_panel_appearance.label", default="保存面板外观"),
@@ -1524,21 +1671,80 @@ class PanelEntriesMixin(MediaGalleryMixin):
     @plugin_entry(
         id="set_panel_appearance",
         name=tr("entries.set_panel_appearance.name", default="保存面板外观"),
-        description=tr("entries.set_panel_appearance.description", default="整包保存面板背景外观参数（所用图库图/填充/位置/滤镜/毛玻璃/文字浓度等）；未传的字段回默认，越界自动夹取（面板内部用）。"),
+        description=tr(
+            "entries.set_panel_appearance.description",
+            default="整包保存面板背景外观参数（所用图库图/填充/位置/滤镜/毛玻璃/文字浓度等）；未传的字段回默认，越界自动夹取（面板内部用）。",
+        ),
         input_schema={
             "type": "object",
             "properties": {
-                "bg_id": {"type": "string", "description": tr("fields.appearanceBgId", default="用作背景的图库条目 id，空串=不启用背景图")},
-                "fill": {"type": "string", "enum": list(APPEARANCE_FILLS), "description": tr("fields.appearanceFill", default="背景填充方式：cover 裁剪铺满 / contain 完整显示 / repeat 平铺 / stretch 拉伸")},
-                "position": {"type": "string", "enum": list(APPEARANCE_POSITIONS), "description": tr("fields.appearancePosition", default="背景位置（九宫格）")},
-                "blur": {"type": "number", "minimum": 0, "maximum": 30, "description": tr("fields.appearanceBlur", default="背景模糊（px）")},
-                "dim": {"type": "number", "minimum": 0, "maximum": 0.85, "description": tr("fields.appearanceDim", default="背景遮罩强度（0=不压暗）")},
-                "brightness": {"type": "number", "minimum": 30, "maximum": 150, "description": tr("fields.appearanceBrightness", default="背景亮度（%）")},
-                "saturate": {"type": "number", "minimum": 0, "maximum": 200, "description": tr("fields.appearanceSaturate", default="背景饱和度（%）")},
-                "contrast": {"type": "number", "minimum": 50, "maximum": 200, "description": tr("fields.appearanceContrast", default="背景对比度（%）")},
-                "glass": {"type": "number", "minimum": 0, "maximum": 40, "description": tr("fields.appearanceGlass", default="卡片毛玻璃强度（px）")},
-                "card_alpha": {"type": "number", "minimum": 0, "maximum": 100, "description": tr("fields.appearanceCardAlpha", default="卡片底色强度（%，100=不透明底色）")},
-                "text_weight": {"type": "number", "minimum": 40, "maximum": 100, "description": tr("fields.appearanceTextWeight", default="整体字体显示强度（%，越低越淡并自动描边）")},
+                "bg_id": {
+                    "type": "string",
+                    "description": tr("fields.appearanceBgId", default="用作背景的图库条目 id，空串=不启用背景图"),
+                },
+                "fill": {
+                    "type": "string",
+                    "enum": list(APPEARANCE_FILLS),
+                    "description": tr(
+                        "fields.appearanceFill",
+                        default="背景填充方式：cover 裁剪铺满 / contain 完整显示 / repeat 平铺 / stretch 拉伸",
+                    ),
+                },
+                "position": {
+                    "type": "string",
+                    "enum": list(APPEARANCE_POSITIONS),
+                    "description": tr("fields.appearancePosition", default="背景位置（九宫格）"),
+                },
+                "blur": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 30,
+                    "description": tr("fields.appearanceBlur", default="背景模糊（px）"),
+                },
+                "dim": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 0.85,
+                    "description": tr("fields.appearanceDim", default="背景遮罩强度（0=不压暗）"),
+                },
+                "brightness": {
+                    "type": "number",
+                    "minimum": 30,
+                    "maximum": 150,
+                    "description": tr("fields.appearanceBrightness", default="背景亮度（%）"),
+                },
+                "saturate": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 200,
+                    "description": tr("fields.appearanceSaturate", default="背景饱和度（%）"),
+                },
+                "contrast": {
+                    "type": "number",
+                    "minimum": 50,
+                    "maximum": 200,
+                    "description": tr("fields.appearanceContrast", default="背景对比度（%）"),
+                },
+                "glass": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 40,
+                    "description": tr("fields.appearanceGlass", default="卡片毛玻璃强度（px）"),
+                },
+                "card_alpha": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": tr("fields.appearanceCardAlpha", default="卡片底色强度（%，100=不透明底色）"),
+                },
+                "text_weight": {
+                    "type": "number",
+                    "minimum": 40,
+                    "maximum": 100,
+                    "description": tr(
+                        "fields.appearanceTextWeight", default="整体字体显示强度（%，越低越淡并自动描边）"
+                    ),
+                },
                 "motion": {"type": "boolean"},
             },
         },
@@ -1586,9 +1792,8 @@ class PanelEntriesMixin(MediaGalleryMixin):
     async def lift_mood(self, **kwargs: Any):
         lanlan = await self._attribution_lanlan(kwargs)
         shard = await self._ensure_shard(lanlan)
-        if (
-            ("expected_lanlan" in kwargs and kwargs["expected_lanlan"] != lanlan)
-            or ("expected_started_at" in kwargs and kwargs["expected_started_at"] != shard.mood.started_at)
+        if ("expected_lanlan" in kwargs and kwargs["expected_lanlan"] != lanlan) or (
+            "expected_started_at" in kwargs and kwargs["expected_started_at"] != shard.mood.started_at
         ):
             return Err(SdkError("mood_changed"))
         expired = self._expire_timed_action_if_due(shard)
@@ -1611,14 +1816,16 @@ class PanelEntriesMixin(MediaGalleryMixin):
         self.push_message(
             visibility=[],
             ai_behavior="read",
-            parts=[{
-                "type": "text",
-                "text": (
-                    "[心情记录] 用户结束了刚才的情绪工具状态（内部提示，不要复述）。"
-                    "这不是你自主决定和好的记录，也不代表你已经释怀。"
-                    "你的感受、语气与接下来怎样回应仍由你自己决定。"
-                ),
-            }],
+            parts=[
+                {
+                    "type": "text",
+                    "text": (
+                        "[心情记录] 用户结束了刚才的情绪工具状态（内部提示，不要复述）。"
+                        "这不是你自主决定和好的记录，也不代表你已经释怀。"
+                        "你的感受、语气与接下来怎样回应仍由你自己决定。"
+                    ),
+                }
+            ],
             source=self.plugin_id,
             target_lanlan=lanlan,
             coalesce_key=f"{self.plugin_id}.mood_instruction",
@@ -1647,8 +1854,14 @@ class PanelEntriesMixin(MediaGalleryMixin):
                 "action": {
                     "type": "string",
                     "enum": [
-                        "ebb_tide", "sea_fog", "shallow_reef", "storm_surge", "seek_harbor",
-                        "ripple", "warm_current", "spring_tide",
+                        "ebb_tide",
+                        "sea_fog",
+                        "shallow_reef",
+                        "storm_surge",
+                        "seek_harbor",
+                        "ripple",
+                        "warm_current",
+                        "spring_tide",
                     ],
                     "description": (
                         "ebb_tide 冷战沉默 / sea_fog 已读不回 / shallow_reef 敷衍应付 / "
@@ -1697,7 +1910,9 @@ class PanelEntriesMixin(MediaGalleryMixin):
     @plugin_entry(
         id="get_diary",
         name=tr("entries.get_diary.name", default="查看时光日记"),
-        description=tr("entries.get_diary.description", default="翻看她最近写下的时光日记：她的手记与自动记下的碎片（当前角色）。"),
+        description=tr(
+            "entries.get_diary.description", default="翻看她最近写下的时光日记：她的手记与自动记下的碎片（当前角色）。"
+        ),
         input_schema={
             "type": "object",
             "properties": {
@@ -1713,13 +1928,15 @@ class PanelEntriesMixin(MediaGalleryMixin):
         offset = max(0, min(int(offset), len(shard.diary)))
         # 时间倒序分页：offset 跳过已看的，供面板"加载更多"追加
         window = [diary_display_record(item) for item in list(reversed(shard.diary))[offset : offset + limit]]
-        return Ok({
-            "items": window,
-            "total": len(shard.diary),
-            "offset": offset,
-            "has_more": offset + len(window) < len(shard.diary),
-            "lanlan": lanlan,
-        })
+        return Ok(
+            {
+                "items": window,
+                "total": len(shard.diary),
+                "offset": offset,
+                "has_more": offset + len(window) < len(shard.diary),
+                "lanlan": lanlan,
+            }
+        )
 
     @ui.action(
         label=tr("actions.invite_journal.label", default="邀请写日记"),
@@ -1748,8 +1965,12 @@ class PanelEntriesMixin(MediaGalleryMixin):
             payload: JsonObject = {"accepted": False, "reason": reason, "lanlan": lanlan}
             if reason == "slot_unresolved":
                 status = await self._channel_dormancy(
-                    True, self._review_cfg, default_slot=_REVIEW_DEFAULT_SLOT,
-                    lanlan=lanlan, channel="review", shard=shard,
+                    True,
+                    self._review_cfg,
+                    default_slot=_REVIEW_DEFAULT_SLOT,
+                    lanlan=lanlan,
+                    channel="review",
+                    shard=shard,
                 )
                 payload["dormant_reason"] = status.get("dormant_reason") or "no_model"
             return Ok(payload)
@@ -1805,7 +2026,10 @@ class PanelEntriesMixin(MediaGalleryMixin):
     @plugin_entry(
         id="get_journal",
         name=tr("entries.get_journal.name", default="翻看个人日记"),
-        description=tr("entries.get_journal.description", default="翻看她的个人日记本（全部页，含每页全部段落）。scope=archive 时改翻藏书阁合订本。仅作用于当前角色。"),
+        description=tr(
+            "entries.get_journal.description",
+            default="翻看她的个人日记本（全部页，含每页全部段落）。scope=archive 时改翻藏书阁合订本。仅作用于当前角色。",
+        ),
         input_schema={
             "type": "object",
             "properties": {
@@ -1899,12 +2123,14 @@ class PanelEntriesMixin(MediaGalleryMixin):
         # 要整启宿主才可达（藏书阁实机踩坑同款防御）；两通道同数据
         want_archive = str(scope or "").strip().lower() == "archive"
         source = shard.review_archive if want_archive else shard.review
-        return Ok({
-            "entries": list(reversed(source)),  # 时间倒序：最新一卷在前
-            "lanlan": lanlan,
-            "scope": "archive" if want_archive else "shelf",
-            "progress": progress,
-        })
+        return Ok(
+            {
+                "entries": list(reversed(source)),  # 时间倒序：最新一卷在前
+                "lanlan": lanlan,
+                "scope": "archive" if want_archive else "shelf",
+                "progress": progress,
+            }
+        )
 
     @ui.action(
         label=tr("actions.get_review_archive.label", default="查看我的日记归档"),
@@ -1947,18 +2173,26 @@ class PanelEntriesMixin(MediaGalleryMixin):
         # 执行，结果经 dashboard 的 review_brief.writing / last_result 回流面板。
         lanlan, shard = await self._current_shard_async()
         if shard.pending_review_write or lanlan in self._review_writing:
-            return Ok({
-                "written": False, "queued": False, "accepted": False, "lanlan": lanlan,
-                "reason": "already_writing",
-            })
+            return Ok(
+                {
+                    "written": False,
+                    "queued": False,
+                    "accepted": False,
+                    "lanlan": lanlan,
+                    "reason": "already_writing",
+                }
+            )
         passed, reason, _resolved = await self._review_write_gate(shard, force=True)
         if not passed:
             # i18n 契约（1.3.0 第九轮）：只回 reason 码与数据字段，面板按码翻译
             # （not_enough_material → panel.review.notEnoughMaterial 插值 turns/min_turns；
             # slot_unresolved → 复用 onboarding.channels.noModel/freeRoute；其余→writeFailed）
             payload: JsonObject = {
-                "written": False, "queued": False, "accepted": False,
-                "lanlan": lanlan, "reason": reason,
+                "written": False,
+                "queued": False,
+                "accepted": False,
+                "lanlan": lanlan,
+                "reason": reason,
             }
             if reason == "not_enough_material":
                 payload["turns"] = int(shard.review_stats.get("turns") or 0)
@@ -1967,18 +2201,26 @@ class PanelEntriesMixin(MediaGalleryMixin):
                 # 判据只留一份：状态灯怎么算，这里的 toast 就怎么报（1.3.2 起灯是
                 # mode 感知的，自己再复刻一遍必然和面板漂移出两个答案）
                 status = await self._channel_dormancy(
-                    True, self._review_cfg,
-                    default_slot=_REVIEW_DEFAULT_SLOT, lanlan=lanlan, channel="review",
+                    True,
+                    self._review_cfg,
+                    default_slot=_REVIEW_DEFAULT_SLOT,
+                    lanlan=lanlan,
+                    channel="review",
                     shard=shard,
                 )
                 payload["dormant_reason"] = status.get("dormant_reason") or "no_model"
             return Ok(payload)
         if shard.pending_review_write or lanlan in self._review_writing:
             # 队列槽位只有一个：上一篇还在写/还在队里，重复点击不再叠加
-            return Ok({
-                "written": False, "queued": False, "accepted": False, "lanlan": lanlan,
-                "reason": "already_writing",
-            })
+            return Ok(
+                {
+                    "written": False,
+                    "queued": False,
+                    "accepted": False,
+                    "lanlan": lanlan,
+                    "reason": "already_writing",
+                }
+            )
         shard.pending_review_write = time.time()
         shard.review_write_result = None  # 上一次的成败结论作废，面板不再重复弹
         return Ok({"written": False, "queued": True, "accepted": True, "lanlan": lanlan})
@@ -1986,13 +2228,19 @@ class PanelEntriesMixin(MediaGalleryMixin):
     @ui.action(
         label=tr("actions.clear_review.label", default="清空我的日记"),
         tone="danger",
-        confirm=tr("actions.clear_review.confirm", default="确定清空当前角色的我的日记吗？所有记录（含归档）和累计素材都会删除，且无法恢复。"),
+        confirm=tr(
+            "actions.clear_review.confirm",
+            default="确定清空当前角色的我的日记吗？所有记录（含归档）和累计素材都会删除，且无法恢复。",
+        ),
         refresh_context=True,
     )
     @plugin_entry(
         id="clear_review",
         name=tr("entries.clear_review.name", default="清空我的日记"),
-        description=tr("entries.clear_review.description", default="删除当前角色的全部「我的日记」评价与档案室旧卷宗，并清零素材统计。不可恢复。"),
+        description=tr(
+            "entries.clear_review.description",
+            default="删除当前角色的全部「我的日记」评价与档案室旧卷宗，并清零素材统计。不可恢复。",
+        ),
         input_schema={"type": "object", "properties": {}},
         metadata={"agent_hidden": True},
     )
@@ -2005,9 +2253,7 @@ class PanelEntriesMixin(MediaGalleryMixin):
         shard.review_archive = []
         res_review = await self._save_shard_review(lanlan, shard)
         # 档案室一并清空（写空列表 blob，与藏书阁 prune 同口径的彻底清理）
-        res_archive = await self._store_write(
-            _review_archive_key(lanlan), [], f"clear review archive for {lanlan}"
-        )
+        res_archive = await self._store_write(_review_archive_key(lanlan), [], f"clear review archive for {lanlan}")
         persist_err = self._persist_error(res_review, res_archive)
         if persist_err is not None:
             return persist_err
@@ -2048,19 +2294,14 @@ class PanelEntriesMixin(MediaGalleryMixin):
         payload: JsonObject = {
             "lanlan": lanlan,
             "today": today,
-            "heatmap": heatmap_payload(
-                shard.stats, today, year=int(year_val) if year_val.isdigit() else None
-            ),
+            "heatmap": heatmap_payload(shard.stats, today, year=int(year_val) if year_val.isdigit() else None),
         }
         # 月报：显式指定月份 → 该月；留空 → 当月（有 days 数据）或最近一个已封卷月
         target = str(month or "").strip()
-        months_seen = sorted({
-            day[:7] for day in (shard.stats.get("days") or {}) if isinstance(day, str) and len(day) >= 7
-        })
-        sealed = {
-            key for key, val in (shard.stats.get("months") or {}).items()
-            if isinstance(val, dict)
-        }
+        months_seen = sorted(
+            {day[:7] for day in (shard.stats.get("days") or {}) if isinstance(day, str) and len(day) >= 7}
+        )
+        sealed = {key for key, val in (shard.stats.get("months") or {}).items() if isinstance(val, dict)}
         if not target:
             current_month = today[:7]
             if current_month in months_seen or any(m == current_month for m in sealed):
@@ -2080,13 +2321,18 @@ class PanelEntriesMixin(MediaGalleryMixin):
     @ui.action(
         label=tr("actions.clear_stats.label", default="清零相处统计"),
         tone="danger",
-        confirm=tr("actions.clear_stats.confirm", default="确定清零当前角色的相处统计吗？起点、里程碑、热力图和月报都会重置，且无法恢复。三本日记不受影响。"),
+        confirm=tr(
+            "actions.clear_stats.confirm",
+            default="确定清零当前角色的相处统计吗？起点、里程碑、热力图和月报都会重置，且无法恢复。三本日记不受影响。",
+        ),
         refresh_context=True,
     )
     @plugin_entry(
         id="clear_stats",
         name=tr("entries.clear_stats.name", default="清零相处统计"),
-        description=tr("entries.clear_stats.description", default="清零当前角色的相处统计（相伴起点/徽章/热力图/月报）。不可恢复。"),
+        description=tr(
+            "entries.clear_stats.description", default="清零当前角色的相处统计（相伴起点/徽章/热力图/月报）。不可恢复。"
+        ),
         input_schema={"type": "object", "properties": {}},
         metadata={"agent_hidden": True},
     )
@@ -2103,13 +2349,17 @@ class PanelEntriesMixin(MediaGalleryMixin):
     @ui.action(
         label=tr("actions.clear_diary.label", default="清空时光日记"),
         tone="danger",
-        confirm=tr("actions.clear_diary.confirm", default="确定清空当前角色的时光日记吗？手记和对话片段都会删除，且无法恢复。"),
+        confirm=tr(
+            "actions.clear_diary.confirm", default="确定清空当前角色的时光日记吗？手记和对话片段都会删除，且无法恢复。"
+        ),
         refresh_context=True,
     )
     @plugin_entry(
         id="clear_diary",
         name=tr("entries.clear_diary.name", default="清空时光日记"),
-        description=tr("entries.clear_diary.description", default="删除当前角色的全部时光日记（她的手记与自动碎片）。不可恢复。"),
+        description=tr(
+            "entries.clear_diary.description", default="删除当前角色的全部时光日记（她的手记与自动碎片）。不可恢复。"
+        ),
         input_schema={"type": "object", "properties": {}},
         metadata={"agent_hidden": True},
     )
@@ -2173,19 +2423,26 @@ class PanelEntriesMixin(MediaGalleryMixin):
             return Err(SdkError("lanlan_is_current"))
         first_delete_err: Err | None = None
         for key in (
-            _cycle_key(name), _mood_key(name), _diary_key(name),
-            _journal_key(name), _weekly_key(name),  # weekly@ 为 0.7.0 前的旧周记 key，一并清
+            _cycle_key(name),
+            _mood_key(name),
+            _diary_key(name),
+            _journal_key(name),
+            _weekly_key(name),  # weekly@ 为 0.7.0 前的旧周记 key，一并清
             _journal_archive_key(name),  # 藏书阁合订本（1.3.0）：角色份一并清
-            _review_key(name), _review_stats_key(name),  # 我的日记（0.8.0）：篇目与旧独立 stats key
+            _review_key(name),
+            _review_stats_key(name),  # 我的日记（0.8.0）：篇目与旧独立 stats key
             _review_archive_key(name),  # 档案室（1.3.0）：旧卷宗合档一并清，不留孤儿卷
             _stats_key(name),  # 相处统计（1.1.0）
             _caps_key(name),  # 能力否决集（1.2.7）：角色份一并清，不留残留开关
             # 调试注入备份（1.3.0 第六轮）：过去 prune 根本不扫这些键，删掉角色后
             # pre_debug@*/与旧 |pre-debug 备份永久孤儿（且同名重建会被旧注入档污染）
             _debug_backup_key("diary", name),
-            _debug_backup_key("journal", name), _legacy_debug_backup_key(_journal_key(name)),
-            _debug_backup_key("review", name), _legacy_debug_backup_key(_review_key(name)),
-            _debug_backup_key("stats", name), _legacy_debug_backup_key(_stats_key(name)),
+            _debug_backup_key("journal", name),
+            _legacy_debug_backup_key(_journal_key(name)),
+            _debug_backup_key("review", name),
+            _legacy_debug_backup_key(_review_key(name)),
+            _debug_backup_key("stats", name),
+            _legacy_debug_backup_key(_stats_key(name)),
         ):
             # 统一删除出口（1.2.2 审查轮 P1）：未通电/真失败都留痕，行为不变
             res = await self._store_delete(key, f"prune {key}")
@@ -2202,7 +2459,8 @@ class PanelEntriesMixin(MediaGalleryMixin):
         # 角色数据并未清干净——过去只 warning，面板却显示"已清除"）
         persist_err = self._persist_error(
             first_delete_err if first_delete_err is not None else Ok(None),
-            res_index, res_pause,
+            res_index,
+            res_pause,
         )
         if persist_err is not None:
             return persist_err

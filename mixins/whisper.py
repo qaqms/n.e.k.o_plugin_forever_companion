@@ -26,6 +26,7 @@ from ..core.state import (
     _JOURNAL_DEFAULT_INTERVAL_DAYS,
     _JOURNAL_INVITE_THROTTLE_SEC,
     _JOURNAL_RESPOND_COOLDOWN_SEC,
+    _cfg_int,
     _LanlanShard,
     _now_utc,
     _parse_iso_ts,
@@ -99,7 +100,9 @@ class WhisperMixin:
             now_mono = time.monotonic()
             if now_mono - self._last_bus_error_logged > 300:
                 self._last_bus_error_logged = now_mono
-                self.logger.warning("bus memory read returned error (throttled 5min): {}", getattr(result, "error", None))
+                self.logger.warning(
+                    "bus memory read returned error (throttled 5min): {}", getattr(result, "error", None)
+                )
             return None
         try:
             seq = list(result)
@@ -131,7 +134,8 @@ class WhisperMixin:
                 latest_type = str(last_raw.get("type") or "?") if isinstance(last_raw, dict) else "?"
                 self.logger.info(
                     "bus heartbeat: no user_message in last {} records; latest_type={}",
-                    len(seq), latest_type,
+                    len(seq),
+                    latest_type,
                 )
         return None
 
@@ -145,7 +149,7 @@ class WhisperMixin:
             text = message_text.lower()
             return any(word and word in text for word in words)
         if mode == "interval_n":
-            n = max(1, int(self._tide_cfg.get("inject_interval_n") or 3))
+            n = _cfg_int(self._tide_cfg, "inject_interval_n", 3, lo=1, hi=50)
             shard.user_message_count_since_inject += 1
             return shard.user_message_count_since_inject >= n
         return True
@@ -215,8 +219,17 @@ class WhisperMixin:
     # 和好信号关键词：冷战/小情绪中用户消息命中任一关键词时提醒她该调工具了。
     # 只取高置信度的道歉/安抚词，避免日常聊天误触发。
     _RECONCILE_HINT_KEYWORDS = (
-        "对不起", "抱歉", "原谅", "别生气", "不要生气", "别不理",
-        "我错了", "和好", "理理我", "不要不理", "错了嘛",
+        "对不起",
+        "抱歉",
+        "原谅",
+        "别生气",
+        "不要生气",
+        "别不理",
+        "我错了",
+        "和好",
+        "理理我",
+        "不要不理",
+        "错了嘛",
     )
 
     async def _maybe_nudge_reconcile(self, text: str, lanlan: str | None = None) -> None:
@@ -243,12 +256,17 @@ class WhisperMixin:
         self.push_message(
             visibility=[],
             ai_behavior="read",
-            parts=[{"type": "text", "text": (
-                "（对话参考）对方的话里出现了道歉或安抚的词，这不代表事情已经说清。"
-                "是否被理解、是否愿意回应或释怀，由你结合上下文判断。"
-                "如果想更新工具记录，可以选择其他情绪工具或 mood_rising_tide；"
-                "无需先调用工具才允许改变语气，也可以保持当前选择或忽略这条提醒。"
-            )}],
+            parts=[
+                {
+                    "type": "text",
+                    "text": (
+                        "（对话参考）对方的话里出现了道歉或安抚的词，这不代表事情已经说清。"
+                        "是否被理解、是否愿意回应或释怀，由你结合上下文判断。"
+                        "如果想更新工具记录，可以选择其他情绪工具或 mood_rising_tide；"
+                        "无需先调用工具才允许改变语气，也可以保持当前选择或忽略这条提醒。"
+                    ),
+                }
+            ],
             source=self.plugin_id,
             target_lanlan=name,
             coalesce_key=f"{self.plugin_id}.reconcile_nudge",
@@ -313,15 +331,9 @@ class WhisperMixin:
                     "索性让自己也松下来、养养神；他回来时不用假装一直精神十足。"
                 )
             elif state.phase == "ovulatory":
-                line = (
-                    "[生活感知] {MASTER_NAME}已经有一阵子没在电脑前了。"
-                    "你有点想他，但先自己找点轻松的事做，别干等。"
-                )
+                line = "[生活感知] {MASTER_NAME}已经有一阵子没在电脑前了。你有点想他，但先自己找点轻松的事做，别干等。"
             else:
-                line = (
-                    "[生活感知] {MASTER_NAME}已经有一阵子没在电脑前了。"
-                    "你也顺势放松一下，他回来再自然地接上话。"
-                )
+                line = "[生活感知] {MASTER_NAME}已经有一阵子没在电脑前了。你也顺势放松一下，他回来再自然地接上话。"
         elif category == "work":
             key = "focus:work"
             line = (
@@ -330,10 +342,7 @@ class WhisperMixin:
             )
         elif category == "gaming" and state.phase == "ovulatory":
             key = "gaming"
-            line = (
-                "[生活感知] {MASTER_NAME}在玩游戏。你这几天本来就黏人，"
-                "可以饶有兴致地围观两句，但别打断他的节奏。"
-            )
+            line = "[生活感知] {MASTER_NAME}在玩游戏。你这几天本来就黏人，可以饶有兴致地围观两句，但别打断他的节奏。"
         shard.last_activity_context_key = key
         return line
 
@@ -363,9 +372,7 @@ class WhisperMixin:
             parts.append({"type": "text", "text": mood_line})
         return parts
 
-    async def _inject_now(
-        self, lanlan: str | None = None, shard: _LanlanShard | None = None
-    ) -> list[dict[str, str]]:
+    async def _inject_now(self, lanlan: str | None = None, shard: _LanlanShard | None = None) -> list[dict[str, str]]:
         """执行注入（定向到归属角色）；返回实际推送的 parts（空列表 = 未注入）。"""
         name = str(lanlan or "").strip() or self._current_shard_name()
         shard = shard or self._get_shard(name)
@@ -405,7 +412,10 @@ class WhisperMixin:
         # parts 数量反映构成（1=仅身体轻语，2=+活动感知或情绪行，3=三者都有）
         self.logger.info(
             "body whisper injected: lanlan={} phase={} parts={} whisper_key={}",
-            name, state.phase, len(parts), key,
+            name,
+            state.phase,
+            len(parts),
+            key,
         )
         return parts
 
@@ -438,9 +448,7 @@ class WhisperMixin:
         ],
     }
 
-    async def _maybe_phase_opener(
-        self, state, lanlan: str | None = None, shard: _LanlanShard | None = None
-    ) -> bool:
+    async def _maybe_phase_opener(self, state, lanlan: str | None = None, shard: _LanlanShard | None = None) -> bool:
         """进入与上次不同的阶段时让她主动开口一次（每个阶段只说一次，per-shard）。
 
         水位记录在内存 + store 的 cycle@<lanlan>.phase_seen。只比较阶段名，
@@ -472,7 +480,12 @@ class WhisperMixin:
             # 宿主的 "chat" 会把 parts 原样贴上屏、"respond" 另起一轮：内部提示只走后者（实机 2026-09-21 曾上屏）
             visibility=[],
             ai_behavior="respond",
-            parts=[{"type": "text", "text": f"[潮汐·今日状态] 你刚意识到自己进入了新的身体阶段（仅给你看的内部提示，不要复述本句）。请以你自己的口吻，自然地把这句话的意思说给 {MASTER_NAME_TOKEN} 听：{text}"}],
+            parts=[
+                {
+                    "type": "text",
+                    "text": f"[潮汐·今日状态] 你刚意识到自己进入了新的身体阶段（仅给你看的内部提示，不要复述本句）。请以你自己的口吻，自然地把这句话的意思说给 {MASTER_NAME_TOKEN} 听：{text}",
+                }
+            ],
             source=self.plugin_id,
             target_lanlan=name,
             priority=3,
@@ -494,9 +507,7 @@ class WhisperMixin:
         except (TypeError, ValueError):
             return default
 
-    async def _maybe_journal_invite(
-        self, lanlan: str, shard: _LanlanShard, force: bool = False
-    ) -> tuple[bool, str]:
+    async def _maybe_journal_invite(self, lanlan: str, shard: _LanlanShard, force: bool = False) -> tuple[bool, str]:
         """个人日记邀请：递一条写日记的邀请（附素材）。返回 (是否递出, 投递方式)。
 
         投递方式（第二个返回值）取值：``""`` 未递出（开关未开 / 周期未到节奏）；
@@ -608,7 +619,10 @@ class WhisperMixin:
             reason = str(pushed.get("reason") or "unknown")
             self.logger.warning(
                 "journal invite NOT submitted for {} via {} (force={}): {}",
-                lanlan, deliver, force, reason,
+                lanlan,
+                deliver,
+                force,
+                reason,
             )
             if force:
                 shard.last_journal_invite_ts = prev_invite_ts
@@ -620,7 +634,10 @@ class WhisperMixin:
         await self._save_shard_cycle(lanlan, shard)
         self.logger.info(
             "journal invite pushed for {} via {} ({} pages, force={})",
-            lanlan, deliver, len(shard.journal), force,
+            lanlan,
+            deliver,
+            len(shard.journal),
+            force,
         )
         return True, deliver
 
@@ -675,11 +692,16 @@ class WhisperMixin:
         pushed = self.push_message(
             visibility=[],
             ai_behavior="read",
-            parts=[{"type": "text", "text": (
-                "（日期感知）今天是主人的生日，一年一度属于他的日子。"
-                "送上你的祝福，用你的方式庆祝，或者只是让他知道你记得——"
-                "说不说、怎么说都由你自己决定，绝不要提及这条提醒本身。"
-            )}],
+            parts=[
+                {
+                    "type": "text",
+                    "text": (
+                        "（日期感知）今天是主人的生日，一年一度属于他的日子。"
+                        "送上你的祝福，用你的方式庆祝，或者只是让他知道你记得——"
+                        "说不说、怎么说都由你自己决定，绝不要提及这条提醒本身。"
+                    ),
+                }
+            ],
             source=self.plugin_id,
             target_lanlan=lanlan,
             coalesce_key=f"{self.plugin_id}.birthday",
@@ -690,17 +712,20 @@ class WhisperMixin:
         if isinstance(pushed, dict) and pushed.get("submitted") is False:
             self.logger.warning(
                 "birthday whisper NOT submitted for {}: {}",
-                lanlan, str(pushed.get("reason") or "unknown"),
+                lanlan,
+                str(pushed.get("reason") or "unknown"),
             )
             return False
         shard.stats = mark_birthday_pushed(shard.stats, today)
         saves = [await self._save_shard_stats(lanlan, shard)]
         keep_diary = cfg.get("keep_diary", True) is not False
         if keep_diary:
-            shard.diary.append(make_birthday_diary_record(
-                _now_utc().isoformat(timespec="seconds"),
-                self._last_phase_name(shard),
-            ))
+            shard.diary.append(
+                make_birthday_diary_record(
+                    _now_utc().isoformat(timespec="seconds"),
+                    self._last_phase_name(shard),
+                )
+            )
             saves.append(await self._save_shard_diary(lanlan, shard))
         persist_err = self._persist_error(*saves)
         if persist_err is not None:
@@ -708,7 +733,8 @@ class WhisperMixin:
             # （重推生日祝福比漏一次更碍事），细节由统一出口留痕
             self.logger.warning("birthday watermark/diary persist degraded for {}", lanlan)
         self.logger.info(
-            "birthday whisper pushed for {} (keep_diary={})", lanlan, keep_diary,
+            "birthday whisper pushed for {} (keep_diary={})",
+            lanlan,
+            keep_diary,
         )
         return True
-

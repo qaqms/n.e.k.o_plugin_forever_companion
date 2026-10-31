@@ -40,6 +40,7 @@ from ..core.state import (
     _STORE_MOOD,
     _STORE_PROACTIVE,
     _STORE_SETTINGS,
+    _cfg_int,
     _cfg_section,
     _cycle_key,
     _diary_key,
@@ -420,14 +421,22 @@ class ShardsMixin:
         shard = shard or self._current_shard()
         params = self._shard_params(shard)
         tide = self._tide_cfg or {}
-        cycle_length = int(params.get("cycle_length") or tide.get("cycle_length") or 28)
+        cycle_length = _cfg_int(
+            params, "cycle_length", _cfg_int(tide, "cycle_length", 28, lo=10, hi=90), lo=10, hi=90
+        )
         if self._auto_derive(shard):
             return derive_cycle_params(cycle_length)
         return {
             "cycle_length": cycle_length,
-            "period_length": int(params.get("period_length") or tide.get("period_length") or 5),
-            "ovulation_day": int(params.get("ovulation_day") or tide.get("ovulation_day") or 14),
-            "ovulation_window": int(params.get("ovulation_window") or tide.get("ovulation_window") or 3),
+            "period_length": _cfg_int(
+                params, "period_length", _cfg_int(tide, "period_length", 5, lo=1, hi=14), lo=1, hi=14
+            ),
+            "ovulation_day": _cfg_int(
+                params, "ovulation_day", _cfg_int(tide, "ovulation_day", 14, lo=2, hi=89), lo=2, hi=89
+            ),
+            "ovulation_window": _cfg_int(
+                params, "ovulation_window", _cfg_int(tide, "ovulation_window", 3, lo=1, hi=5), lo=1, hi=5
+            ),
         }
 
     def _cycle_params(self, shard: _LanlanShard | None = None) -> JsonObject:

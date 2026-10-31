@@ -81,18 +81,18 @@ def _patch_clock(monkeypatch, tm, holder):
 
 
 def test_seek_harbor_fallback_auto_resolves(monkeypatch, tm, plugin_factory) -> None:
-    p = plugin_factory(mood_extra={"open_action_timeout_minutes": 120})
+    p = plugin_factory()
     now = [1000.0]
     _patch_clock(monkeypatch, tm, now)
 
     run(p._apply_mood_action(action="seek_harbor", minutes=None, reason="委屈", timed=False))
     assert p._mood_state.action == "seek_harbor"
 
-    now[0] = 1000.0 + 119 * 60  # 未到阈值
+    now[0] = 1000.0 + 19 * 60  # 未到默认 20 分钟阈值
     assert run(p._fallback_open_action_if_due()) == ""
     assert p._mood_state.action == "seek_harbor"
 
-    now[0] = 1000.0 + 121 * 60  # 超阈值：自动解除
+    now[0] = 1000.0 + 20 * 60  # 达到阈值：自动解除
     assert run(p._fallback_open_action_if_due()) == "seek_harbor"
     assert p._mood_state.action == ""
     # 限时动作不受兜底影响

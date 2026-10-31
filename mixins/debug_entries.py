@@ -36,6 +36,7 @@ from ..core.state import (
     _JOURNAL_MAX_PAGES,
     _TIMED_ACTIONS,
     _TONE_COLD_LABELS,
+    _cfg_int,
     _debug_backup_key,
     _diary_key,
     _journal_archive_key,
@@ -375,8 +376,8 @@ class DebugEntriesMixin:
                 if seconds > 0 else "记录已到期，下一趟监督循环结束记录，不发起回复"
             )
         elif action == "seek_harbor":
-            limit = self._mood_cfg.get("open_action_timeout_minutes")
-            remaining = f"兜底阈值 {limit if limit is not None else 120} 分钟；把 minutes_ago 调到超过阈值即可验证自动解除"
+            limit = _cfg_int(self._mood_cfg, "open_action_timeout_minutes", 20, lo=0, hi=1440)
+            remaining = f"兜底阈值 {limit} 分钟；把 minutes_ago 调到超过阈值即可验证自动解除"
         return Ok({
             "action": action,
             "lanlan": name,

@@ -33,6 +33,7 @@ from ..core.state import (
     _MOOD_ACTION_LABEL_KEYS,
     _PROACTIVE_PAUSE_ACTIONS,
     _TIMED_ACTIONS,
+    _cfg_int,
     _channel_route,
     _LanlanShard,
     _MoodState,
@@ -48,7 +49,6 @@ JsonObject = dict[str, Any]
 
 class MoodActionsMixin:
     """情绪引擎：@llm_tool 集中地 + 状态机（应用/到期/恢复/监督）。"""
-
 
     async def _speak_recovery_line(self, action: str, lanlan: str) -> None:
         """只同步记录到期，不替角色宣布释怀，也不发起独立回复。"""
@@ -91,8 +91,11 @@ class MoodActionsMixin:
         # 纯属性读取零成本，_retrusting 防重入与 _ensure_shard 门控共享
         if not self._state_trusted and not self._retrusting and self._store_ready:
             await self._retrust_state()
-        if not self._supervise_lock.acquire(timeout=10):
-            return  # 另一个驱动源正在处理，本趟跳过
+        # 非阻塞取锁：本方法在 async 路径里被调用，阻塞等锁会卡住所在事件循环
+        # （持锁方可能正在连发数次 4s 超时的宿主 HTTP）；另一驱动源已在处理，
+        # 本趟直接跳过，tick 每 10s 会再推进一次
+        if not self._supervise_lock.acquire(blocking=False):
+            return
         try:
             for lanlan, shard in list(self._shards.items()):
                 if not shard.loaded:
@@ -137,14 +140,7 @@ class MoodActionsMixin:
         if not state.action or state.action in _TIMED_ACTIONS:
             return ""
         # 注意不能用 `or 120`：配 0 表示用户显式关闭兜底，不能被默认值吞掉
-        raw = self._mood_cfg.get("open_action_timeout_minutes")
-        if raw is None:
-            limit_min = 120
-        else:
-            try:
-                limit_min = max(0, int(raw))
-            except (TypeError, ValueError):
-                limit_min = 120
+        limit_min = _cfg_int(self._mood_cfg, "open_action_timeout_minutes", 20, lo=0, hi=1440)
         if limit_min <= 0 or state.started_at <= 0:
             return ""
         if time.time() - state.started_at < limit_min * 60:
@@ -154,7 +150,6 @@ class MoodActionsMixin:
         state.clear_action()
         self.logger.info("open-ended mood action {} exceeded {}min; auto-resolved", action, limit_min)
         return action
-
 
     # ==========================================
     # 情绪系统：LLM 工具自主决策
@@ -195,9 +190,7 @@ class MoodActionsMixin:
         """该角色冷战沉默/已读不回生效中：插件侧应停止对她的一切主动输出。"""
         shard = shard or self._current_shard()
         return bool(
-            self._mood_enabled(shard)
-            and shard.mood.is_active()
-            and shard.mood.action in ("ebb_tide", "sea_fog")
+            self._mood_enabled(shard) and shard.mood.is_active() and shard.mood.action in ("ebb_tide", "sea_fog")
         )
 
     def _action_label(self, action: str) -> str:
@@ -343,7 +336,9 @@ class MoodActionsMixin:
         )
         self.logger.info(
             "extreme affect invite pushed for {} (side={} valence={:.2f})",
-            lanlan, "low" if side < 0 else "high", valence,
+            lanlan,
+            "low" if side < 0 else "high",
+            valence,
         )
         return True
 
@@ -351,9 +346,7 @@ class MoodActionsMixin:
         """薄委托：连续心情当前值（惰性衰减，arousal 向静息基线回归），实现在 affect.py。"""
         return _current_affect(shard.mood, now=now, arousal_baseline=self._affect_arousal_baseline())
 
-    def _apply_affect_impulse(
-        self, shard: _LanlanShard, dv: float, da: float, now: float | None = None
-    ) -> None:
+    def _apply_affect_impulse(self, shard: _LanlanShard, dv: float, da: float, now: float | None = None) -> None:
         """薄委托：先惰性衰减再叠加冲量并 clamp，实现在 affect.py。"""
         _apply_affect_impulse(shard.mood, dv, da, now=now, arousal_baseline=self._affect_arousal_baseline())
 
@@ -396,8 +389,10 @@ class MoodActionsMixin:
         action = shard.mood.action
         action_label = self._action_label(action)
         reason = shard.mood.reason.strip()
-        source = "用户明确要求的体验" if shard.mood.origin == "user" else (
-            "你最近一次选择" if shard.mood.origin == "self" else "之前保存"
+        source = (
+            "用户明确要求的体验"
+            if shard.mood.origin == "user"
+            else ("你最近一次选择" if shard.mood.origin == "self" else "之前保存")
         )
         line = f"[心情记录] {source}的工具状态是「{action_label}」。"
         hint = self._MOOD_BEHAVIOR_HINTS.get(action)
@@ -435,7 +430,7 @@ class MoodActionsMixin:
             await self._on_mood_expired(name, shard, expired)
         previous = shard.mood.action
         # 我的日记素材：记一笔动作事件。origin=user 是主人明确要求的演示
-        #（"让她冷战"不算他对她不好），origin=self 才是她的自主反应
+        # （"让她冷战"不算他对她不好），origin=self 才是她的自主反应
         self._feed_review_action(shard, action, origin=origin)
         # 相处统计：同口径记当日情绪事件（origin=user 不计）；两路增量与 mood
         # 一起即时落盘（批次2 起，不再"搭车"等下一条用户消息）
@@ -444,7 +439,7 @@ class MoodActionsMixin:
         # 其余动作回落 mood.default_action_minutes 配置
         default_minutes = _ACTION_DEFAULT_MINUTES.get(action)
         if default_minutes is None:
-            default_minutes = int(self._mood_cfg.get("default_action_minutes") or 10)
+            default_minutes = _cfg_int(self._mood_cfg, "default_action_minutes", 10)
         duration_min = minutes if minutes and minutes > 0 else default_minutes
         duration_min = min(max(duration_min, 1), 720)
         shard.mood.action = action
@@ -454,7 +449,10 @@ class MoodActionsMixin:
         shard.mood.origin = "user" if origin == "user" else "self"
         shard.mood.record_event(
             "switch" if previous and previous != action else "choose",
-            action, shard.mood.origin, shard.mood.reason, previous_action=previous,
+            action,
+            shard.mood.origin,
+            shard.mood.reason,
+            previous_action=previous,
         )
         shard.tone_window = []
         shard.last_injected_whisper_key = ""
@@ -554,9 +552,7 @@ class MoodActionsMixin:
         shard = await self._ensure_shard(lanlan)
         if not self._mood_enabled(shard):
             return Err(SdkError("情绪系统未开启"))
-        res = await self._apply_mood_action(
-            action="sea_fog", minutes=minutes, reason=reason, timed=True, lanlan=lanlan
-        )
+        res = await self._apply_mood_action(action="sea_fog", minutes=minutes, reason=reason, timed=True, lanlan=lanlan)
         if isinstance(res, Err):
             return res
         return Ok({**res.value, "note": "已记录已读不回。是否暂时搁置、接回话题或简短回应，由你决定。"})
@@ -661,9 +657,7 @@ class MoodActionsMixin:
         shard = await self._ensure_shard(lanlan)
         if not self._mood_enabled(shard):
             return Err(SdkError("情绪系统未开启"))
-        res = await self._apply_mood_action(
-            action="ripple", minutes=minutes, reason=reason, timed=True, lanlan=lanlan
-        )
+        res = await self._apply_mood_action(action="ripple", minutes=minutes, reason=reason, timed=True, lanlan=lanlan)
         if isinstance(res, Err):
             return res
         return Ok({**res.value, "note": "已记录心有涟漪。怎样表达、是否释怀由你决定，想更新记录时可以选择其他工具。"})
@@ -762,24 +756,24 @@ class MoodActionsMixin:
         shard.tone_window = []
         shard.last_injected_whisper_key = ""
         # 相处统计（1.1.0）：她主动调转晴结束负面情绪 = 一次和好
-        #（口径：此前确实处于负面状态才算——没生过气就"转晴"不计数）
+        # （口径：此前确实处于负面状态才算——没生过气就"转晴"不计数）
         if previous in _COLD_ACTIONS:
             self._feed_stats_made_up(shard)
         res_mood = await self._save_shard_mood(lanlan, shard)
         # 和好计数即时落盘（1.2.2 批次2）：过去只进内存、等下一条用户消息冲刷
-        res_stats = (
-            await self._save_shard_stats(lanlan, shard) if previous in _COLD_ACTIONS else Ok(None)
-        )
+        res_stats = await self._save_shard_stats(lanlan, shard) if previous in _COLD_ACTIONS else Ok(None)
         await self._maybe_sync_proactive_pause()
         persist_err = self._persist_error(res_mood, res_stats)
         if persist_err is not None:
             return persist_err
         self.logger.info("mood recovered via llm tool for {}, previous={}", lanlan, previous)
-        return Ok({
-            "previous_action": previous,
-            "reason": (reason or "")[:200],
-            "note": "已按你的选择结束情绪工具记录。是否仍有余绪、怎样继续相处由你决定，无需立刻亲近。",
-        })
+        return Ok(
+            {
+                "previous_action": previous,
+                "reason": (reason or "")[:200],
+                "note": "已按你的选择结束情绪工具记录。是否仍有余绪、怎样继续相处由你决定，无需立刻亲近。",
+            }
+        )
 
     @llm_tool(
         name="mood_drift_bottle",
@@ -825,13 +819,15 @@ class MoodActionsMixin:
         self.push_message(
             visibility=[],
             ai_behavior="read",
-            parts=[{
-                "type": "text",
-                "text": (
-                    f"[时光日记] 你刚刚在心里写下了一段手记（{record['mood'] or '无标签'}）："
-                    f"「{record['entry']}」。这是你的真实感受和记忆，之后可以自然地想起它。"
-                ),
-            }],
+            parts=[
+                {
+                    "type": "text",
+                    "text": (
+                        f"[时光日记] 你刚刚在心里写下了一段手记（{record['mood'] or '无标签'}）："
+                        f"「{record['entry']}」。这是你的真实感受和记忆，之后可以自然地想起它。"
+                    ),
+                }
+            ],
             source=self.plugin_id,
             target_lanlan=lanlan,
             coalesce_key=f"{self.plugin_id}.diary",
@@ -912,14 +908,19 @@ class MoodActionsMixin:
         self._journal_writing.add(lanlan)
         try:
             return await self._write_journal_entry(
-                lanlan, shard, events, thoughts, feelings, extra, new_page, title,
+                lanlan,
+                shard,
+                events,
+                thoughts,
+                feelings,
+                extra,
+                new_page,
+                title,
             )
         finally:
             self._journal_writing.discard(lanlan)
 
-    async def _write_journal_entry(
-        self, lanlan, shard, events, thoughts, feelings, extra, new_page, title
-    ):
+    async def _write_journal_entry(self, lanlan, shard, events, thoughts, feelings, extra, new_page, title):
         # 四栏拼装成带引导小标题的成段日记；段落间空行分开，读起来是一篇连贯的日记
         body = assemble_journal_entry(events, thoughts, feelings, extra)
         # 页眉的好感度参考值：落笔瞬间的连续心情（读取时已惰性衰减），只进页眉展示层
@@ -943,13 +944,15 @@ class MoodActionsMixin:
         persist_err = self._persist_error(res_journal, res_archive, res_stats)
         if persist_err is not None:
             return persist_err
-        return Ok({
-            "saved": True,
-            "page": page_no,
-            "title": normalize_journal_title(shard.journal[-1].get("title")),
-            "pages_total": len(shard.journal),
-            "recent_context": previous_lines,
-        })
+        return Ok(
+            {
+                "saved": True,
+                "page": page_no,
+                "title": normalize_journal_title(shard.journal[-1].get("title")),
+                "pages_total": len(shard.journal),
+                "recent_context": previous_lines,
+            }
+        )
 
     @llm_tool(
         name="mood_recall_fragments",
@@ -973,31 +976,31 @@ class MoodActionsMixin:
         },
         timeout=15.0,
     )
-    async def tool_recall_fragments(
-        self, kind: str = "", query: str = "", limit: int = 10, **kwargs: Any
-    ):
+    async def tool_recall_fragments(self, kind: str = "", query: str = "", limit: int = 10, **kwargs: Any):
         lanlan = await self._attribution_lanlan(kwargs)
         shard = await self._ensure_shard(lanlan)
         if not self._mood_enabled(shard):
             return Err(SdkError("情绪系统未开启"))
         items = recall_fragments(shard.diary, kind=kind, query=query, limit=limit)
-        return Ok({
-            "found": len(items),
-            "items": [
-                {
-                    "ts": item.get("ts"),
-                    "kind": item.get("kind"),
-                    "quote": item.get("quote"),
-                    "note": item.get("note"),
-                }
-                for item in items
-            ],
-            "hint": (
-                "这些是你心里记着的、关于他的片段。用不用、怎么说，由你自己决定。"
-                if items
-                else "这本日记里还没有匹配的记录。"
-            ),
-        })
+        return Ok(
+            {
+                "found": len(items),
+                "items": [
+                    {
+                        "ts": item.get("ts"),
+                        "kind": item.get("kind"),
+                        "quote": item.get("quote"),
+                        "note": item.get("note"),
+                    }
+                    for item in items
+                ],
+                "hint": (
+                    "这些是你心里记着的、关于他的片段。用不用、怎么说，由你自己决定。"
+                    if items
+                    else "这本日记里还没有匹配的记录。"
+                ),
+            }
+        )
 
     @llm_tool(
         name="mood_check_memory",
@@ -1018,9 +1021,7 @@ class MoodActionsMixin:
         },
         timeout=45.0,
     )
-    async def tool_check_memory(
-        self, limit: int = _FRAGMENT_REVIEW_DEFAULT_ITEMS, **kwargs: Any
-    ):
+    async def tool_check_memory(self, limit: int = _FRAGMENT_REVIEW_DEFAULT_ITEMS, **kwargs: Any):
         lanlan = await self._attribution_lanlan(kwargs)
         shard = await self._ensure_shard(lanlan)
         if not self._mood_enabled(shard):
@@ -1036,11 +1037,13 @@ class MoodActionsMixin:
             want = _FRAGMENT_REVIEW_DEFAULT_ITEMS
         items = recall_fragments(shard.diary, limit=want)
         if len(items) < 2:
-            return Ok({
-                "checked": len(items),
-                "findings": [],
-                "hint": "日记里还没有足够的片段可比对。",
-            })
+            return Ok(
+                {
+                    "checked": len(items),
+                    "findings": [],
+                    "hint": "日记里还没有足够的片段可比对。",
+                }
+            )
         resolved, slot, _core_cfg = await self._resolve_channel_endpoint(
             self._fragments_cfg, default_slot=_FRAGMENT_DEFAULT_SLOT
         )
@@ -1064,7 +1067,10 @@ class MoodActionsMixin:
         self._channel_break_note(
             # Keep on-demand memory review failures separate from the automatic
             # fragment capture breaker.
-            lanlan, "memory_review", route, ok=raw is not None
+            lanlan,
+            "memory_review",
+            route,
+            ok=raw is not None,
         )
         if raw is None:
             return Err(SdkError("这次没连上模型，稍后再试"))
@@ -1078,21 +1084,24 @@ class MoodActionsMixin:
             if not 1 <= index <= len(items):
                 continue  # 编号越界：只丢这条建议，不影响其他发现
             target = items[index - 1]
-            result.append({
-                "ts": target.get("ts"),
-                "kind": target.get("kind"),
-                "quote": target.get("quote"),
-                "issue": item["issue"],
-                "reason": item["reason"],
-            })
+            result.append(
+                {
+                    "ts": target.get("ts"),
+                    "kind": target.get("kind"),
+                    "quote": target.get("quote"),
+                    "issue": item["issue"],
+                    "reason": item["reason"],
+                }
+            )
         shard.last_fragment_review_ts = now
-        return Ok({
-            "checked": len(items),
-            "findings": result,
-            "hint": (
-                "以上只是建议。要不要处理、怎么处理，由你自己决定。"
-                if result
-                else "这些片段看起来都还说得上话，没发现明显过时或矛盾的地方。"
-            ),
-        })
-
+        return Ok(
+            {
+                "checked": len(items),
+                "findings": result,
+                "hint": (
+                    "以上只是建议。要不要处理、怎么处理，由你自己决定。"
+                    if result
+                    else "这些片段看起来都还说得上话，没发现明显过时或矛盾的地方。"
+                ),
+            }
+        )

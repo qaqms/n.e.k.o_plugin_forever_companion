@@ -45,7 +45,7 @@ mood_note = "这个阶段你的情绪更敏感：更容易觉得委屈、更想�
 [mood]
 enabled = true                     # 关闭后情绪工具调用会被拒绝（工具仍对模型可见）
 default_action_minutes = 10        # 限时情绪动作的默认持续时长（分钟），范围 [1, 720]
-open_action_timeout_minutes = 120  # 求安抚的兜底自动解除阈值；0 = 关闭兜底，上限 1440
+open_action_timeout_minutes = 20  # 求安抚的兜底自动解除阈值；0 = 关闭兜底，上限 1440
 arousal_baseline = 0.35            # 活跃度静息基线：无刺激时活跃度回归到此水平，范围 [0,1]；0 = 旧行为（回归到完全平静）
 extreme_invite_threshold = 0.4     # 持续极端心情邀请：心情越过 ±此值（对应"低落/雀跃"档）才开始计时；0 = 关闭邀请
 extreme_invite_after_minutes = 20  # 持续满 N 分钟才推一次动作邀请

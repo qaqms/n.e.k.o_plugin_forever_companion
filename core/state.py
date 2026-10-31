@@ -19,11 +19,11 @@ from typing import Any
 JsonObject = dict[str, Any]
 
 # ---- Store 布局（0.5.0 起 per-lanlan 分片）----
-_STORE_SETTINGS = "settings"          # 全局覆盖层：{tide: {...}, mood: {...}}
+_STORE_SETTINGS = "settings"  # 全局覆盖层：{tide: {...}, mood: {...}}
 _STORE_LANLAN_INDEX = "lanlan_index"  # 已知角色名列表（PluginStore 无 list-keys 能力，面板只读角色列表数据源）
 _STORE_PROACTIVE = "proactive_state"  # 主动搭话协调：{prev: {master: bool} | None, paused_by: [lanlan, ...]}
-_STORE_GUIDE = "guide"               # 新手引导（1.2.6）：安装级一次性 {wizard: ""|done|skip, at, version}
-_STORE_CAPS_GLOBAL = "caps@*"        # 功能能力否决集（1.2.7 能力中心）：全局份，对所有角色生效
+_STORE_GUIDE = "guide"  # 新手引导（1.2.6）：安装级一次性 {wizard: ""|done|skip, at, version}
+_STORE_CAPS_GLOBAL = "caps@*"  # 功能能力否决集（1.2.7 能力中心）：全局份，对所有角色生效
 # 旧版单角色 key：仅用于启动时一次性迁移读取，之后不再写入（保留作备份，回滚 0.4.0 不丢数据）
 _STORE_CYCLE = "cycle_state"
 _STORE_MOOD = "mood_state"
@@ -71,9 +71,15 @@ _GALLERY_THUMB_MAX_CHARS = 400_000
 # 图库容量上限：每张 ≤4.5MB base64，24 张是 store.db 体积与实用性的折中
 _GALLERY_MAX_ITEMS = 24
 # 允许的 MIME（data:image/<mime>;base64 前缀里解析出来的部分）
-_PANEL_BG_MIMES = frozenset({
-    "image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml",
-})
+_PANEL_BG_MIMES = frozenset(
+    {
+        "image/png",
+        "image/jpeg",
+        "image/webp",
+        "image/gif",
+        "image/svg+xml",
+    }
+)
 # 遮罩强度默认值：压暗背景保证文字可读（0=不压暗，上限 0.85）
 _PANEL_BG_DEFAULT_DIM = 0.4
 # 旧版单图迁移进图库时使用的固定条目 id（缩略图由面板生成后经入口回填）
@@ -217,10 +223,17 @@ _MOOD_ACTION_DEFAULT_LABELS = {
     "drift_bottle": "心情手记",
 }
 
-_TIMED_ACTIONS = frozenset({
-    "ebb_tide", "sea_fog", "shallow_reef", "storm_surge",
-    "ripple", "warm_current", "spring_tide",
-})
+_TIMED_ACTIONS = frozenset(
+    {
+        "ebb_tide",
+        "sea_fog",
+        "shallow_reef",
+        "storm_surge",
+        "ripple",
+        "warm_current",
+        "spring_tide",
+    }
+)
 
 # 限时动作的默认时长（分钟）：未显式指定 minutes 时优先用它，
 # 不在表里的动作回落 mood.default_action_minutes 配置
@@ -229,19 +242,31 @@ _ACTION_DEFAULT_MINUTES = {"ripple": 15, "warm_current": 30, "spring_tide": 30}
 # 主动搭话暂停白名单（重度负面动作）：只有这些动作生效才暂停宿主主动搭话；
 # 心有涟漪（中间态小情绪）与暖流涌动/满潮欢喜（正面状态）不暂停——
 # 小情绪和好心情不该掐断宿主的主动搭话，否则开心时她反而被静默，逻辑反了
-_PROACTIVE_PAUSE_ACTIONS = frozenset({
-    "ebb_tide", "sea_fog", "shallow_reef", "storm_surge", "seek_harbor",
-})
+_PROACTIVE_PAUSE_ACTIONS = frozenset(
+    {
+        "ebb_tide",
+        "sea_fog",
+        "shallow_reef",
+        "storm_surge",
+        "seek_harbor",
+    }
+)
 
 # 正面动作：面板徽标 tone 据此分色
 _POSITIVE_ACTIONS = frozenset({"warm_current", "spring_tide"})
 
 # ---- 相处统计（1.1.0，stats.py）----
 # 冷战类动作：相处统计里"冷战次数"只统计她自主发起的这些动作
-#（心有涟漪是小情绪不算冷战，与主动搭话暂停白名单语义不同，单列表）
-_COLD_ACTIONS = frozenset({
-    "ebb_tide", "sea_fog", "shallow_reef", "storm_surge", "seek_harbor",
-})
+# （心有涟漪是小情绪不算冷战，与主动搭话暂停白名单语义不同，单列表）
+_COLD_ACTIONS = frozenset(
+    {
+        "ebb_tide",
+        "sea_fog",
+        "shallow_reef",
+        "storm_surge",
+        "seek_harbor",
+    }
+)
 # days 逐日聚合的保留上限：超出窗口的旧天丢弃（徽章/累计总数即时重算不受影响；
 # 热力图年份选择的回退深度也受此约束，上限防的是"每天都聊"极端用户的 Store 膨胀）
 _STATS_DAYS_MAX = 730
@@ -283,8 +308,8 @@ _FRAGMENT_DEFAULT_SLOT = "agent"
 # 为什么不用 min_interval_sec 表达——那是"隔多久"，聊得密的日子里同样能把一天摊满；
 # 日限才是"每天最多几次"的直接说法。取不到/非法一律回落出厂值，越界钳到边界。
 _FRAGMENT_DEFAULT_DAILY_LIMIT = 60
-_FRAGMENT_MIN_DAILY_LIMIT = 0          # 0 = 这条今天一次都不发（等价关闭）
-_FRAGMENT_MAX_DAILY_LIMIT = 500        # 与宿主 agent 日配额同量级，再高就是自己刷自己
+_FRAGMENT_MIN_DAILY_LIMIT = 0  # 0 = 这条今天一次都不发（等价关闭）
+_FRAGMENT_MAX_DAILY_LIMIT = 500  # 与宿主 agent 日配额同量级，再高就是自己刷自己
 _FRAGMENT_DEFAULT_CONFIDENCE = 0.6
 # 碎片捕获的最小间隔（秒，[fragments].min_interval_sec）：与语气感知共用"每轮至多分析一次"的节奏
 _FRAGMENT_DEFAULT_MIN_INTERVAL_SEC = 60
@@ -592,6 +617,8 @@ def _channel_route(slot: str, resolved: JsonObject | None) -> str:
     """
     transport = str((resolved or {}).get("transport") or _CHANNEL_TRANSPORT_DIRECT)
     return f"{transport}|{slot}"
+
+
 # 单次补全的超时（秒）与输出上限（token）。超时两条传输共用同一组数字：这个旋钮必须
 # 对用户说得出一个值，不能"看这次走哪条路"——README 与面板都按它承诺"点一下要让后台
 # 等多久"。输出上限目前只有宿主管线用得上（插件那份 urllib 请求体没带
@@ -625,11 +652,18 @@ _ASSIST_KEY_FIELDS = {
 # 直连路径的情绪标签归一化：宿主端点返回英文五分类，直连时小模型可能回中文标签，
 # 统一映射到下游判定用的英文 label（_TONE_WARM_LABELS/_TONE_COLD_LABELS 消费）
 _TONE_EMOTION_ALIASES = {
-    "happy": "happy", "开心": "happy", "高兴": "happy",
-    "sad": "sad", "难过": "sad", "委屈": "sad",
-    "angry": "angry", "生气": "angry",
-    "surprised": "surprised", "惊讶": "surprised",
-    "neutral": "neutral", "平静": "neutral",
+    "happy": "happy",
+    "开心": "happy",
+    "高兴": "happy",
+    "sad": "sad",
+    "难过": "sad",
+    "委屈": "sad",
+    "angry": "angry",
+    "生气": "angry",
+    "surprised": "surprised",
+    "惊讶": "surprised",
+    "neutral": "neutral",
+    "平静": "neutral",
 }
 # 直连路径的五分类 prompt：宿主 OUTWARD_EMOTION_ANALYSIS_PROMPT 的精简中文版，
 # 直接内嵌（不读宿主文件），输入是"用户消息 + 猫娘回复"拼接的一轮互动
@@ -665,6 +699,28 @@ def _cfg_section(raw: Any) -> JsonObject:
     return dict(raw) if isinstance(raw, dict) else {}
 
 
+def _cfg_int(section: Any, key: str, default: int, *, lo: int | None = None, hi: int | None = None) -> int:
+    """读整数配置：缺失/None/空串/非数值/bool 回落 default，越界钳到 [lo, hi]。
+
+    toml 手改或旧 Store 覆盖层可能带进 "3次" 这类坏值；直接 int() 会让每趟
+    tick 抛 ValueError，注入与语气感知整条链路静默停摆。面板写入口另有校验，
+    这里只兜读取侧。
+    """
+    raw = section.get(key) if isinstance(section, dict) else None
+    if raw is None or raw == "" or isinstance(raw, bool):
+        value = default
+    else:
+        try:
+            value = int(raw)
+        except (TypeError, ValueError, OverflowError):
+            value = default
+    if lo is not None:
+        value = max(lo, value)
+    if hi is not None:
+        value = min(hi, value)
+    return value
+
+
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -690,9 +746,15 @@ class _MoodState:
     """
 
     __slots__ = (
-        "action", "reason", "started_at", "expires_at",
-        "valence", "arousal", "affect_updated_at",
-        "origin", "history",
+        "action",
+        "reason",
+        "started_at",
+        "expires_at",
+        "valence",
+        "arousal",
+        "affect_updated_at",
+        "origin",
+        "history",
     )
 
     def __init__(self) -> None:
@@ -737,10 +799,11 @@ class _MoodState:
                 for item in history[-40:]:
                     if not isinstance(item, dict):
                         continue
-                    if isinstance(item.get("ts"), bool):
+                    raw_ts = item.get("ts")
+                    if raw_ts is None or isinstance(raw_ts, bool):
                         continue
                     try:
-                        ts = float(item.get("ts"))
+                        ts = float(raw_ts)
                     except (TypeError, ValueError, OverflowError):
                         continue
                     if not math.isfinite(ts) or ts <= 0:
@@ -753,14 +816,18 @@ class _MoodState:
                     if not isinstance(action, str) or action not in _MOOD_ACTION_LABEL_KEYS:
                         continue
                     previous = item.get("previous_action")
-                    state.history.append({
-                        "ts": ts,
-                        "kind": item["kind"],
-                        "origin": item["origin"],
-                        "action": action,
-                        "previous_action": previous if isinstance(previous, str) and previous in _MOOD_ACTION_LABEL_KEYS else "",
-                        "reason": str(item.get("reason") or "")[:200],
-                    })
+                    state.history.append(
+                        {
+                            "ts": ts,
+                            "kind": item["kind"],
+                            "origin": item["origin"],
+                            "action": action,
+                            "previous_action": previous
+                            if isinstance(previous, str) and previous in _MOOD_ACTION_LABEL_KEYS
+                            else "",
+                            "reason": str(item.get("reason") or "")[:200],
+                        }
+                    )
             # 旧版的 proactive_prev（主动搭话暂停水位）有意忽略：
             # 0.5.0 起水位移到全局 proactive_state，由迁移逻辑单独搬运
         return state
@@ -778,17 +845,17 @@ class _MoodState:
             "history": [dict(item) for item in self.history],
         }
 
-    def record_event(
-        self, kind: str, action: str, origin: str, reason: str = "", *, previous_action: str = ""
-    ) -> None:
-        self.history.append({
-            "ts": time.time(),
-            "kind": kind,
-            "origin": origin,
-            "action": action,
-            "previous_action": previous_action,
-            "reason": reason[:200],
-        })
+    def record_event(self, kind: str, action: str, origin: str, reason: str = "", *, previous_action: str = "") -> None:
+        self.history.append(
+            {
+                "ts": time.time(),
+                "kind": kind,
+                "origin": origin,
+                "action": action,
+                "previous_action": previous_action,
+                "reason": reason[:200],
+            }
+        )
         self.history = self.history[-40:]
 
     def clear_action(self) -> None:

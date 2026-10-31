@@ -268,7 +268,7 @@ def test_mood_action_guide_covers_states_and_release_without_diary_tools():
     assert actions["rising_tide"]["label"]["$i18n"] == "mood.rising_tide"
     assert "心情好了" in actions["rising_tide"]["description"]["default"]
     assert "不是新的持续状态" in actions["rising_tide"]["description"]["default"]
-    assert "默认 120 分钟的兜底解除" in actions["seek_harbor"]["description"]["default"]
+    assert "默认 20 分钟的兜底解除" in actions["seek_harbor"]["description"]["default"]
     assert build_intro_payload(CAPABILITY_SPECS["whisper"], _fake_ref)["actions"] == []
 
 
