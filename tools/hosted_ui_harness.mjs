@@ -18,6 +18,8 @@ import { heatmapChecks } from "./hosted_ui_heatmap_checks.mjs"
 import { diaryChecks } from "./hosted_ui_diary_checks.mjs"
 import { moodChecks } from "./hosted_ui_mood_checks.mjs"
 import { backupChecks } from "./hosted_ui_backup_checks.mjs"
+import { tooltipChecks } from "./hosted_ui_tooltip_checks.mjs"
+import { moodStateChecks } from "./hosted_ui_mood_state_checks.mjs"
 
 const TOOL_ROOT = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_PLUGIN = resolve(TOOL_ROOT, "..")
@@ -1186,7 +1188,7 @@ async function calendarDiagnostics(browser, origin, output) {
     try {
       const diagnostics = await frame.evaluate(() => {
         const content = document.querySelector(".tm-content")
-        const tips = [...content.querySelectorAll(".neko-tooltip-content")]
+        const tips = [...document.querySelectorAll("body > .tm-tip")]
         const measure = () => ({ clientWidth: content.clientWidth, scrollWidth: content.scrollWidth, overflow: content.scrollWidth - content.clientWidth })
         const before = measure()
         const tooltipBounds = tips.map(element => {
@@ -1203,12 +1205,11 @@ async function calendarDiagnostics(browser, origin, output) {
         })
         return { before, withoutTooltip, tooltipBounds }
       })
-      await frame.locator(".tm-card-header .neko-tooltip").hover()
+      await frame.locator(".tm-card-header .tm-tooltip-trigger").hover()
       await frame.waitForTimeout(180)
-      const hoveredTooltip = await frame.locator(".tm-card-header .neko-tooltip-content").evaluate(element => {
+      const hoveredTooltip = await frame.locator("body > .tm-tip").evaluate(element => {
         const rect = element.getBoundingClientRect()
-        const contentRect = document.querySelector(".tm-content").getBoundingClientRect()
-        return { left: rect.left, right: rect.right, visibleRight: contentRect.right, clippedRight: Math.max(0, rect.right - contentRect.right), opacity: getComputedStyle(element).opacity }
+        return { left: rect.left, right: rect.right, visibleRight: innerWidth, clippedRight: Math.max(0, rect.right - innerWidth), opacity: getComputedStyle(element).opacity }
       })
       const path = join(output, `${width}-${locale}-calendar-tooltip-hover.png`)
       await page.screenshot({ path, animations: "disabled" })
@@ -1460,7 +1461,17 @@ async function main() {
     let browser
     try {
       browser = await chromium.launch(launch)
-      if (!process.argv.includes("--interactions-only") && !process.argv.includes("--diagnostics-only") && !process.argv.includes("--compact-only") && !process.argv.includes("--theme-only") && !process.argv.includes("--copy-only") && !process.argv.includes("--demo-only") && !process.argv.includes("--intro-only") && !process.argv.includes("--appearance-only") && !process.argv.includes("--video-only") && !process.argv.includes("--direct-only") && !process.argv.includes("--heatmap-only") && !process.argv.includes("--diary-only") && !process.argv.includes("--emotion-only") && !process.argv.includes("--mood-only") && !process.argv.includes("--settings-only") && !process.argv.includes("--backup-only")) report.screenshots = await screenshotMatrix(browser, sources, origin, output)
+      if (!process.argv.includes("--interactions-only") && !process.argv.includes("--diagnostics-only") && !process.argv.includes("--compact-only") && !process.argv.includes("--theme-only") && !process.argv.includes("--copy-only") && !process.argv.includes("--demo-only") && !process.argv.includes("--intro-only") && !process.argv.includes("--appearance-only") && !process.argv.includes("--video-only") && !process.argv.includes("--direct-only") && !process.argv.includes("--heatmap-only") && !process.argv.includes("--diary-only") && !process.argv.includes("--emotion-only") && !process.argv.includes("--mood-only") && !process.argv.includes("--settings-only") && !process.argv.includes("--backup-only") && !process.argv.includes("--tooltip-only") && !process.argv.includes("--mood-states-only")) report.screenshots = await screenshotMatrix(browser, sources, origin, output)
+      if (process.argv.includes("--mood-states") || process.argv.includes("--mood-states-only")) {
+        const moodStates = await moodStateChecks(browser, sources, origin, output, { loadPage, inspectLayout })
+        report.screenshots.push(...moodStates.screenshots)
+        report.interactions.push(...moodStates.checks)
+      }
+      if (process.argv.includes("--tooltip") || process.argv.includes("--tooltip-only")) {
+        const tooltip = await tooltipChecks(browser, sources, origin, output, { loadPage, inspectLayout })
+        report.screenshots.push(...tooltip.screenshots)
+        report.interactions.push(...tooltip.checks)
+      }
       if (process.argv.includes("--backup") || process.argv.includes("--backup-only")) {
         const backup = await backupChecks(browser, sources, origin, output, { loadPage, inspectLayout })
         report.screenshots.push(...backup.screenshots)

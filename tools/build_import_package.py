@@ -93,6 +93,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--python", type=Path, help="Existing build interpreter; defaults to the host virtual environment.")
     parser.add_argument("--check-only", action="store_true")
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -102,7 +103,7 @@ def main() -> int:
     if args.worker:
         build_and_verify(plugin, output, check_only=args.check_only)
         return 0
-    python = host / ".venv" / "Scripts" / "python.exe"
+    python = args.python.resolve() if args.python else host / ".venv" / "Scripts" / "python.exe"
     if not python.is_file():
         raise FileNotFoundError(python)
     with tempfile.TemporaryDirectory(prefix="neko-companion-build-") as temporary:

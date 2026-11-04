@@ -1,9 +1,10 @@
 // 总览页 · 陪伴仪表盘：她的现在（月相环 + 当前心情 + 情绪状态）
 // + 近况与相处（三本日记速览 + 相处信号）。顶栏瘦身后所有"看状态"的需求都在这页。
 // hosted-tsx 约束：唯一 export 在任何 JSX 闭合标签之前；辅助组件放文件尾部靠函数声明提升
-import { Card, StatusBadge, Tooltip } from "@neko/plugin-ui"
+import { Card, StatusBadge } from "@neko/plugin-ui"
 import type { Mood, Onboarding, ReviewBrief, Settings, Status, TFunc } from "./types"
 import { arousalColor, arousalScore, moodDotColor, moodWordOf, stripEmoji, valenceBarColor, valenceScore, phaseColorOf } from "./utils"
+import { AdaptiveTip } from "./tmswitch"
 import { RingStatus } from "./ring"
 import { GuideCard } from "./guidecard"
 
@@ -133,7 +134,7 @@ function MoodChip(props: { t: TFunc; mood: Mood }) {
   return (
     <div className="tm-ov-mood-chip">
       {mood.reason ? (
-        <Tooltip content={mood.reason} placement="bottom">{badge}</Tooltip>
+        <AdaptiveTip content={mood.reason} place="bottom" inline>{badge}</AdaptiveTip>
       ) : badge}
       {remaining ? <span className="tm-status-sub">{remaining}</span> : null}
     </div>

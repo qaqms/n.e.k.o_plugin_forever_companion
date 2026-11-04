@@ -108,20 +108,6 @@ export const PANEL_STYLES = `
 /* 宿主 kit 对禁用按钮用了 cursor: wait（Windows 上显示转圈忙碌光标），这里纠正为不可点击 */
 .neko-page .neko-button:disabled { cursor: not-allowed; }
 
-/* Tooltips keep natural width; header actions anchor to the card's right edge. */
-.neko-page .neko-tooltip-content {
-  width: max-content;
-  max-width: min(280px, 80vw);
-  white-space: normal;
-}
-.tm-card-header .neko-tooltip[data-placement="bottom"] .neko-tooltip-content {
-  left: auto; right: 0; max-width: min(280px, calc(100vw - 150px));
-  overflow-wrap: anywhere; transform: translateY(-4px);
-}
-.tm-card-header .neko-tooltip[data-placement="bottom"]:is(:hover, :focus, :focus-within) .neko-tooltip-content {
-  transform: translateY(0);
-}
-
 .tm-statusbar {
   display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
   padding: 14px 22px;
@@ -983,7 +969,7 @@ export const PANEL_STYLES = `
 }
 
 /* ---- 自适应悬停提示（AdaptiveTip）：tip 单例挂在 document.body 的 fixed 元素 ----
-   坐标由悬停瞬间的视口量测写入 style；上弹时底边对齐 top、下翻时顶边对 top。
+   坐标按触发元与提示框的实际宽高计算，避让四边；放不下的长说明在框内滚动。
    必须挂 body：.tm-heat-scroll 的 container-type 与 .neko-card 的 backdrop-filter
    都会劫持 fixed 后代的包含块（视口坐标被按容器内坐标解释，实测偏移 ~180px），
    卡片 overflow:hidden 还会裁剪——body 无 transform/filter 祖先，fixed 即真视口系 */
@@ -992,15 +978,17 @@ export const PANEL_STYLES = `
    星期标签列（11.5px 节距）与之渐行错位；压掉 strut 后包裹层高度即内容本高。
    hero 统计卡/徽章卡的包裹层在 flex/grid 上下文里不含行内内容，不受影响 */
 .tm-tip-wrap { display: block; line-height: 0; }
+.tm-tooltip-trigger { display: inline-flex; min-width: 0; width: fit-content; }
 .tm-tip {
-  position: fixed; z-index: 10000; transform: translate(-50%, -100%);
-  max-width: 240px; padding: 5px 9px; border-radius: 8px;
+  position: fixed; z-index: 9980; box-sizing: border-box;
+  width: max-content; max-width: 240px; padding: 5px 9px; border-radius: 8px;
   background: rgba(28, 28, 32, 0.96); color: #f0f0f2;
   font-size: 11px; line-height: 1.45; text-align: center;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.24); text-shadow: none;
-  pointer-events: none; white-space: normal;
+  white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto;
+  overscroll-behavior: contain; letter-spacing: 0;
 }
-.tm-tip-below { transform: translate(-50%, 0); }
+.tm-tip-detail { max-width: 280px; padding: 7px 9px; font-size: 12px; text-align: left; }
 /* hero 数字区：相伴天数大数字 + 纪念日进度环（氛围卡内上半区）。
    与下方统计卡的间距 12→18px：统计卡与 hero 同为玻璃质感，间距小了糊成一片 */
 .tm-hero {

@@ -1,5 +1,77 @@
 # Isolated Hosted UI QA
 
+## 1.4.6 Version And Import Package (2026-11-04)
+
+The manifest, Python project, lockfile and README current version are 1.4.6.
+The full Python suite passed 1,150 tests with 39 conditional skips. Ruff,
+the offline lockfile check, hosted TSX typecheck and the 33-module link check
+passed. The UI bundle hash is unchanged from the all-mood-state and shared
+tooltip reports below, preserving their 272 and 143 passing interaction checks.
+The user also confirmed the imported tooltip test package displays correctly.
+
+Package: `../dist/forever_companion_1.4.6.neko-plugin` (734,293 bytes).
+The isolated official build passed strict validation with no issues, ZIP CRC,
+payload hash verification and byte comparison of all 82 packaged source files.
+SHA-256:
+`fd30b3202794573a6f4bfe240c31f00b562c888f76c5be437bb0683123bdcd37`.
+Typecheck report: `../dist/qa-release-146-typecheck/report.json`.
+Host code and the running installation were not changed. No tag or GitHub
+release was created as part of this local version update.
+
+## All Mood States And Import Package (2026-11-04)
+
+`node tools/hosted_ui_harness.mjs --mood-states-only --typecheck
+--out ../dist/qa-mood-states-import-test-final` passed 272 interaction checks
+and 16 screenshots, with zero check, render or layout failures. Coverage includes
+all eight sustained states (ebb_tide, sea_fog, shallow_reef, storm_surge,
+seek_harbor, ripple, warm_current and spring_tide), seven continuous mood words,
+all eight locales, 1280px light and 320px dark windows. Checks verify translated
+labels, badge colors, header and overview tooltip bounds and overlay hit tests,
+literal long reasons, expiry visibility, emotion-page details, missing reasons,
+inactive states and disabled systems. Navigation first moves away from the
+tooltip and verifies dismissal so intentionally hoverable long content does
+not cover the tab being clicked. Chinese desktop and narrow screenshots were
+visually inspected. The 99 focused mood/affect/multi-character Python tests
+also passed.
+
+Package: `../dist/forever_companion_1.4.5_mood_tooltip_test.neko-plugin`
+(734,128 bytes). Version remains 1.4.5 for local testing. The isolated official
+builder passed strict validation, ZIP CRC, payload hash verification and byte
+comparison of all 82 packaged source files. SHA-256:
+`55bf9eb8be29efa70fc859055d08778e78a39a28a4488f8ce68711a15721a874`.
+The build helper supports an explicit interpreter when the current host checkout
+has no virtual environment; packaging code still comes from the selected host.
+Host code remains unchanged. Import into the installed host remains a user test.
+
+## Shared Tooltip Placement (2026-11-04)
+
+The top status bar and body both used `z-index: 1`. Body cards painted over
+the status tooltip, while its centered position also overflowed the right
+viewport edge. Overview reasons were clipped by their card. Moment tooltips
+could overflow short windows or shrink into narrow columns near the right edge.
+
+All custom tooltips now share the body portal in `ui/tmswitch.tsx`, alongside
+the existing custom switch, staying within the host's 32 dependency file limit.
+This supersedes the initial status-bar-only CSS workaround. The tooltip is
+measured at its natural constrained width before positioning, avoids all four
+viewport edges, flips when the preferred side has insufficient room, and
+scrolls internally for long explanations. It supports hover and keyboard focus,
+updates changed text, and closes on external scrolling, resize, window blur,
+hidden documents, Escape, component removal and modal opening. Its layer is
+below host modal backdrops. Tooltip text remains literal text.
+
+`node tools/hosted_ui_harness.mjs --tooltip-only --heatmap --typecheck
+--out ../dist/qa-all-tooltips-final` passed 143 interaction checks and 46
+screenshots, with zero render/layout failures. Coverage includes all eight
+locales, 1280/390/320 widths, 900/400/360/300 heights, light/dark, wallpapers,
+glass, overlay hit testing, edge cells, card clipping, long-text scrolling,
+keyboard dismissal, content refresh, unmount cleanup and confirmation layers.
+The 33-module link check and 133 focused Python/frontend regression tests passed.
+
+Report: `../dist/qa-all-tooltips-final/report.json`. This uses the current host
+UI kit in an isolated iframe. No host files were changed; installed-host
+verification remains a user test.
+
 ## 1.4.0 Card Surface Release Acceptance
 
 The final settings surface reuses the plugin card border, radius, shadow and

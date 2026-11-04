@@ -2,9 +2,10 @@
 // + 相处热力图（GitHub 式日历年视图：格子从首条互动日长起，非当年可 ‹ › 翻年份）
 // + 我们的一月（月报，可翻历史月份）+ 相处徽章（收藏墙）+ 生日设置卡（同页最底部）。
 // hosted-tsx 约束：唯一 export 排在任何 JSX 闭合标签之前；辅助组件放文件尾部靠函数声明提升
-import { Card, EmptyState, StatusBadge, useRef } from "@neko/plugin-ui"
+import { Card, EmptyState, StatusBadge } from "@neko/plugin-ui"
 import type { BirthdayView, HeatDay, Heatmap, MonthReport, StatsBadge, StatsSummary, TFunc } from "./types"
 import { heatLevel, heatThresholds, monthLabel, moodDotColor, toneLabelKey } from "./utils"
+import { AdaptiveTip } from "./tmswitch"
 import { BirthdaySettingsCard } from "./birthdaycard"
 
 export function MomentPane(props: {
@@ -291,53 +292,6 @@ function BadgeGlyph(props: { id: string }) {
     )
   }
   return null
-}
-
-// 自适应悬停提示（AdaptiveTip，body 门户单例）：tip 是挂在 document.body 的
-// fixed 元素（在面板渲染器管辖之外的原生 DOM），悬停瞬间量取触发元视口坐标直接定位。
-// 为什么必须挂 body 而非渲染在组件树里：.tm-heat-scroll 的 container-type 与
-// .neko-card 的 backdrop-filter 都会劫持 fixed 后代的包含块——写入的视口坐标被
-// 浏览器按容器内坐标解释（实测偏移 ~180px），再叠加卡片 overflow:hidden 裁剪，
-// 就出现"时隐时现/飞到奇怪位置"。body 无任何 transform/filter 祖先，fixed 即真
-// 视口坐标系且不被任何后代容器裁剪。上方空间不足自动向下翻、左右缘自动收拢；
-// place 仅作首选方向。面板内任何滚动立即隐藏（fixed 不随滚动容器移动）。
-let __tipEl: any = null
-function __bodyTip(): any {
-  if (__tipEl && __tipEl.isConnected) return __tipEl
-  __tipEl = document.createElement("span")
-  __tipEl.className = "tm-tip"
-  __tipEl.style.display = "none"
-  document.body.appendChild(__tipEl)
-  return __tipEl
-}
-function hideBodyTip() {
-  if (!__tipEl) return
-  __tipEl.style.display = "none"
-  window.removeEventListener("scroll", hideBodyTip, true)
-}
-function AdaptiveTip(props: { key?: string; content: string; place?: string; children?: any }) {
-  const ref = useRef(null)
-  const show = () => {
-    const el = ref.current as HTMLElement | null
-    if (!el || !props.content) return
-    const r = el.getBoundingClientRect()
-    const vw = window.innerWidth || 800
-    const below = (props.place || "top") === "bottom" || r.top < 72
-    const x = Math.max(8, Math.min(vw - 8, r.left + r.width / 2))
-    const y = below ? r.bottom + 7 : r.top - 7
-    const tip = __bodyTip()
-    tip.textContent = props.content
-    tip.className = `tm-tip${below ? " tm-tip-below" : ""}`
-    tip.style.left = `${x}px`
-    tip.style.top = `${y}px`
-    tip.style.display = ""
-    window.addEventListener("scroll", hideBodyTip, true)
-  }
-  return (
-    <span ref={ref as any} className="tm-tip-wrap" onMouseEnter={show} onMouseLeave={hideBodyTip}>
-      {props.children}
-    </span>
-  )
 }
 
 // 徽章 id → 展示文案（天数类带数字）

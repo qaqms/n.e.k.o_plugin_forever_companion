@@ -1,8 +1,8 @@
 // 顶部状态条（精简版）：她是谁 · 今天状态一句话 · 心情胶囊 · 总开关。
 // 详细状态（月相环/天数/情绪详情）都在「总览」页——点击状态条任意空白跳转总览。
 // hosted-tsx 约束：唯一 export 在任何 JSX 闭合标签之前；辅助组件放文件尾部靠函数声明提升
-import { StatusBadge, Tooltip } from "@neko/plugin-ui"
-import { TmSwitch } from "./tmswitch"
+import { StatusBadge } from "@neko/plugin-ui"
+import { AdaptiveTip, TmSwitch } from "./tmswitch"
 import type { Mood, Status, TFunc } from "./types"
 import { moodBadgeTone, moodDotColor, moodWordOf, stripEmoji, valenceScore, arousalScore, phaseColorOf } from "./utils"
 
@@ -44,9 +44,9 @@ export function StatusBar(props: StatusBarProps) {
         ) : null}
         {enabled && mood.system_enabled !== false && mood.active ? (
           mood.reason ? (
-            <Tooltip content={mood.reason} placement="bottom">
+            <AdaptiveTip content={mood.reason} place="bottom" inline>
               <StatusBadge tone={moodBadgeTone(mood.action)} label={stripEmoji(mood.action_label) || mood.action || ""} />
-            </Tooltip>
+            </AdaptiveTip>
           ) : (
             <StatusBadge tone={moodBadgeTone(mood.action)} label={stripEmoji(mood.action_label) || mood.action || ""} />
           )

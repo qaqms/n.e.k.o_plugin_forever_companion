@@ -1,7 +1,8 @@
 // 潮汐日历页：月视图 + 阶段图例 + 选日模式（设置潮汐首日 / 快进一天）
 // 组件内部持有月份/选日交互态；父级用 key={lanlan} 在切换角色时整体重置
-import { Button, EmptyState, Tooltip, useEffect, useState } from "@neko/plugin-ui"
+import { Button, EmptyState, useEffect, useState } from "@neko/plugin-ui"
 import type { Calendar, TFunc } from "./types"
+import { AdaptiveTip } from "./tmswitch"
 
 export function CalendarPane(props: {
   t: TFunc
@@ -53,11 +54,12 @@ export function CalendarPane(props: {
       <div className="tm-card">
         <div className="tm-card-header">
           <h2 className="tm-card-title">{t("panel.calendar.title", { defaultValue: "潮汐日历" })}</h2>
-          <Tooltip
+          <AdaptiveTip
             content={selectMode
               ? t("panel.calendar.exitPick", { defaultValue: "退出日期选择" })
               : t("panel.calendar.pickTip", { defaultValue: "选择日期：可设置潮汐首日或快进" })}
-            placement="bottom"
+            place="bottom"
+            inline
           >
             <button
               type="button"
@@ -69,7 +71,7 @@ export function CalendarPane(props: {
             >
               <span className="tm-ico tm-ico-target" />
             </button>
-          </Tooltip>
+          </AdaptiveTip>
         </div>
         <div className="tm-card-body">
           {calendar?.error || !m || !m.cells ? (
