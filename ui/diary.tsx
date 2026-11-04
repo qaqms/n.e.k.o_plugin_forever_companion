@@ -62,6 +62,7 @@ export function DiaryPane(props: {
   const [diaryHasMore, setDiaryHasMore] = useState(false)
   const [diaryLoading, setDiaryLoading] = useState(false)
   const timeline = fullDiary || diary
+  const canLoadMoreDiary = fullDiary === null ? diary.length < diaryTotal : diaryHasMore
   // ---- 个人日记：整本（目录数据源）+ 当前翻开页（null = 目录视图）----
   const [pages, setPages] = useState<JournalPage[]>([])
   const [bookLoaded, setBookLoaded] = useState(false)
@@ -293,7 +294,7 @@ export function DiaryPane(props: {
                       </span>
                     </div>
                     <TimelineView t={t} items={timeline} onDelete={onDeleteFragment} />
-                    {fullDiary === null || diaryHasMore ? (
+                    {canLoadMoreDiary ? (
                       <div className="tm-diary-more">
                         <Button onClick={() => { loadMore() }} disabled={diaryLoading}>
                           {diaryLoading
@@ -301,9 +302,9 @@ export function DiaryPane(props: {
                             : t("panel.diary.loadMore", { defaultValue: "加载更多" })}
                         </Button>
                       </div>
-                    ) : (
+                    ) : fullDiary !== null ? (
                       <div className="tm-diary-end">{t("panel.diary.endReached", { defaultValue: "已显示全部记录" })}</div>
-                    )}
+                    ) : null}
                   </div>
                 ) : (
                   <EmptyState

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { join } from "node:path"
 
-export async function diaryChecks(browser, sources, origin, output, { loadPage, inspectLayout }) {
+export async function diaryChecks(browser, sources, origin, output, { loadPage, inspectLayout, paginationOnly = false }) {
   const checks = []
   const screenshots = []
   const check = async (name, operation) => {
@@ -14,6 +14,70 @@ export async function diaryChecks(browser, sources, origin, output, { loadPage, 
       console.log(`FAIL ${name}: ${error.message}`)
     }
   }
+  for (const width of [1280, 390]) {
+    for (const total of [0, 1, 12, 13, 62, 63]) {
+      const loaded = await loadPage(browser, origin, { locale: "zh-CN", tab: "diary", wallpaper: "none" }, width, 900, "light")
+      const { page, frame, context, errors } = loaded
+      try {
+        await check(`timeline-pagination-${total}-${width}`, async () => {
+          const payload = await page.evaluate(total => {
+            const fixture = window.qaFixture
+            fixture.diary = Array.from({ length: total }, (_, index) => ({
+              ts: new Date(Date.UTC(2026, 8, 30, 12, 0, -index)).toISOString(),
+              source: index % 2 ? "self" : "auto", kind: "important",
+              entry: `timeline-${index}`, quote: `timeline-${index}`,
+            }))
+            fixture.context.state.diary_recent = fixture.diary.slice(0, 12)
+            fixture.context.state.diary_total = total
+            fixture.context.state.fragment_total = fixture.diary.filter(item => item.source === "auto").length
+            return fixture.context
+          }, total)
+          await frame.evaluate(next => window.__NekoRefreshHostedPayload(next), payload)
+          await frame.waitForFunction(count => document.querySelectorAll(".tm-tl-row").length === count, Math.min(total, 12))
+          const button = frame.locator(".tm-diary-more button")
+          const calls = () => page.evaluate(() => window.qaMessages
+            .filter(item => item.method === "call" && item.payload.actionId === "get_diary")
+            .map(item => item.payload.args))
+          assert.deepEqual(await calls(), [])
+          assert.equal(await button.count(), total > 12 ? 1 : 0)
+          assert.equal(await frame.locator(".tm-diary-end").count(), 0)
+          if (!total) {
+            assert.equal(await frame.locator(".tm-diary-end").count(), 0)
+            assert((await frame.locator(".tm-content").innerText()).includes(sources.messages["zh-CN"]["panel.diary.emptyTitle"]))
+          }
+          let visible = Math.min(total, 12)
+          const expectedCalls = []
+          while (visible < total) {
+            expectedCalls.push({ limit: 50, offset: visible })
+            await button.click()
+            visible = Math.min(total, visible + 50)
+            await frame.waitForFunction(count => document.querySelectorAll(".tm-tl-row").length === count, visible)
+            assert.deepEqual(await calls(), expectedCalls)
+            assert.equal(await button.count(), visible < total ? 1 : 0)
+            assert.equal(await frame.locator(".tm-diary-end").count(), visible < total ? 0 : 1)
+          }
+          if (total) {
+            if (total > 12) {
+              assert.equal(await frame.locator(".tm-diary-end").innerText(), sources.messages["zh-CN"]["panel.diary.endReached"])
+            } else {
+              assert.equal(await frame.locator(".tm-diary-end").count(), 0)
+            }
+            const displayed = await frame.locator(".tm-tl-entry,.tm-tl-quote").allTextContents()
+            assert.deepEqual(displayed, Array.from({ length: total }, (_, index) => index % 2 ? `timeline-${index}` : `「timeline-${index}」`))
+          }
+          const path = join(output, `timeline-pagination-${total}-${width}.png`)
+          await page.screenshot({ path, animations: "disabled" })
+          const layout = await inspectLayout(frame)
+          assert.equal(layout.documentOverflow, 0)
+          assert.equal(layout.contentOverflow, 0)
+          assert.deepEqual(layout.issues, [])
+          assert.deepEqual(errors, [])
+          screenshots.push({ id: `timeline-pagination-${total}-${width}`, path, layout, errors: [...errors], diagnostics: [] })
+        })
+      } finally { await context.close() }
+    }
+  }
+  if (paginationOnly) return { checks, screenshots }
   for (const locale of Object.keys(sources.messages)) {
     for (const width of [1280, 390]) {
       const loaded = await loadPage(browser, origin, { locale, tab: "diary", wallpaper: "none", diaryCase: "headings" }, width, 900, "light")

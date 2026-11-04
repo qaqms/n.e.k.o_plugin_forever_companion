@@ -1,5 +1,53 @@
 # Isolated Hosted UI QA
 
+## 1.4.7 Version And Package (2026-11-04)
+
+The manifest, Python project, lockfile and README current version are 1.4.7.
+The full Python suite passed 1,156 tests with 39 conditional skips. The pinned
+CI Ruff check, offline lockfile check and 33-module hosted link check passed.
+Runtime UI source is unchanged from the final pagination footer checks below.
+
+Package: `../dist/forever_companion_1.4.7.neko-plugin` (734,396 bytes).
+Official strict validation, ZIP CRC, payload hash verification and byte
+comparison of all 82 packaged source files passed. SHA-256:
+`50ed5713f834cad23604f34b433bf66222f7c76b6c5805c69a4052913ccb135a`.
+Host code and user storage were not changed. No release tag was created.
+
+## Timeline Pagination Availability (2026-11-04)
+
+The initial timeline now compares the dashboard's loaded count with
+`diary_total` before offering more records. A complete single record or full
+12-record preview has no pagination footer. After paging, the button follows
+the endpoint's `has_more` response; the end message appears only after the user
+loads the remaining records.
+
+The final footer adjustment passed `--diary-only --diary-pagination-only
+--typecheck --out ../dist/qa-diary-pagination-quiet`: 12 interaction checks and
+12 screenshots with zero check, render or layout failures. Initial complete
+lists have no end message; manually paged lists show it only at the end.
+The desktop single-record screenshot was visually inspected.
+The updated import package is
+`../dist/forever_companion_1.4.6_diary_pagination_quiet_test.neko-plugin`
+(734,319 bytes). Strict validation, ZIP CRC, payload hash verification and
+byte comparison of all 82 packaged source files passed. SHA-256:
+`358055b8d1a48d2199dfb331fb5ecab9750b6d8ec919a63d8e9291d65c45342c`.
+The user confirmed the preceding pagination test package works in the host;
+this footer adjustment remains an import test.
+
+Before this footer adjustment, `node tools/hosted_ui_harness.mjs --diary-only --typecheck
+--out ../dist/qa-diary-pagination-fix` passed 145 interaction checks and 116
+screenshots with zero check, render or layout failures. The new pagination
+cases cover 0, 1, 12, 13, 62 and 63 mixed-source records at 1280px and 390px,
+including request offsets, complete ordered content and the final button state.
+The isolated fixture now respects the real endpoint's 50-record page limit.
+The diary/fragment/link Python checks passed 94 tests; Ruff and
+`git diff --check` passed. Single-record desktop and narrow screenshots were
+visually inspected.
+
+Report: `../dist/qa-diary-pagination-fix/report.json`. These are isolated
+checks; installed-host import remains a user test. Host code and user storage
+were not changed. The version remains 1.4.6; no publication was performed.
+
 ## 1.4.6 Version And Import Package (2026-11-04)
 
 The manifest, Python project, lockfile and README current version are 1.4.6.

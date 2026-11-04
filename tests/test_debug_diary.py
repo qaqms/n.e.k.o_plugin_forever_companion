@@ -75,6 +75,37 @@ def test_existing_demo_prefix_hidden_in_dashboard_and_pagination_without_rewriti
     assert plugin.store.data["pre_debug@diary@Alice"] == before["pre_debug@diary@Alice"]
 
 
+@pytest.mark.parametrize("total", [0, 1, 12, 13, 62, 63])
+def test_dashboard_and_diary_pagination_boundaries(plugin_factory_full, total):
+    records = [
+        {
+            "ts": datetime(2026, 10, 18, 9, index // 60, index % 60, tzinfo=timezone.utc).isoformat(),
+            "source": "self", "entry": f"Note {index}",
+        }
+        for index in range(total)
+    ]
+    plugin = plugin_factory_full(current_lanlan="Alice", store_initial={
+        "lanlan_index": ["Alice"], "diary@Alice": copy.deepcopy(records),
+    })
+    dashboard = run(plugin.dashboard())
+    expected = list(reversed(records))
+    items = [{key: item[key] for key in ("ts", "source", "entry")} for item in dashboard["diary_recent"]]
+    assert dashboard["diary_total"] == total
+    assert items == expected[:12]
+    while len(items) < total:
+        offset = len(items)
+        page = run(plugin.get_diary(limit=50, offset=offset)).value
+        assert page["offset"] == offset and page["total"] == total
+        page_items = [{key: item[key] for key in ("ts", "source", "entry")} for item in page["items"]]
+        assert page_items == expected[offset:offset + 50]
+        items += page_items
+        assert page["has_more"] == (len(items) < total)
+    assert items == expected
+    assert run(plugin.get_diary(offset=total)).value["items"] == []
+    assert not run(plugin.get_diary(offset=total)).value["has_more"]
+    assert plugin.store.data["diary@Alice"] == records
+
+
 def test_seed_restore_pagination_and_other_data_unchanged(plugin_factory_full, tm):
     plugin = prepared(plugin_factory_full)
     shard = plugin._get_shard("Alice")

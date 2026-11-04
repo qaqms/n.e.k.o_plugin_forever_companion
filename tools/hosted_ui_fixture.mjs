@@ -496,7 +496,12 @@ export function installFixtureBridge(fixture) {
     }
     if (action === "get_journal") return { pages: args.scope === "archive" ? fixture.journalArchive : fixture.journal }
     if (action === "get_review") return { entries: args.scope === "archive" ? fixture.reviewArchive : fixture.review, progress: fixture.reviewProgress }
-    if (action === "get_diary") return { items: fixture.diary.slice(Number(args.offset || 0)), has_more: false }
+    if (action === "get_diary") {
+      const offset = Math.max(0, Math.min(Number(args.offset || 0), fixture.diary.length))
+      const limit = Math.max(1, Math.min(Number(args.limit ?? 10), 50))
+      const items = fixture.diary.slice(offset, offset + limit)
+      return { items, total: fixture.diary.length, offset, has_more: offset + items.length < fixture.diary.length }
+    }
     if (action === "get_stats") return { ...fixture.stats, heatmap: fixture.heatmaps?.[args.year] || fixture.stats.heatmap, month: fixture.stats.month ? { ...fixture.stats.month, month: args.month || fixture.stats.month.month } : null }
     if (action === "get_capability_intro") return clone(fixture.intros[args.capability_id] || { found: false, id: args.capability_id })
     if (action === "update_settings") {

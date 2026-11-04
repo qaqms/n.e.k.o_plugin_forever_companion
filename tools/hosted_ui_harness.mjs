@@ -1528,7 +1528,9 @@ async function main() {
         report.interactions.push(...heatmap.checks)
       }
       if (process.argv.includes("--diary") || process.argv.includes("--diary-only")) {
-        const diary = await diaryChecks(browser, sources, origin, output, { loadPage, inspectLayout })
+        const diary = await diaryChecks(browser, sources, origin, output, {
+          loadPage, inspectLayout, paginationOnly: process.argv.includes("--diary-pagination-only"),
+        })
         report.screenshots.push(...diary.screenshots)
         report.interactions.push(...diary.checks)
       }
