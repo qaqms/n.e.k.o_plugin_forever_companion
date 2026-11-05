@@ -1,6 +1,6 @@
 // Keep settings sections mounted so switching views preserves drafts and imports.
-import { Field, Select, StatusBadge, Button, useState } from "@neko/plugin-ui"
-import { TmSwitch } from "./tmswitch"
+import { Field, StatusBadge, Button, useState } from "@neko/plugin-ui"
+import { TmSelect, TmSwitch } from "./tmswitch"
 import type { HostedAction, HostedApi } from "@neko/plugin-ui"
 import { BackupPanel } from "./backup"
 import type { FormValues, LanlanItem, TFunc } from "./types"
@@ -77,7 +77,7 @@ export function ManagePane(props: {
           {t("panel.settings.sectionGlobalHint", { defaultValue: "以下设置对所有角色生效" })}
         </div>
         <Field label={t("panel.settings.timezone", { defaultValue: "时区" })} help={t("panel.settings.timezoneHelp", { defaultValue: "周期与日历按此时区计算；默认自动跟随系统" })}>
-          <Select value={form.timezone} options={timezoneOptions} onChange={(v: any) => updateForm({ timezone: String(v) })} />
+          <TmSelect label={t("panel.settings.timezone", { defaultValue: "时区" })} value={form.timezone} options={timezoneOptions} onChange={(v: string) => updateForm({ timezone: v })} />
         </Field>
         {onReopenGuide ? (
           <div className="tm-reopen-guide">

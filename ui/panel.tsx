@@ -2,6 +2,7 @@
 // 顶级页签：日历 / 周期 / 注入 / 情绪（情绪系统+语气感知）/ 手记 / 管理（危险区+角色名单）
 import {
   Alert,
+  h,
   Page,
 } from "@neko/plugin-ui"
 import { useConfirm, useEffect, useLocalState, useRef, useState, useToast } from "@neko/plugin-ui"
@@ -37,6 +38,7 @@ import { OnboardingWizard } from "./onboarding"
 import { DiaryPane } from "./diary"
 import { MomentPane } from "./moment"
 import { AppearanceCard } from "./appearance"
+import { useSelectMenu } from "./tmswitch"
 import {
   BackgroundVideo,
   cancelMediaTask,
@@ -1406,6 +1408,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       <div key="root" className="tm-appearance-root" style={rootStyle}>
       <style key="styles">{PANEL_STYLES}</style>
       <style key="demo-styles">{CAPDEMO_STYLES}</style>
+      <style key="select-styles">{SELECT_STYLES}</style>
 
       {bgDataUrl ? (
         <div key="bg" className="tm-bg" aria-hidden="true">
@@ -1656,7 +1659,125 @@ export default function Panel(props: PluginSurfaceProps<State>) {
         }}
         onFinish={(action: "done" | "skip") => { closeWizard(action) }}
       />
+      <TmSelectLayer scope={state.lanlan} />
       </div>
     </Page>
   )
 }
+
+// Keep the floating layer in the entry to stay within the host's dependency budget.
+function TmSelectLayer(props: { scope?: string }) {
+  const { current, close, choose, highlight } = useSelectMenu()
+  const menu = useRef<HTMLElement | null>(null)
+  useEffect(() => { close() }, [props.scope])
+  useEffect(() => {
+    if (!current) return
+    const anchor = current.owner.getBoundingClientRect()
+    const valid = () => {
+      const rect = current.owner.getBoundingClientRect()
+      if (!current.owner.isConnected || current.owner.disabled || !current.owner.getClientRects().length
+        || Math.abs(rect.top - anchor.top) > 1 || Math.abs(rect.left - anchor.left) > 1
+        || Math.abs(rect.width - anchor.width) > 1 || Math.abs(rect.height - anchor.height) > 1
+        || document.querySelector(".neko-modal-backdrop")) close()
+    }
+    const outside = (event: Event) => {
+      if (!current.owner.contains(event.target as Node) && !menu.current?.contains(event.target as Node)) close()
+    }
+    const scroll = (event: Event) => { if (!menu.current?.contains(event.target as Node)) close() }
+    const visibility = () => { if (document.hidden) close() }
+    const observer = new MutationObserver(valid)
+    observer.observe(document.body, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ["disabled", "hidden", "open", "class", "style"] })
+    window.addEventListener("pointerdown", outside, true)
+    window.addEventListener("scroll", scroll, true)
+    window.addEventListener("resize", close)
+    window.addEventListener("blur", close)
+    document.addEventListener("visibilitychange", visibility)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener("pointerdown", outside, true)
+      window.removeEventListener("scroll", scroll, true)
+      window.removeEventListener("resize", close)
+      window.removeEventListener("blur", close)
+      document.removeEventListener("visibilitychange", visibility)
+    }
+  }, [current?.owner])
+  if (!current) return null
+  return h("div", {
+    id: current.id, role: "listbox", className: "tm-select-menu", "aria-label": current.props.current.label,
+    ref: (element: HTMLElement | null) => {
+      menu.current = element
+      if (!element) return
+      const rect = current.owner.getBoundingClientRect()
+      const margin = 8
+      const gap = 5
+      const vw = document.documentElement.clientWidth
+      const vh = document.documentElement.clientHeight
+      const below = Math.max(0, vh - rect.bottom - gap - margin)
+      const above = Math.max(0, rect.top - gap - margin)
+      element.style.width = `${Math.min(Math.max(rect.width, 200), vw - margin * 2)}px`
+      element.style.maxHeight = "300px"
+      const naturalHeight = element.getBoundingClientRect().height
+      const bottom = below >= naturalHeight || below >= above
+      element.style.maxHeight = `${Math.max(1, Math.min(300, bottom ? below : above))}px`
+      const bounds = element.getBoundingClientRect()
+      element.style.left = `${Math.max(margin, Math.min(rect.left, vw - margin - bounds.width))}px`
+      element.style.top = `${Math.max(margin, bottom ? rect.bottom + gap : rect.top - gap - bounds.height)}px`
+      element.dataset.placement = bottom ? "bottom" : "top"
+      element.style.visibility = "visible"
+      const option = element.children[current.index] as HTMLElement | undefined
+      if (option) {
+        if (option.offsetTop < element.scrollTop) element.scrollTop = option.offsetTop
+        else if (option.offsetTop + option.offsetHeight > element.scrollTop + element.clientHeight) {
+          element.scrollTop = option.offsetTop + option.offsetHeight - element.clientHeight
+        }
+      }
+    },
+    onMouseDown: (event: any) => event.preventDefault(),
+  }, current.props.current.options.map((option, index) => h("div", {
+    key: option.value, id: `${current.id}-option-${index}`, role: "option", className: "tm-select-option",
+    "data-value": option.value, "data-active": current.index === index ? "true" : "false",
+    "aria-selected": option.value === current.props.current.value ? "true" : "false",
+    "aria-disabled": option.disabled ? "true" : undefined,
+    onPointerMove: (event: any) => { if (event.pointerType !== "touch" && !option.disabled && current.index !== index) highlight(index) },
+    onClick: () => choose(index),
+  }, h("span", null, option.label),
+  h("span", { className: "tm-demo-icon tm-select-check", "data-icon": "check", "aria-hidden": "true" }))))
+}
+
+const SELECT_STYLES = `
+.tm-select {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  box-sizing: border-box; width: 100%; min-width: 0; max-width: 100%; height: 40px;
+  padding: 8px 12px; border: 1px solid var(--tm-border); border-radius: 6px;
+  background: rgba(var(--tm-surface-rgb), calc(var(--tm-input-alpha) * var(--tm-card-k, 1)));
+  color: var(--text); font: inherit; font-size: 14px; line-height: 1.5;
+  text-align: left; cursor: pointer; letter-spacing: 0;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+.tm-select-value { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tm-select:hover:not(:disabled), .tm-select[aria-expanded="true"] { border-color: var(--primary); }
+.tm-select:disabled { opacity: 0.55; cursor: not-allowed; }
+.tm-select .tm-select-chevron { width: 16px; height: 16px; flex: 0 0 16px; color: var(--muted); transform: rotate(90deg); transition: transform 120ms ease; }
+.tm-select[aria-expanded="true"] .tm-select-chevron { transform: rotate(-90deg); }
+.tm-select-menu {
+  position: fixed; z-index: 9985; visibility: hidden; box-sizing: border-box;
+  max-width: calc(100vw - 16px); padding: 5px; margin: 0;
+  overflow: auto; overscroll-behavior: contain; scrollbar-width: thin;
+  border: 1px solid var(--tm-border); border-radius: 8px;
+  color: var(--text); background: rgb(var(--tm-surface-rgb));
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16); text-shadow: none;
+  font-size: 13px; line-height: 1.5; letter-spacing: 0;
+}
+.tm-select-option {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  min-height: 36px; box-sizing: border-box; padding: 8px 10px; border-radius: 4px;
+  cursor: pointer; overflow-wrap: anywhere;
+}
+.tm-select-option > span:first-child { min-width: 0; }
+.tm-select-option[data-active="true"] { background: var(--tm-hover); }
+.tm-select-option[aria-selected="true"] { color: var(--primary); background: var(--tm-accent-soft); font-weight: 600; }
+.tm-select-option[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+.tm-select-option .tm-select-check { width: 16px; height: 16px; flex: 0 0 16px; visibility: hidden; }
+.tm-select-option[aria-selected="true"] .tm-select-check { visibility: visible; }
+.tm-memory .tm-select { width: auto; min-width: min(160px, 100%); height: 34px; font-size: 12px; padding: 6px 10px; }
+`

@@ -1,20 +1,9 @@
-// 设置 · 模型通道（全局）：三个小模型槽位集中一处，各自带状态灯——
-// 语气分析（默认走宿主情感端点）、碎片提取与我的日记成文（默认复用宿主 LLM 管线）。
-// 每张卡两个正交旋钮：槽位 = 用宿主哪个槽的模型，通道 = 由谁去调它。
-// 通道选「宿主」时零配置即用（端点、模型名、免费路由、客户端身份都由宿主给出）；
-// 选「自定义」则插件读宿主本地配置自己直连该槽端点——留给要接本地模型/独立服务商
-// 的空间，代价是宿主免费路由下拼不出可用端点（那些值不在存盘配置里），会休眠。
-// 状态灯直说"为什么不能用/怎么办"，并如实显示这次实际走了哪条路（宿主模式回落直连时不说"正常"）。
-// 行为开关（启用/频率/灵敏度）在各自功能的设置卡里，这张卡只管"走哪条模型通道"。
-//
-// ⚠️ 空值哨兵：UI kit 受控 Select 在 option value='' 时有 mount 竞态——select.value
-// 先于 options 设置会进 dirty 态，selectedIndex 停在 -1，change 事件回传的是 option
-// 的 label 文本而不是空串（实测复现）。因此"宿主默认"选项的 value 用哨兵 "__default"，
-// onChange 时翻译回空串再进表单；后端校验只认空串。哨兵不会出现在表单/存储里。
-import { Card, NumberInput, Select } from "@neko/plugin-ui"
+// 全局模型通道：槽位选择模型，通道选择宿主管线或读取宿主配置直连。
+// 状态灯反映实际通道与休眠原因，具体行为在各自功能卡配置。
+// 自绘下拉直接保留宿主默认槽位的空串。
+import { Card, NumberInput } from "@neko/plugin-ui"
+import { TmSelect } from "./tmswitch"
 import type { AgentTierUsage, ChannelStatusItem, FormValues, TFunc, ToneSlotOption } from "./types"
-
-const DEFAULT_SLOT_SENTINEL = "__default__"
 
 // 通道模式：与 core/state.py 的 _CHANNEL_MODE_* 一字不差
 const MODE_HOST = "host"
@@ -40,14 +29,13 @@ export function ChannelSettingsCard(props: {
     const name = t(`panel.settings.tone_slot_names.${value || "default"}`, { defaultValue: value || "default" })
     const model = String(opt.model || "").trim()
     return {
-      // 空值选项用哨兵，规避 UI kit Select 的 value='' mount 竞态（见文件头注释）
-      value: value === "" ? DEFAULT_SLOT_SENTINEL : value,
+      value,
       label: model ? `${name} · ${model}` : name,
     }
   })
   // 碎片/成文的下拉不给空串与 emotion：空串档是"跟随宿主情感端点"（五分类专用，
   // 对这两条要自定义 prompt 的通道无意义），emotion 槽只由语气分析那张卡暴露
-  const directSlots = allSlots.filter((opt) => String(opt.value) !== DEFAULT_SLOT_SENTINEL && String(opt.value) !== "emotion")
+  const directSlots = allSlots.filter((opt) => opt.value !== "" && opt.value !== "emotion")
   const modeOptions = [
     { value: MODE_HOST, label: t("panel.settings.channelModeHost", { defaultValue: "通过宿主" }) },
     { value: MODE_CUSTOM, label: t("panel.settings.channelModeCustom", { defaultValue: "自定义直连" }) },
@@ -71,10 +59,11 @@ export function ChannelSettingsCard(props: {
         hint={t("panel.settings.channelToneHint", { defaultValue: "默认通过宿主调用情感模型；选择其他槽位时改为直连。互动文本可能发送给配置的模型服务。" })}
         light={channelLight(t, toneCh, form.emotion_sense_enabled)}
       >
-        <Select
-          value={form.tone_slot === "" ? DEFAULT_SLOT_SENTINEL : form.tone_slot}
+        <TmSelect
+          label={t("panel.settings.channelTone", { defaultValue: "语气分析" })}
+          value={form.tone_slot}
           options={allSlots}
-          onChange={(v: any) => updateForm({ tone_slot: String(v) === DEFAULT_SLOT_SENTINEL ? "" : String(v) })}
+          onChange={(v: string) => updateForm({ tone_slot: v })}
         />
       </ChannelRow>
 
@@ -87,8 +76,9 @@ export function ChannelSettingsCard(props: {
         hint={channelHint(t, form.fragments_mode)}
         light={channelLight(t, fragCh, form.fragments_enabled, form.fragments_mode || MODE_HOST)}
       >
-        <Select value={form.fragments_slot} options={directSlots} onChange={(v: any) => updateForm({ fragments_slot: String(v) })} />
-        <Select
+        <TmSelect label={t("panel.settings.channelFragments", { defaultValue: "对话片段提取" })} value={form.fragments_slot} options={directSlots} onChange={(v: string) => updateForm({ fragments_slot: v })} />
+        <TmSelect
+          label={`${t("panel.settings.channelFragments", { defaultValue: "对话片段提取" })} · ${t("panel.settings.channels", { defaultValue: "模型通道" })}`}
           value={form.fragments_mode || MODE_HOST}
           options={modeOptions}
           onChange={(v: any) => updateForm({ fragments_mode: String(v) })}
@@ -102,8 +92,9 @@ export function ChannelSettingsCard(props: {
         hint={channelHint(t, form.review_mode)}
         light={channelLight(t, reviewCh, form.review_enabled, form.review_mode || MODE_HOST)}
       >
-        <Select value={form.review_slot} options={directSlots} onChange={(v: any) => updateForm({ review_slot: String(v) })} />
-        <Select
+        <TmSelect label={t("panel.settings.channelReview", { defaultValue: "我的日记生成" })} value={form.review_slot} options={directSlots} onChange={(v: string) => updateForm({ review_slot: v })} />
+        <TmSelect
+          label={`${t("panel.settings.channelReview", { defaultValue: "我的日记生成" })} · ${t("panel.settings.channels", { defaultValue: "模型通道" })}`}
           value={form.review_mode || MODE_HOST}
           options={modeOptions}
           onChange={(v: any) => updateForm({ review_mode: String(v) })}

@@ -17,6 +17,7 @@ import { directChecks } from "./hosted_ui_direct_checks.mjs"
 import { heatmapChecks } from "./hosted_ui_heatmap_checks.mjs"
 import { diaryChecks } from "./hosted_ui_diary_checks.mjs"
 import { memoryChecks } from "./hosted_ui_memory_checks.mjs"
+import { chooseOption, selectChecks } from "./hosted_ui_select_checks.mjs"
 import { moodChecks } from "./hosted_ui_mood_checks.mjs"
 import { backupChecks } from "./hosted_ui_backup_checks.mjs"
 import { tooltipChecks } from "./hosted_ui_tooltip_checks.mjs"
@@ -317,13 +318,13 @@ async function interactionChecks(browser, origin, output) {
     })
     await check("five-second-refresh-preserves-unsaved-timezone-and-scroll", async () => {
       await selectSettings(frame, "general")
-      const timezone = frame.locator("select").first()
-      await timezone.selectOption("Asia/Tokyo")
+      const timezone = frame.locator("#tm-settings-general .tm-select")
+      await chooseOption(frame, timezone, "Asia/Tokyo")
       await frame.locator(".tm-content").evaluate(element => { element.scrollTop = 240 })
       const scrollBefore = await frame.locator(".tm-content").evaluate(element => element.scrollTop)
       const refreshBefore = await page.evaluate(() => window.qaRefreshes)
       await page.waitForFunction(before => window.qaRefreshes > before, refreshBefore, { timeout: 6500 })
-      assert.equal(await timezone.inputValue(), "Asia/Tokyo")
+      assert.equal(await timezone.getAttribute("data-value"), "Asia/Tokyo")
       assert.equal(await frame.locator(".tm-content").evaluate(element => element.scrollTop), scrollBefore)
     })
     await check("wallpaper-draft-survives-refresh-and-reverts", async () => {
@@ -347,7 +348,7 @@ async function interactionChecks(browser, origin, output) {
     })
     await check("persist-failure-produces-visible-error", async () => {
       await selectSettings(frame, "general")
-      await frame.locator("select").first().selectOption("Europe/London")
+      await chooseOption(frame, frame.locator("#tm-settings-general .tm-select"), "Europe/London")
       await page.evaluate(() => { window.qaFailNext = "update_settings" })
       await frame.locator(".tm-save button").click()
       await frame.waitForSelector('.neko-toast[data-tone="danger"]')
@@ -479,7 +480,7 @@ async function galleryChecks(browser, origin, output) {
     })
     await check("unified-save-submits-settings-and-appearance-once", async () => {
       await selectSettings(frame, "general")
-      await frame.locator("select").first().selectOption("Europe/Berlin")
+      await chooseOption(frame, frame.locator("#tm-settings-general .tm-select"), "Europe/Berlin")
       await selectSettings(frame, "appearance")
       await frame.locator(".tm-gallery-pick").nth(3).click()
       const before = await page.evaluate(() => window.qaMessages.length)
@@ -959,7 +960,7 @@ async function compactAndFooterChecks(browser, origin, output) {
     try {
       await check(`compact-savebar-clickable-${locale}-390x600`, async () => {
         await selectSettings(loaded.frame, "general")
-        await loaded.frame.locator("select").first().selectOption("Asia/Tokyo")
+        await chooseOption(loaded.frame, loaded.frame.locator("#tm-settings-general .tm-select"), "Asia/Tokyo")
         await loaded.frame.locator(".tm-content").evaluate(element => { element.scrollTop = element.scrollHeight })
         const geometry = await loaded.frame.locator(".tm-save button").evaluate(element => {
           const rect = element.getBoundingClientRect()
@@ -1462,7 +1463,15 @@ async function main() {
     let browser
     try {
       browser = await chromium.launch(launch)
-      if (!process.argv.includes("--interactions-only") && !process.argv.includes("--diagnostics-only") && !process.argv.includes("--compact-only") && !process.argv.includes("--theme-only") && !process.argv.includes("--copy-only") && !process.argv.includes("--demo-only") && !process.argv.includes("--intro-only") && !process.argv.includes("--appearance-only") && !process.argv.includes("--video-only") && !process.argv.includes("--direct-only") && !process.argv.includes("--heatmap-only") && !process.argv.includes("--diary-only") && !process.argv.includes("--emotion-only") && !process.argv.includes("--mood-only") && !process.argv.includes("--settings-only") && !process.argv.includes("--backup-only") && !process.argv.includes("--tooltip-only") && !process.argv.includes("--mood-states-only")) report.screenshots = await screenshotMatrix(browser, sources, origin, output)
+      if (!process.argv.includes("--interactions-only") && !process.argv.includes("--diagnostics-only") && !process.argv.includes("--compact-only") && !process.argv.includes("--theme-only") && !process.argv.includes("--copy-only") && !process.argv.includes("--demo-only") && !process.argv.includes("--intro-only") && !process.argv.includes("--appearance-only") && !process.argv.includes("--video-only") && !process.argv.includes("--direct-only") && !process.argv.includes("--heatmap-only") && !process.argv.includes("--diary-only") && !process.argv.includes("--emotion-only") && !process.argv.includes("--mood-only") && !process.argv.includes("--settings-only") && !process.argv.includes("--backup-only") && !process.argv.includes("--tooltip-only") && !process.argv.includes("--mood-states-only") && !process.argv.includes("--select-only")) report.screenshots = await screenshotMatrix(browser, sources, origin, output)
+      if (process.argv.includes("--select") || process.argv.includes("--select-only")) {
+        const selects = await selectChecks(browser, sources, origin, output, {
+          loadPage, inspectLayout, quick: process.argv.includes("--select-quick"),
+          edgesOnly: process.argv.includes("--select-edges-only"),
+        })
+        report.screenshots.push(...selects.screenshots)
+        report.interactions.push(...selects.checks)
+      }
       if (process.argv.includes("--mood-states") || process.argv.includes("--mood-states-only")) {
         const moodStates = await moodStateChecks(browser, sources, origin, output, { loadPage, inspectLayout })
         report.screenshots.push(...moodStates.screenshots)
@@ -1486,7 +1495,7 @@ async function main() {
       if (process.argv.includes("--details")) report.screenshots.push(...await detailScreenshots(browser, origin, output))
       if (process.argv.includes("--calendar-diagnostics")) report.calendarDiagnostics = await calendarDiagnostics(browser, origin, output)
       if (process.argv.includes("--interactions") || process.argv.includes("--interactions-only")) {
-        report.interactions = await interactionChecks(browser, origin, output)
+        report.interactions.push(...await interactionChecks(browser, origin, output))
         if (process.argv.includes("--gallery")) report.interactions.push(...await galleryChecks(browser, origin, output))
       }
       if (process.argv.includes("--compact") || process.argv.includes("--compact-only")) report.interactions.push(...await compactAndFooterChecks(browser, origin, output))

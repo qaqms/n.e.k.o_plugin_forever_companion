@@ -1,17 +1,130 @@
-// 动画开关（1.3.1）：面板全部"是/否"类开关的统一自绘组件，替换宿主 Kit 的
-// Switch（那枚本质是 16px 原生 checkbox、零动画）。经典顺滑型：滑块 0.25s
-// 缓动平移 + 轨道渐变换色；开启态浅蓝色系，与面板淡蓝磨砂底（rgba(147,197,253)
-// 弥散光）同族。样式在 styles.ts 的 .tm-sw 段（含暗色孪生）。
-//
-// 乐观回滚契约（状态条/功能管理这类"点击后经确认+服务端往返才落定"的开关需要）：
-// onChange 可返回 Promise——resolve 值 === false（取消/失败/被拒）时开关立即回落
-// 到权威值 checked；其余情况本地保持，待父级刷新后 checked 变化时自动收编。
-// 同步表单类调用点（设置页 updateForm）checked 立刻变化，天然满足。
+// Shared switches, tooltips and selects. TmSwitch rolls back when onChange
+// rejects or resolves false, then follows the parent's authoritative checked value.
 import { h, useEffect, useRef, useState } from "@neko/plugin-ui"
+import type { OpenSelectMenu, TmSelectProps } from "./types"
 
 // Shared custom controls stay in one module to respect the host's dependency limit.
 let activeTip: { owner: HTMLElement; node: HTMLElement; close: () => void } | null = null
 let tipSequence = 0
+
+let activeSelect: OpenSelectMenu | null = null
+let selectSequence = 0
+const selectListeners = new Set<() => void>()
+
+function notifySelect() { selectListeners.forEach(listener => listener()) }
+function closeSelect() {
+  const current = activeSelect
+  if (!current) return
+  activeSelect = null
+  current.owner.removeAttribute("aria-activedescendant")
+  current.onClose()
+  notifySelect()
+}
+function setSelectIndex(index: number) {
+  const current = activeSelect
+  if (!current || index < 0) return
+  current.index = index
+  current.owner.setAttribute("aria-activedescendant", `${current.id}-option-${index}`)
+  notifySelect()
+}
+function chooseSelect(index: number) {
+  const current = activeSelect
+  const option = current?.props.current.options[index]
+  if (!current || current.owner.disabled || !option || option.disabled) return
+  closeSelect()
+  if (option.value !== current.props.current.value) current.props.current.onChange(option.value)
+}
+function selectKeyDown(event: any) {
+  const current = activeSelect
+  if (!current || event.currentTarget !== current.owner || event.isComposing) return
+  const options = current.props.current.options
+  const enabled = options.map((option, index) => option.disabled ? -1 : index).filter(index => index >= 0)
+  if (event.key === "Escape" || event.key === "Tab") {
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation() }
+    closeSelect()
+  } else if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault()
+    chooseSelect(current.index)
+  } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+    event.preventDefault()
+    const at = enabled.indexOf(current.index)
+    const next = event.key === "Home" ? 0 : event.key === "End" ? enabled.length - 1
+      : Math.max(0, Math.min(enabled.length - 1, at + (event.key === "ArrowDown" ? 1 : -1)))
+    setSelectIndex(enabled[next] ?? -1)
+  } else if (event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) {
+    event.preventDefault()
+    const now = Date.now()
+    const letter = event.key.toLocaleLowerCase()
+    current.search = now - current.searchedAt > 700 ? letter : current.search + letter
+    current.searchedAt = now
+    const repeated = [...current.search].every(char => char === letter)
+    const query = repeated ? letter : current.search
+    const start = enabled.indexOf(current.index)
+    const ordered = [...enabled.slice(start + 1), ...enabled.slice(0, start + 1)]
+    setSelectIndex(ordered.find(index => options[index].label.toLocaleLowerCase().startsWith(query)) ?? -1)
+  }
+}
+
+export function TmSelect(props: TmSelectProps) {
+  const owner = useRef<HTMLButtonElement | null>(null)
+  const latest = useRef(props)
+  latest.current = props
+  const id = useRef("")
+  if (!id.current) id.current = `tm-select-${++selectSequence}`
+  const [opened, setOpened] = useState(false)
+  const signature = JSON.stringify([props.value, props.options, props.disabled, props.label])
+  const selected = props.options.find(option => option.value === props.value)
+  const text = selected?.label || props.placeholder || props.value
+  function open(last = false) {
+    if (!owner.current || props.disabled || !props.options.some(option => !option.disabled)) return
+    closeSelect()
+    closeAdaptiveTip()
+    const enabled = props.options.map((option, index) => option.disabled ? -1 : index).filter(index => index >= 0)
+    const selectedIndex = props.options.findIndex(option => option.value === props.value && !option.disabled)
+    activeSelect = {
+      owner: owner.current, props: latest, signature, id: id.current,
+      index: selectedIndex >= 0 ? selectedIndex : enabled[last ? enabled.length - 1 : 0],
+      search: "", searchedAt: 0, onClose: () => setOpened(false),
+    }
+    owner.current.focus({ preventScroll: true })
+    setOpened(true)
+    setSelectIndex(activeSelect.index)
+  }
+  useEffect(() => {
+    if (activeSelect?.owner === owner.current && activeSelect.signature !== signature) closeSelect()
+  }, [signature])
+  useEffect(() => {
+    const element = owner.current
+    return () => { if (activeSelect?.owner === element) closeSelect() }
+  }, [])
+  // Menu clicks stay in the hosted renderer's trusted event path.
+  return h("button", {
+    ref: owner, type: "button", role: "combobox", className: `tm-select ${props.className || ""}`,
+    "aria-label": props.label, "aria-haspopup": "listbox", "aria-expanded": opened ? "true" : "false",
+    "aria-controls": opened ? id.current : undefined, "data-value": props.value, disabled: !!props.disabled,
+    onClick: () => { if (activeSelect?.owner === owner.current) closeSelect(); else open() },
+    onKeyDown: (event: any) => {
+      if (activeSelect?.owner === owner.current) selectKeyDown(event)
+      else if (["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) {
+        event.preventDefault()
+        open(event.key === "ArrowUp")
+      }
+    },
+    onBlur: () => { if (activeSelect?.owner === owner.current) closeSelect() },
+  },
+  h("span", { className: "tm-select-value", title: text }, text),
+  h("span", { className: "tm-demo-icon tm-select-chevron", "data-icon": "next", "aria-hidden": "true" }))
+}
+
+export function useSelectMenu() {
+  const [, redraw] = useState(0)
+  useEffect(() => {
+    const listener = () => redraw(value => value + 1)
+    selectListeners.add(listener)
+    return () => { selectListeners.delete(listener); closeSelect() }
+  }, [])
+  return { current: activeSelect, close: closeSelect, choose: chooseSelect, highlight: setSelectIndex }
+}
 
 function closeAdaptiveTip(owner?: HTMLElement | null) {
   if (activeTip && (!owner || activeTip.owner === owner)) activeTip.close()
@@ -22,7 +135,7 @@ export function AdaptiveTip(props: { key?: string; content: string; place?: stri
   const scheduleRef = useRef<(() => void) | null>(null)
   const show = () => {
     const owner = ref.current
-    if (!owner) return
+    if (!owner || activeSelect) return
     closeAdaptiveTip()
     const modal = document.querySelector(".neko-modal-backdrop")
     if (!props.content || (modal && !modal.contains(owner))) return

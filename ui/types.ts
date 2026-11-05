@@ -439,3 +439,23 @@ export type FormValues = {
   anniversary_inject: boolean
   debug_mode: boolean
 }
+
+export type TmSelectProps = {
+  value: string
+  options: { value: string; label: string; disabled?: boolean }[]
+  onChange: (value: string) => any
+  label: string
+  placeholder?: string
+  disabled?: boolean
+  className?: string
+}
+export type OpenSelectMenu = {
+  owner: HTMLButtonElement
+  props: { current: TmSelectProps }
+  signature: string
+  id: string
+  index: number
+  search: string
+  searchedAt: number
+  onClose: () => void
+}

@@ -1702,7 +1702,7 @@ export const PANEL_STYLES = `
   .tm-month-cell:nth-child(even) { border-left: 1px solid var(--tm-divider); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .neko-page, .neko-card, .tm-sw-track, .tm-sw-knob, .tm-heat-cell, .neko-button {
+  .neko-page, .neko-card, .tm-sw-track, .tm-sw-knob, .tm-heat-cell, .neko-button, .tm-select, .tm-select-chevron {
     animation: none !important; transition: none !important;
   }
 }

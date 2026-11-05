@@ -1,7 +1,7 @@
 // 设置 · 状态注入（全局）：身体状态以何种频率/方式进入对话上下文。
 // 时区在「设置」页；这张卡只管注入行为。周期参数（角色独立）在「周期」页的她周期卡。
-import { Card, Field, Grid, NumberInput, Select } from "@neko/plugin-ui"
-import { TmSwitch } from "./tmswitch"
+import { Card, Field, Grid, NumberInput } from "@neko/plugin-ui"
+import { TmSelect, TmSwitch } from "./tmswitch"
 import type { FormValues, TFunc } from "./types"
 
 export function InjectSettingsCard(props: {
@@ -25,7 +25,7 @@ export function InjectSettingsCard(props: {
       </div>
       <Grid cols={2}>
         <Field label={t("panel.settings.injectMode", { defaultValue: "状态提示方式" })} help={t("panel.settings.injectModeHelp", { defaultValue: "设置后台状态提示加入对话的频率" })}>
-          <Select value={form.inject_mode} options={injectModes} onChange={(v: any) => updateForm({ inject_mode: String(v) })} />
+          <TmSelect label={t("panel.settings.injectMode", { defaultValue: "状态提示方式" })} value={form.inject_mode} options={injectModes} onChange={(v: string) => updateForm({ inject_mode: v })} />
         </Field>
         {form.inject_mode === "interval_n" ? (
           <Field className="tm-reserve-help" label={t("panel.settings.intervalN", { defaultValue: "每 N 条消息检查一次" })}>

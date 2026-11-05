@@ -5,6 +5,7 @@
 import { Button, Card, EmptyState, Tabs, useToast } from "@neko/plugin-ui"
 import { useEffect, useLocalState, useRef, useState } from "@neko/plugin-ui"
 import { BOOK_STYLES } from "./styles_book"
+import { TmSelect } from "./tmswitch"
 import type {
   DiaryItem, JournalPage, JournalPageHeader, JournalArchiveBrief, JournalWrite, ReviewArchiveBrief, ReviewBrief, ReviewEntry, ReviewProgress, TFunc,
 } from "./types"
@@ -646,15 +647,9 @@ function MemoryControls(props: { t: TFunc; item: DiaryItem; onManage: (ts: strin
       <summary>{label("details")}{auto ? ` · ${label(state)}` : ""}{meta.pinned ? ` · ${label("pinned")}` : ""}</summary>
       {auto ? (
         <div className="tm-memory-fields">
-          <label>{label("type")}<select value={memoryType}
-            ref={(element: any) => { if (element) element.value = memoryType }}
-            disabled={busy} onChange={(event: any) => {
-              const kind = event.target.value
-              event.target.value = memoryType
-              apply("classify", kind)
-            }}>
-            {["preference", "temporary", "event", "boundary"].map(kind => <option key={kind} value={kind} selected={memoryType === kind}>{label(kind)}</option>)}
-          </select></label>
+          <label>{label("type")}<TmSelect label={label("type")} value={memoryType} disabled={busy}
+            options={["preference", "temporary", "event", "boundary"].map(kind => ({ value: kind, label: label(kind) }))}
+            onChange={(kind: string) => apply("classify", kind)} /></label>
           <div>{label("confirmations")} · {meta.confirmations || 1}</div>
           {meta.last_confirmed_at ? <div>{label("lastConfirmed")} · {meta.last_confirmed_at.replace("T", " ").slice(0, 16)}</div> : null}
           {meta.condition ? <div>{label("condition")} · {meta.condition}</div> : null}
@@ -672,22 +667,21 @@ function MemoryControls(props: { t: TFunc; item: DiaryItem; onManage: (ts: strin
           </details> : null}
         </div>
       ) : null}
-      <select className="tm-memory-action" aria-label={label("action")} value="choose" disabled={busy}
-        ref={(element: any) => { if (element) element.value = "choose" }}
-        onChange={(event: any) => {
-          const action = event.target.value
-          event.target.value = "choose"
+      <TmSelect className="tm-memory-action" label={label("action")} value="" placeholder={label("action")} disabled={busy}
+        options={[
+          ...(auto ? [
+            { value: meta.pinned ? "unpin" : "pin", label: label(meta.pinned ? "unpin" : "pin") },
+            { value: meta.paused ? "resume" : "pause", label: label(meta.paused ? "resume" : "pause") },
+            { value: "confirm", label: label("confirm") },
+            { value: "correct", label: label("correct") },
+          ] : []),
+          { value: meta.archived || item.in_archive ? "unarchive" : "archive", label: label(meta.archived || item.in_archive ? "unarchive" : "archiveAction") },
+          ...(meta.undo && meta.undo.length > 0 ? [{ value: "undo", label: label("undo") }] : []),
+        ]}
+        onChange={(action: string) => {
           if (action === "correct") setEditing(true)
-          else if (action && action !== "choose") apply(action)
-        }}>
-        <option key="choose" value="choose">{label("action")}</option>
-        {auto ? <option key="pin" value={meta.pinned ? "unpin" : "pin"}>{label(meta.pinned ? "unpin" : "pin")}</option> : null}
-        {auto ? <option key="pause" value={meta.paused ? "resume" : "pause"}>{label(meta.paused ? "resume" : "pause")}</option> : null}
-        {auto ? <option key="confirm" value="confirm">{label("confirm")}</option> : null}
-        {auto ? <option key="correct" value="correct">{label("correct")}</option> : null}
-        <option key="archive" value={meta.archived || item.in_archive ? "unarchive" : "archive"}>{label(meta.archived || item.in_archive ? "unarchive" : "archiveAction")}</option>
-        {meta.undo && meta.undo.length > 0 ? <option key="undo" value="undo">{label("undo")}</option> : null}
-      </select>
+          else if (action) apply(action)
+        }} />
       {editing ? <div className="tm-memory-editor">
         <textarea aria-label={label("correction")} value={text} maxLength={500} disabled={busy}
           onInput={(event: any) => setText(event.target.value)} />

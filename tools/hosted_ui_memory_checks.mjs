@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import { join } from "node:path"
+import { chooseOption } from "./hosted_ui_select_checks.mjs"
 
 export async function memoryChecks(browser, sources, origin, output, { loadPage, inspectLayout, pagingOnly = false }) {
   const checks = []
@@ -30,7 +31,7 @@ export async function memoryChecks(browser, sources, origin, output, { loadPage,
       const choose = async action => {
         const count = await page.evaluate(() => window.qaMessages.filter(item => item.payload?.actionId === "delete_diary_item").length)
         const details = await openDetails()
-        await details.locator(".tm-memory-action").selectOption(action)
+        await chooseOption(frame, details.locator(".tm-memory-action"), action)
         if (action !== "correct") {
           await page.waitForFunction(count => window.qaMessages.filter(item => item.payload?.actionId === "delete_diary_item").length > count, count)
           await frame.waitForFunction(() => !document.querySelector(".tm-memory-action")?.disabled)
@@ -95,17 +96,17 @@ export async function memoryChecks(browser, sources, origin, output, { loadPage,
           await frame.waitForFunction(() => !document.querySelector(".tm-memory-action")?.disabled)
           assert.equal(await page.evaluate(() => JSON.stringify(window.qaFixture.diary)), before)
           assert((await frame.locator(".tm-memory > summary").innerText()).includes(label("active")))
-          assert.equal(await frame.locator(".tm-memory-action").inputValue(), "choose")
+          assert.equal(await frame.locator(".tm-memory-action").getAttribute("data-value"), "")
         })
         await check("temporary-classification-and-date", async () => {
           const details = await openDetails()
-          await details.locator(".tm-memory-fields select").selectOption("temporary")
+          await chooseOption(frame, details.locator(".tm-memory-fields .tm-select"), "temporary")
           await frame.locator(".tm-memory > summary").filter({ hasText: label("pending") }).waitFor()
           const refreshed = await openDetails()
           await refreshed.locator('input[type="date"]').fill("2040-12-31")
           await refreshed.locator(".tm-memory-fields").getByRole("button", { name: label("save"), exact: true }).click()
           await frame.locator(".tm-memory > summary").filter({ hasText: label("active") }).waitFor()
-          assert.equal(await (await openDetails()).locator(".tm-memory-fields select").inputValue(), "temporary")
+          assert.equal(await (await openDetails()).locator(".tm-memory-fields .tm-select").getAttribute("data-value"), "temporary")
           assert.equal(await frame.locator('input[type="date"]').inputValue(), "2040-12-31")
         })
         await check("archive-entry-visible-after-last-recent-record", async () => {
@@ -156,8 +157,10 @@ export async function memoryChecks(browser, sources, origin, output, { loadPage,
           assert.equal(layout.contentOverflow, 0)
           assert.deepEqual(layout.issues, [])
           screenshots.push({ id, path, layout, errors: [...errors], diagnostics: [] })
-          assert(await details.locator('option[value="unarchive"]').count())
-          assert.equal(await details.locator(".tm-memory-fields select").inputValue(), "temporary")
+          await details.locator(".tm-memory-action").click()
+          assert(await frame.locator('.tm-select-option[data-value="unarchive"]').count())
+          await details.locator(".tm-memory-action").press("Escape")
+          assert.equal(await details.locator(".tm-memory-fields .tm-select").getAttribute("data-value"), "temporary")
           assert.equal(await frame.locator("#tm-memory-scope-archive").getAttribute("aria-selected"), "true")
           assert.equal(await frame.locator(".tm-tl-quote").innerText(), "「Original coffee」")
         })
@@ -215,7 +218,7 @@ export async function memoryChecks(browser, sources, origin, output, { loadPage,
         await frame.waitForFunction(() => document.querySelectorAll(".tm-tl-row").length === 112)
         const details = frame.locator(".tm-memory").first()
         await details.locator(":scope > summary").click()
-        await details.locator(".tm-memory-action").selectOption("correct")
+        await chooseOption(frame, details.locator(".tm-memory-action"), "correct")
         await details.locator("textarea").fill("Unsaved correction")
         const before = await callCount()
         for (let index = 0; index < 3; index++) await refresh()
@@ -233,11 +236,11 @@ export async function memoryChecks(browser, sources, origin, output, { loadPage,
       await check("management-beyond-preview-preserves-loaded-pages", async () => {
         const details = frame.locator(".tm-memory").nth(100)
         await details.locator(":scope > summary").click()
-        await details.locator(".tm-memory-action").selectOption("pin")
+        await chooseOption(frame, details.locator(".tm-memory-action"), "pin")
         await details.locator(":scope > summary").filter({ hasText: sources.messages["zh-CN"]["panel.memory.pinned"] }).waitFor()
         await frame.waitForFunction(() => !document.querySelector(".tm-memory-scope-tab").disabled)
         assert.equal(await frame.locator(".tm-tl-row").count(), 112)
-        assert.equal(await details.locator(".tm-memory-action").inputValue(), "choose")
+        assert.equal(await details.locator(".tm-memory-action").getAttribute("data-value"), "")
         assert.equal(await page.evaluate(() => window.qaFixture.diary[100].memory.pinned), true)
       })
       await check("late-archive-reply-cannot-replace-other-role", async () => {

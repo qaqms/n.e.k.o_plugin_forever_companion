@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import { join } from "node:path"
+import { chooseOption } from "./hosted_ui_select_checks.mjs"
 
 export async function selectSettings(frame, section) {
   await frame.locator(`#tm-settings-tab-${section}`).click()
@@ -117,7 +118,7 @@ export async function settingsChecks(browser, sources, origin, output, helpers) 
         await frame.locator("#tm-settings-tab-appearance").focus()
         await frame.locator("#tm-settings-tab-appearance").press("ArrowRight")
         assert(await frame.locator("#tm-settings-general").isVisible())
-        await frame.locator("#tm-settings-general select").selectOption("Asia/Tokyo")
+        await chooseOption(frame, frame.locator("#tm-settings-general .tm-select"), "Asia/Tokyo")
         const advanced = frame.locator("#tm-settings-general details")
         assert.equal(await advanced.evaluate(element => element.open), false)
         await advanced.locator("summary").click()

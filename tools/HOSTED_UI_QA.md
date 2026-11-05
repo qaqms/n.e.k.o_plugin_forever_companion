@@ -1,5 +1,48 @@
 # Isolated Hosted UI QA
 
+## Modern Select Controls (2026-11-05)
+
+All plugin-panel selects now use the shared controlled combobox, including
+memory type/actions, model slots/channels, emotion frequency/sensitivity,
+state injection and timezone. The menu has an opaque theme-aware surface,
+rounded corners, shadow, hover highlighting and a selected checkmark. One
+floating layer outside the scrolling cards avoids clipping and the save bar.
+It opens upward when needed and constrains long lists to the viewport.
+Host code and saved configuration formats are unchanged.
+
+The layer renders through the hosted event handlers, preserving user-initiated
+attribution for immediate memory actions. Escape cancels, Enter commits, Tab
+closes, arrows/Home/End navigate and typing searches labels. Outside clicks,
+page scrolling, resize, disabled/hidden owners and role changes dismiss the
+menu. List scrolling stays open. Choosing the existing value does not submit.
+The default model slot retains its actual empty string without a sentinel.
+
+Final commands:
+
+- `node tools/hosted_ui_harness.mjs --select-only --interactions --typecheck
+  --out ../dist/qa-modern-select-verified`: 113 interaction checks and 82
+  screenshots, zero check, render or layout failures.
+- `node tools/hosted_ui_harness.mjs --diary-only --diary-pagination-only
+  --diary-memory --out ../dist/qa-modern-select-memory`: 162 interaction checks
+  and 44 screenshots, zero check, render or layout failures.
+
+Coverage includes eight locales, desktop/narrow layouts, light/dark themes,
+wallpaper, 480px-high windows, keyboard selection/cancellation, long lists,
+empty slot values, unsaved form values across polling, user-initiated memory
+actions, archive management and pagination. Chinese desktop, narrow wallpaper
+and upward-opening menu screenshots were visually inspected. The focused
+lifecycle/i18n/link/package Python suite passed 108 tests; the 33-module hosted
+link check, hosted TSX typecheck and `git diff --check` passed. The floating
+layer and its styles live in the entry to retain the host dependency budget.
+
+Package: `../dist/forever_companion_1.4.7_modern_select_test.neko-plugin`
+(754,359 bytes). Official strict validation, ZIP CRC, payload hash verification
+and byte comparison of all 83 packaged source files passed. SHA-256:
+`c021101339bfdbf596e5fc786b79fba3e8e8f26bb0d10147af5409c1eccc33b0`.
+
+Version remains 1.4.7. Host code and user storage were not modified.
+No commit, push, tag or Release was created for this UI change.
+
 ## Visible Time Diary Archive Entry (2026-11-05)
 
 Time Diary now shows Recent and Archive as adjacent tabs with live counts,

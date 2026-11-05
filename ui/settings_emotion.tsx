@@ -1,7 +1,7 @@
 // 设置 · 语气感知（全局）：回复后异步分析互动情绪，只提醒不自动改状态。
 // 槽位选择在「模型通道」卡；这张卡只管行为（启用/分析间隔/抽查频率/阶段灵敏度）。
-import { Card, Field, Grid, NumberInput, Select } from "@neko/plugin-ui"
-import { TmSwitch } from "./tmswitch"
+import { Card, Field, Grid, NumberInput } from "@neko/plugin-ui"
+import { TmSelect, TmSwitch } from "./tmswitch"
 import type { FormValues, TFunc } from "./types"
 
 export function EmotionSenseSettingsCard(props: {
@@ -43,11 +43,11 @@ export function EmotionSenseSettingsCard(props: {
               <NumberInput value={form.tone_min_interval_sec} min={10} max={3600} step={1} onChange={(v: number | string) => updateForm({ tone_min_interval_sec: typeof v === "number" ? v : 20 })} />
             </Field>
             <Field className="tm-reserve-help" label={t("panel.settings.toneCheckRate", { defaultValue: "语气检查频率" })}>
-              <Select value={String(form.tone_check_rate)} options={toneCheckRates} onChange={(v: any) => updateForm({ tone_check_rate: Number(v) })} />
+              <TmSelect label={t("panel.settings.toneCheckRate", { defaultValue: "语气检查频率" })} value={String(form.tone_check_rate)} options={toneCheckRates} onChange={(v: string) => updateForm({ tone_check_rate: Number(v) })} />
             </Field>
             {form.tone_phase_sensitivity_enabled ? (
               <Field className="tm-reserve-help" label={t("panel.settings.tonePhaseSensitivity", { defaultValue: "灵敏度调整幅度" })}>
-                <Select value={String(form.tone_phase_sensitivity)} options={toneSensitivities} onChange={(v: any) => updateForm({ tone_phase_sensitivity: Number(v) })} />
+                <TmSelect label={t("panel.settings.tonePhaseSensitivity", { defaultValue: "灵敏度调整幅度" })} value={String(form.tone_phase_sensitivity)} options={toneSensitivities} onChange={(v: string) => updateForm({ tone_phase_sensitivity: Number(v) })} />
               </Field>
             ) : null}
           </Grid>
