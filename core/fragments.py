@@ -91,6 +91,10 @@ def _format_line(index: int, item: JsonObject) -> str:
         line += f" (状态:{memory_state(item)}; 条件:{meta.get('condition') or '无'}"
         if meta.get("correction"):
             line += f"; 用户纠正后的结论:{memory_text(item)}"
+        if meta.get("conflicts_with"):
+            line += f"; 关联记录日期:{meta['conflicts_with']}"
+        if meta.get("suggestion"):
+            line += f"; 待核实建议:{meta['suggestion'].get('reason') or ''}"
         line += ")"
     return line
 
@@ -171,7 +175,7 @@ def parse_fragment_response(raw: str) -> JsonObject | None:
     if relation not in _FRAGMENT_RELATIONS:
         relation = "new"
     target = 0
-    if relation in {"supersede", "duplicate", "conflict"}:
+    if relation in {"supersede", "duplicate", "conflict", "resolve"}:
         value = data.get("target")
         if type(value) is int:
             target = value
@@ -186,9 +190,9 @@ def parse_fragment_response(raw: str) -> JsonObject | None:
         "relation": relation,
         "target": target,
     }
-    for key in ("memory_type", "valid_until", "condition"):
+    for key in ("memory_type", "valid_until", "condition", "resolution_quote"):
         if isinstance(data.get(key), str):
-            result[key] = data[key].strip()[:120]
+            result[key] = data[key].strip()[:300 if key == "resolution_quote" else 120]
     return result
 
 
@@ -243,7 +247,7 @@ def build_review_prompt(items: list[JsonObject]) -> str:
         for index, item in enumerate(items, start=1)
         if str(item.get("quote") or "").strip()
     ]
-    return f"{_FRAGMENT_REVIEW_PROMPT}" + ("\n".join(lines) if lines else "（无）")
+    return f"当前时间：{_now_utc().isoformat()}\n{_FRAGMENT_REVIEW_PROMPT}" + ("\n".join(lines) if lines else "（无）")
 
 
 def parse_review_response(raw: str) -> list[JsonObject] | None:

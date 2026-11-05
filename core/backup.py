@@ -248,14 +248,17 @@ def _entries(value, kind=""):
 
 def _memory(meta, *, nested=False):
     _fields(meta, text=("type", "last_confirmed_at", "updated_at", "valid_until", "condition",
-                        "correction", "conflicts_with", "valid_through", "return_to_recent"),
-            counts=("schema", "confirmations"), flags=("pinned", "paused", "pending", "archived"),
+                        "correction", "conflicts_with", "valid_through", "return_to_recent",
+                        "aging_started_at", "review_attempted_at", "clarification_at"),
+            counts=("schema", "confirmations", "clarification_count"), flags=("pinned", "paused", "pending", "archived"),
             lists=("evidence", "history", "undo"), objects=("suggestion",))
     if meta.get("schema", 1) != 1:
         raise BackupError("backup_version_unsupported")
     if "type" in meta and meta["type"] not in {"preference", "temporary", "event", "boundary"}:
         _invalid()
     if "confirmations" in meta and not 1 <= meta["confirmations"] <= 10000:
+        _invalid()
+    if meta.get("clarification_count", 0) > 2:
         _invalid()
     if len(meta.get("evidence", [])) > 8 or len(meta.get("history", [])) > 20 or len(meta.get("undo", [])) > 10:
         _invalid()

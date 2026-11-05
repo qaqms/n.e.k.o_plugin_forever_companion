@@ -1012,6 +1012,7 @@ class ForeverCompanionPlugin(
         # 我的日记：双门槛攒够就成文一篇（放在链路末尾——成文是一次模型调用，
         # 放前面会拖慢注入/语气感知的时序；写完只落 Store，不打扰任何人）
         review_written, _review_reason = await self._maybe_write_review(current, current_shard)
+        memory_reviewed = await self._maybe_maintain_memories(current, current_shard)
         # 相处统计：跨月时封卷上个月的月报 + 纪念日当天注入一次轻语。
         # 放在链路末尾（与 review 同理：统计副作用不挡注入时序）；
         # 纪念日不依赖消息，独立检查（与阶段开场白同例，只对当前角色）
@@ -1024,6 +1025,7 @@ class ForeverCompanionPlugin(
             "fragment_captured": fragment_captured,
             "extreme_invited": extreme_invited,
             "review_written": review_written,
+            "memory_reviewed": memory_reviewed,
             "anniversary_pushed": anniversary_pushed,
         })
 

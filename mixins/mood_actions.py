@@ -20,7 +20,7 @@ from plugin.sdk.plugin import Err, Ok, Result, SdkError, llm_tool
 from ..core.affect import _MOOD_AFFECT_IMPULSES, _apply_affect_impulse, _current_affect
 from ..core.fragments import build_review_prompt, parse_review_response, recall_fragments
 from ..core.journal import assemble_journal_entry, has_journal_content, journal_write, normalize_journal_title
-from ..core.memory import memory_state, memory_text, metadata
+from ..core.memory import attach_review_suggestions, memory_state, memory_text, metadata
 from ..core.state import (
     _ACTION_DEFAULT_MINUTES,
     _CHANNEL_BUDGET_REASON,
@@ -1090,30 +1090,10 @@ class MoodActionsMixin:
         if findings is None:
             # 解析失败不改任何状态、不占节流位：这次等于没发生，她可以再试
             return Err(SdkError("模型这次的回答读不懂，没有改动任何记录"))
-        def attach_suggestions(diary):
-            result = []
-            for finding in findings:
-                index = int(finding["index"])
-                if not 1 <= index <= len(items):
-                    continue
-                expected = items[index - 1]
-                # Do not attach an in-flight review to an edited/deleted record.
-                target = next((current for current in diary if current == expected), None)
-                if target is None:
-                    continue
-                result.append({
-                    "ts": target.get("ts"), "kind": target.get("kind"), "quote": target.get("quote"),
-                    "issue": finding["issue"], "reason": finding["reason"],
-                })
-                stamp = _now_utc().isoformat()
-                target["memory"] = {
-                    **metadata(target), "updated_at": stamp,
-                    "suggestion": {"ts": stamp, "issue": finding["issue"], "reason": finding["reason"]},
-                }
-                target["memory"].pop("undo", None)
-            return result
-
-        saved = await self._update_shard_diary(lanlan, shard, attach_suggestions)
+        saved = await self._update_shard_diary(
+            lanlan, shard,
+            lambda diary: attach_review_suggestions(diary, items, findings, _now_utc().isoformat()),
+        )
         if isinstance(saved, Err):
             return self._persist_error(saved)
         result = saved.value

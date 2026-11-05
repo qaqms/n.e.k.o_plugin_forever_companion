@@ -15,6 +15,11 @@ MEMORY_ACTIONS = frozenset({
     "pin", "unpin", "pause", "resume", "confirm", "correct", "archive", "unarchive", "classify", "expire", "undo",
 })
 DAY = 86400
+MAINTENANCE_INTERVAL = 6 * 3600
+AUTO_REVIEW_INTERVAL = DAY
+CLARIFICATION_INTERVAL = 7 * DAY
+CONVERSATION_WINDOW = 15 * 60
+OPERATIONAL_FIELDS = frozenset({"aging_started_at", "review_attempted_at", "clarification_at", "clarification_count"})
 
 
 class MemoryPolicyError(ValueError):
@@ -32,6 +37,8 @@ def _policy_snapshot(item: dict) -> dict:
     meta = deepcopy(metadata(item))
     meta.pop("undo", None)
     meta.pop("history", None)
+    for field in OPERATIONAL_FIELDS:
+        meta.pop(field, None)
     return meta
 
 
@@ -56,18 +63,18 @@ def memory_state(item: dict, now: datetime | None = None) -> str:
         return "pending"
     if meta.get("paused") is True:
         return "paused"
-    if meta.get("pending") is True:
-        return "pending"
     current = _time(now)
     expires = _parse_iso_ts(meta.get("valid_until"))
     if expires and current >= expires:
         return "expired"
+    if meta.get("pending") is True:
+        return "pending"
     if not meta or meta.get("pinned") is True or meta.get("type") == "boundary":
         return "active"
     if meta.get("type") == "temporary" and not expires:
         return "pending"
-    confirmed = _parse_iso_ts(meta.get("last_confirmed_at"))
-    # Legacy records have no aging baseline. Reading them must not start a clock.
+    confirmed = _parse_iso_ts(meta.get("last_confirmed_at")) or _parse_iso_ts(meta.get("aging_started_at"))
+    # Migration starts a grace period; reads alone never start or refresh it.
     if not confirmed:
         return "active"
     days = max(0, (current - confirmed).total_seconds() / DAY)
@@ -114,7 +121,7 @@ def memory_priority(item: dict, now: datetime | None = None) -> float:
     meta = metadata(item)
     if not meta:
         return 0.0
-    confirmed = _parse_iso_ts(meta.get("last_confirmed_at"))
+    confirmed = _parse_iso_ts(meta.get("last_confirmed_at")) or _parse_iso_ts(meta.get("aging_started_at"))
     days = max(0, (_time(now) - confirmed).total_seconds() / DAY) if confirmed else 0.0
     return (
         (4 if meta.get("pinned") else 0)
@@ -151,12 +158,112 @@ def recall_memories(
 
 def extraction_candidates(diary: list[dict], user_text: str, limit: int = 10) -> list[dict]:
     eligible = [(index, item) for index, item in enumerate(diary)
-                if item.get("source") == "auto" and memory_state(item) in {"active", "dormant", "expired"}]
+                if item.get("source") == "auto" and not metadata(item).get("paused")
+                and metadata(item).get("schema", 1) == 1
+                and memory_state(item) in {"active", "dormant", "expired", "pending"}]
     ranked = sorted(eligible, key=lambda pair: (relevance(user_text, pair[1]), pair[0]), reverse=True)
     selected = {index for index, _ in ranked[:max(1, limit - 3)]}
     selected.update(index for index, _ in eligible[-3:])
+    # Include the other side of a selected conflict before unrelated context.
+    linked = {str(metadata(item).get("conflicts_with") or "") for index, item in eligible if index in selected}
+    partners = {index for index, item in eligible if str(item.get("ts") or "") in linked}
+    selected.update(partners)
+    if len(selected) > limit:
+        priority = sorted(selected, key=lambda index: (
+            index in partners, relevance(user_text, diary[index]), index,
+        ), reverse=True)
+        selected = set(priority[:limit])
     # Keep the prompt's numbered list in chronological order, newest first.
     return [deepcopy(item) for index, item in reversed(eligible) if index in selected][:limit]
+
+
+def maintain_memories(diary: list[dict], now: datetime | None = None) -> int:
+    """Migrate legacy policy without inventing a confirmation or aging history."""
+    stamp = _time(now).isoformat()
+    changed = 0
+    for item in diary:
+        meta = metadata(item)
+        if (item.get("source") != "auto" or item.get("demo") is True
+                or meta.get("schema", 1) != 1 or _parse_iso_ts(meta.get("last_confirmed_at"))
+                or _parse_iso_ts(meta.get("aging_started_at"))):
+            continue
+        meta = deepcopy(meta)
+        meta.setdefault("schema", 1)
+        meta.setdefault("type", new_metadata(item, stamp)["type"])
+        meta.setdefault("confirmations", 1)
+        meta.update({"aging_started_at": stamp, "updated_at": stamp})
+        meta.pop("undo", None)
+        meta["history"] = [*(meta.get("history") or []), {"ts": stamp, "action": "auto_migrate"}][-20:]
+        item["memory"] = meta
+        changed += 1
+    return changed
+
+
+def review_candidates(diary: list[dict], limit: int = 20) -> list[dict]:
+    """Rotate through history, including the archive, without expanding a call."""
+    eligible = [(index, item) for index, item in enumerate(diary)
+                if item.get("source") == "auto" and item.get("demo") is not True
+                and metadata(item).get("schema", 1) == 1
+                and memory_state(item) in {"active", "dormant", "pending"}]
+    eligible.sort(key=lambda pair: (str(metadata(pair[1]).get("review_attempted_at") or ""), pair[0]))
+    selected = sorted(eligible[:limit], key=lambda pair: pair[0], reverse=True)
+    return [deepcopy(item) for _, item in selected]
+
+
+def last_policy_time(diary: list[dict], field: str) -> float:
+    stamps = (_parse_iso_ts(metadata(item).get(field)) for item in diary)
+    return max((stamp.timestamp() for stamp in stamps if stamp), default=0.0)
+
+
+def clarification_candidate(diary: list[dict], user_text: str, now: datetime | None = None) -> dict | None:
+    current = _time(now)
+    if current.timestamp() - last_policy_time(diary, "clarification_at") < DAY:
+        return None
+    candidates = []
+    for index, item in enumerate(diary):
+        meta = metadata(item)
+        state = memory_state(item, current)
+        if (item.get("source") != "auto" or item.get("demo") is True or meta.get("schema", 1) != 1
+                or meta.get("paused") or meta.get("pinned") or meta.get("correction")
+                or item.get("kind") == "overstep" or state not in {"active", "dormant", "pending"}
+                or not (state == "pending" or meta.get("suggestion"))
+                or meta.get("clarification_count", 0) >= 2):
+            continue
+        previous = _parse_iso_ts(meta.get("clarification_at"))
+        if previous and (current - previous).total_seconds() < CLARIFICATION_INTERVAL:
+            continue
+        match = relevance(user_text, item)
+        if match > 0:
+            candidates.append((match, index, item))
+    return deepcopy(max(candidates, key=lambda row: row[:2])[2]) if candidates else None
+
+
+def mark_review_attempt(diary: list[dict], existing: list[dict], stamp: str) -> list[dict]:
+    selected = []
+    for expected in existing:
+        target = next((item for item in diary if item == expected), None)
+        if target is None:
+            continue
+        target["memory"] = {**metadata(target), "review_attempted_at": stamp}
+        selected.append(deepcopy(target))
+    return selected
+
+
+def attach_review_suggestions(diary: list[dict], existing: list[dict], findings: list[dict], stamp: str) -> list[dict]:
+    attached = []
+    for finding in findings:
+        index = finding["index"]
+        if not 1 <= index <= len(existing):
+            continue
+        target = next((item for item in diary if item == existing[index - 1]), None)
+        if target is None:
+            continue
+        target["memory"] = {**metadata(target), "updated_at": stamp,
+                            "suggestion": {"ts": stamp, "issue": finding["issue"], "reason": finding["reason"]}}
+        target["memory"].pop("undo", None)
+        attached.append({"ts": target.get("ts"), "kind": target.get("kind"), "quote": target.get("quote"),
+                         "issue": finding["issue"], "reason": finding["reason"]})
+    return attached
 
 
 def new_metadata(parsed: dict, stamp: str, *, user_text: str = "", local_now: datetime | None = None) -> dict:
@@ -188,12 +295,19 @@ def new_metadata(parsed: dict, stamp: str, *, user_text: str = "", local_now: da
                 meta["valid_through"] = day
             except (ValueError, OverflowError):
                 meta["pending"] = True
-        elif re.search(r"今天|今晚|今日|\btoday\b|\btonight\b", user_text, re.IGNORECASE):
-            end = current.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-            meta["valid_until"] = end.isoformat(timespec="seconds")
-            meta["valid_through"] = current.date().isoformat()
         else:
-            meta["pending"] = True
+            relative_text = re.sub(r"\bday\s+after\s+tomorrow\b", "", user_text, flags=re.IGNORECASE)
+            offsets = {offset for pattern, offset, text in (
+                (r"今天|今晚|今日|\btoday\b|\btonight\b", 0, user_text),
+                (r"明天|明晚|\btomorrow\b", 1, relative_text),
+                (r"(?<!大)后天|\bday\s+after\s+tomorrow\b", 2, user_text),
+            ) if re.search(pattern, text, re.IGNORECASE)}
+            if len(offsets) == 1:
+                end = current.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=offsets.pop() + 1)
+                meta["valid_until"] = end.isoformat(timespec="seconds")
+                meta["valid_through"] = (end - timedelta(days=1)).date().isoformat()
+            else:
+                meta["pending"] = True
     return meta
 
 
@@ -217,7 +331,9 @@ def reinforce(item: dict, parsed: dict, stamp: str) -> bool:
     return True
 
 
-def apply_capture(diary: list[dict], existing: list[dict], parsed: dict, record: dict) -> str:
+def apply_capture(
+    diary: list[dict], existing: list[dict], parsed: dict, record: dict, *, user_text: str = "",
+) -> str:
     """Mutate only a still-matching target. Returns new/reinforced/duplicate."""
     relation = parsed.get("relation")
     if any(item.get("source") == "auto" and item.get("quote") == parsed.get("quote")
@@ -228,6 +344,13 @@ def apply_capture(diary: list[dict], existing: list[dict], parsed: dict, record:
     if relation == "duplicate" and expected is None:
         expected = next((item for item in existing if item.get("quote") == parsed.get("quote")), None)
     current = next((item for item in diary if expected and item == expected), None)
+    if relation == "resolve":
+        return _resolve_capture(diary, existing, current, parsed, record, user_text)
+    if current and memory_state(current) == "pending" and relation == "supersede":
+        record["memory"]["pending"] = True
+        record["memory"]["conflicts_with"] = str(current.get("ts") or "")
+        diary.append(record)
+        return "new"
     if relation == "duplicate" and current and memory_state(current) in {"paused", "pending", "superseded"}:
         return "duplicate"
     if relation == "duplicate":
@@ -269,6 +392,46 @@ def apply_capture(diary: list[dict], existing: list[dict], parsed: dict, record:
                 current["memory"] = {**metadata(current), "pending": True,
                                      "conflicts_with": record["ts"], "updated_at": record["ts"]}
                 current["memory"].pop("undo", None)
+    diary.append(record)
+    return "new"
+
+
+def _resolve_capture(
+    diary: list[dict], existing: list[dict], current: dict | None, parsed: dict, record: dict, user_text: str,
+) -> str:
+    proof = str(parsed.get("resolution_quote") or "").strip()
+    related = _related_memories(diary, current) if current else []
+    # Old superseded facts remain linked for audit/undo, but do not have to be
+    # re-extracted or reconfirmed to settle the currently unresolved facts.
+    group = [item for item in [current, *related] if str(item.get("status") or "active") == "active"] if current else []
+    grounded = (
+        float(parsed.get("confidence") or 0) >= 0.85
+        and len(proof) >= 4 and proof in user_text and str(parsed.get("quote") or "") in user_text
+        and bool(str(parsed.get("quote") or "").strip()) and not re.search(r"[?？]", proof)
+        and not re.search(r"[?？]", str(parsed.get("quote") or ""))
+        and any(relevance(proof, item) > 0 for item in group)
+    )
+    safe = bool(group) and all(
+        item in existing and item.get("source") == "auto" and item.get("kind") != "overstep"
+        and metadata(item).get("schema", 1) == 1
+        and not any(metadata(item).get(flag) for flag in ("paused", "pinned", "correction"))
+        and metadata(item).get("condition", "") == metadata(record).get("condition", "")
+        for item in group
+    )
+    if (grounded and safe and not metadata(record).get("pending")
+            and (memory_state(current) == "pending" or metadata(current).get("suggestion"))):
+        for item in group:
+            meta = deepcopy(metadata(item))
+            meta.update({"pending": False, "updated_at": record["ts"]})
+            for field in ("undo", "suggestion"):
+                meta.pop(field, None)
+            meta["history"] = [*(meta.get("history") or []), {"ts": record["ts"], "action": "auto_resolve"}][-20:]
+            item.update({"status": "superseded", "memory": meta})
+        record["supersedes"] = current["ts"]
+    else:
+        record["memory"]["pending"] = True
+        if current:
+            record["memory"]["conflicts_with"] = str(current.get("ts") or "")
     diary.append(record)
     return "new"
 
@@ -328,9 +491,13 @@ def manage_memory(diary: list[dict], item: dict, action: str, *, text: str = "",
             other = next(other for other in diary if other.get("ts") == related["ts"])
             if related["had_memory"]:
                 audit = {key: value for key, value in metadata(other).items() if key in {"history", "undo"}}
-                other["memory"] = {**deepcopy(related["memory"]), **audit, "updated_at": stamp}
+                operations = {key: value for key, value in metadata(other).items() if key in OPERATIONAL_FIELDS}
+                other["memory"] = {**deepcopy(related["memory"]), **audit, **operations, "updated_at": stamp}
             else:
-                other["memory"] = {"updated_at": stamp}
+                other["memory"] = {
+                    **{key: value for key, value in metadata(other).items() if key in OPERATIONAL_FIELDS},
+                    "updated_at": stamp,
+                }
         if saved["had_status"]:
             item["status"] = saved["status"]
         else:
@@ -341,7 +508,8 @@ def manage_memory(diary: list[dict], item: dict, action: str, *, text: str = "",
         if not saved["had_memory"] and not restored["undo"]:
             # Retain only the audit trail, without creating an aging baseline.
             restored = {"history": restored["history"]}
-        item["memory"] = {**restored, "updated_at": stamp}
+        operations = {key: value for key, value in meta.items() if key in OPERATIONAL_FIELDS}
+        item["memory"] = {**restored, **operations, "updated_at": stamp}
         return
     if action in {"pin", "unpin"}:
         meta["pinned"] = action == "pin"

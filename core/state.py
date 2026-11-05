@@ -342,11 +342,16 @@ note 用第三人称简短记录这件事（如"他说最喜欢她做的饭"，2
 
 记忆使用规则：
 - duplicate 也要返回 target，指向同一结论、同一适用条件的旧记录，以便累计独立确认。
+- 待确认的记忆或带整理建议的记忆，只有主人本轮明确说明当前结论时，才可用 relation="resolve"，
+  target 指向对应旧记录，并返回 resolution_quote（本轮主人明确澄清的完整原话，必须逐字摘录）。
+  同时 quote 摘录本轮的新结论，不能只写"对""好的"。提问、猜测、转述、玩笑、没有回答的问题
+  都不能算澄清；不要从猫娘的提问或回复里编造主人确认。没有明确结论时不要强行解除待确认。
 - 只有主人明确纠正或说明旧结论已改变时才用 supersede；仅仅矛盾、指代不明时用 conflict 并填 target。
 - "喜欢咖啡"与"晚上不喝咖啡"适用条件不同，可以同时成立，不要互相取代。
 - 可增加 memory_type：preference=长期偏好，temporary=临时状态，event=历史事件，boundary=明确边界。
 - condition 可摘录原话中的适用条件，必须是原文子串；没有条件就留空。
 - 临时状态可增加 valid_until（原话明确的 YYYY-MM-DD 日期）；今天/今晚只在今天有效。
+  明天/后天等明确的相对日期由系统按用户时区换算；有多个日期且不明确时不要猜。
   没有可核对的期限不要编造日期，系统会将临时记录列为待确认。
 - 历史上的过激言行是发生过的事件，不能因时间过去就判断已经原谅。
 
@@ -356,7 +361,7 @@ note 用第三人称简短记录这件事（如"他说最喜欢她做的饭"，2
 # 关系判定的闭集（写入后治理）：new = 与已有记忆无关；duplicate = 同一结论又提一遍，
 # 不新增条目；supersede = 主人明确更新旧结论；conflict = 不确定的矛盾，双方待确认。
 # 未知取值一律按 new 处理——主体内容（kind/quote）合法时不该因关系字段坏了整条丢弃。
-_FRAGMENT_RELATIONS = frozenset({"new", "duplicate", "supersede", "conflict"})
+_FRAGMENT_RELATIONS = frozenset({"new", "duplicate", "supersede", "conflict", "resolve"})
 # 提取候选仍最多 10 条：从全部历史中按词面相关性选取并保留最近候选，
 # 选完按时间倒序编号。归档不扩大模型提示词或增加后台模型调用。
 _FRAGMENT_RECALL_FOR_PROMPT = 10
@@ -373,8 +378,8 @@ _FRAGMENT_REVIEW_MAX_ITEMS = 30
 # 复读节奏就会连烧配额；30 分钟够她"想起来整理一下"，又不至于让她觉得点了没反应。
 _FRAGMENT_REVIEW_MIN_INTERVAL_SEC = 1800.0
 # 自检 prompt：只挑客观问题，不评价"该不该存在"——删不删、改不改永远是她的事。
-_FRAGMENT_REVIEW_PROMPT = """你是猫娘的记忆整理助手。下面是她的时光日记里最近的碎片（编号 + 类型 + 日期 + 他当时的原话）。
-编号 1 是最近的一条，按时间倒序排列。
+_FRAGMENT_REVIEW_PROMPT = """你是猫娘的记忆整理助手。下面是她的时光日记里选出的碎片（编号 + 类型 + 日期 + 他当时的原话，可能包括归档）。
+编号 1 是本批最近的一条，按时间倒序排列。休眠表示久未确认，不等于内容错误；待确认不能当作现行事实。
 请检查有没有这三类客观问题：
 - stale：已经过时（临时约定早就过期了、季节性的安排过去了、明显不再成立）
 - conflict：两条互相矛盾（同一件事得出相反结论）
@@ -926,6 +931,11 @@ class _LanlanShard:
         "last_fragment_analysis_ts",
         "last_fragment_nudge_ts",
         "last_fragment_review_ts",
+        "last_memory_maintenance_ts",
+        "last_memory_turn_marker",
+        "last_memory_observed_marker",
+        "last_memory_turn_at",
+        "memory_maintenance_lock",
         "affect_extreme_since",
         "affect_extreme_side",
         "last_extreme_invite_ts",
@@ -992,6 +1002,11 @@ class _LanlanShard:
         # 记忆自检（mood_review_memory）的节流位：只放内存，重启清零无副作用——
         # 它是"她主动想清理"的低频动作，不需要跨进程严格的冷却保证
         self.last_fragment_review_ts = 0.0
+        self.last_memory_maintenance_ts = 0.0
+        self.last_memory_turn_marker = ""
+        self.last_memory_observed_marker = ""
+        self.last_memory_turn_at = 0.0
+        self.memory_maintenance_lock = threading.Lock()
         # 持续极端心情邀请（[mood] extreme_invite_*）：首次进入极端档的时刻
         # （0 = 不在极端档，恢复常态即清零）、当前侧别（-1 低落 / 1 高涨，换侧重计时）
         # 与上次邀请节流；内存即可，重启最多重邀一次
