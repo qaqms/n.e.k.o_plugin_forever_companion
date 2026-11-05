@@ -2,6 +2,7 @@
 // 顶级页签：日历 / 周期 / 注入 / 情绪（情绪系统+语气感知）/ 手记 / 管理（危险区+角色名单）
 import {
   Alert,
+  Fragment,
   h,
   Page,
 } from "@neko/plugin-ui"
@@ -70,6 +71,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   // 拖动滑块时 pointermove 不进元素、hot 会掉，但拖动即滚动，onScroll 接棒。
   const [contentHot, setContentHot] = useState(false)
   const [contentScrolling, setContentScrolling] = useState(false)
+  const contentRef = useRef<HTMLDivElement | null>(null)
   const scrollIdleRef = useRef<any>(null)
   const markContentScrolling = () => {
     setContentScrolling(true)
@@ -1375,6 +1377,9 @@ export default function Panel(props: PluginSurfaceProps<State>) {
 
   const VALID_TABS = ["overview", "calendar", "diary", "moment", "mood", "features", "cycle", "settings"]
   const activeTab = VALID_TABS.indexOf(tab) >= 0 ? tab : "overview"
+  useEffect(() => {
+    if (contentRef.current) contentRef.current.scrollTop = 0
+  }, [activeTab])
 
   // 面板始终跟随宿主当前角色（5 秒轮询自动跟上切卡），lanlan_list 提供全部已知角色的状态摘要
   const lanlanKnown = (state.lanlan_list || []).filter((item) => item && item.name)
@@ -1447,7 +1452,8 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       {status.error ? <div key="warn-error" className="tm-warnstrip"><Alert tone="danger" message={status.error} /></div> : null}
 
       <div key="body" className="tm-body">
-        <nav className="tm-tabs">
+        {/* 固定左右容器，只重建内容页，避免宿主移动导航并清空滚动位置。 */}
+        <nav key="navigation" className="tm-tabs">
           {tabs.map((item) => (
             <button
               key={item.id}
@@ -1464,7 +1470,8 @@ export default function Panel(props: PluginSurfaceProps<State>) {
 
         <div
           className={contentHot || contentScrolling ? "tm-content tm-content-hot" : "tm-content"}
-          key={activeTab}
+          key="content"
+          ref={contentRef}
           onScroll={markContentScrolling}
           onPointerMove={(e: any) => {
             const rect = e.currentTarget.getBoundingClientRect()
@@ -1473,6 +1480,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
           }}
           onPointerLeave={() => setContentHot(false)}
         >
+          <Fragment key={activeTab}>
           {activeTab === "overview" ? (
             <OverviewPane
               t={t}
@@ -1646,6 +1654,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
               />
             </ManagePane>
           ) : null}
+          </Fragment>
         </div>
       </div>
 

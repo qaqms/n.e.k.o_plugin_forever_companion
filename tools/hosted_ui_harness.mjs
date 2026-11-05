@@ -22,6 +22,7 @@ import { moodChecks } from "./hosted_ui_mood_checks.mjs"
 import { backupChecks } from "./hosted_ui_backup_checks.mjs"
 import { tooltipChecks } from "./hosted_ui_tooltip_checks.mjs"
 import { moodStateChecks } from "./hosted_ui_mood_state_checks.mjs"
+import { navigationChecks } from "./hosted_ui_navigation_checks.mjs"
 
 const TOOL_ROOT = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_PLUGIN = resolve(TOOL_ROOT, "..")
@@ -1470,7 +1471,12 @@ async function main() {
     let browser
     try {
       browser = await chromium.launch(launch)
-      if (!process.argv.includes("--interactions-only") && !process.argv.includes("--diagnostics-only") && !process.argv.includes("--compact-only") && !process.argv.includes("--theme-only") && !process.argv.includes("--copy-only") && !process.argv.includes("--demo-only") && !process.argv.includes("--intro-only") && !process.argv.includes("--appearance-only") && !process.argv.includes("--video-only") && !process.argv.includes("--direct-only") && !process.argv.includes("--heatmap-only") && !process.argv.includes("--diary-only") && !process.argv.includes("--emotion-only") && !process.argv.includes("--mood-only") && !process.argv.includes("--settings-only") && !process.argv.includes("--backup-only") && !process.argv.includes("--tooltip-only") && !process.argv.includes("--mood-states-only") && !process.argv.includes("--select-only")) report.screenshots = await screenshotMatrix(browser, sources, origin, output)
+      if (!process.argv.includes("--interactions-only") && !process.argv.includes("--diagnostics-only") && !process.argv.includes("--compact-only") && !process.argv.includes("--theme-only") && !process.argv.includes("--copy-only") && !process.argv.includes("--demo-only") && !process.argv.includes("--intro-only") && !process.argv.includes("--appearance-only") && !process.argv.includes("--video-only") && !process.argv.includes("--direct-only") && !process.argv.includes("--heatmap-only") && !process.argv.includes("--diary-only") && !process.argv.includes("--emotion-only") && !process.argv.includes("--mood-only") && !process.argv.includes("--settings-only") && !process.argv.includes("--backup-only") && !process.argv.includes("--tooltip-only") && !process.argv.includes("--mood-states-only") && !process.argv.includes("--select-only") && !process.argv.includes("--navigation-only")) report.screenshots = await screenshotMatrix(browser, sources, origin, output)
+      if (process.argv.includes("--navigation") || process.argv.includes("--navigation-only")) {
+        const navigation = await navigationChecks(browser, sources, origin, output, { loadPage, inspectLayout })
+        report.screenshots.push(...navigation.screenshots)
+        report.interactions.push(...navigation.checks)
+      }
       if (process.argv.includes("--select") || process.argv.includes("--select-only")) {
         const selects = await selectChecks(browser, sources, origin, output, {
           loadPage, inspectLayout, quick: process.argv.includes("--select-quick"),

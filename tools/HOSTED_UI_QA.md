@@ -1,5 +1,33 @@
 # Isolated Hosted UI QA
 
+## Sidebar Scroll Stability (2026-11-05)
+
+The sidebar previously lost its scroll position when switching modules:
+the hosted reconciler replaced its unkeyed navigation beside the keyed
+content. Keying the navigation alone preserved identity but still moved its
+DOM during sibling replacement, which reset scrolling in Chromium.
+Both scroll containers now have stable keys; only the right-hand page subtree
+remounts inside a keyed Fragment. A tab-change effect resets right-hand content
+to the top without changing the sidebar.
+
+`node tools/hosted_ui_harness.mjs --navigation-only --typecheck
+--out tools/out/sidebar-scroll-stable` passed eight checks and 24 screenshots.
+All eight cases failed against the original source. Coverage includes
+1280/390px widths, 360/480px heights, light/dark themes, repeated real clicks,
+keyboard activation, context refresh, preserved navigation/button identity and
+focus, continued wheel scrolling, and independent right-hand scroll reset.
+Desktop and narrow screenshots were visually inspected. Hosted typechecking,
+the 33-module link check and ten focused save-bar tests passed.
+`node tools/hosted_ui_harness.mjs --interactions-only --compact
+--out tools/out/sidebar-scroll-regression` also passed 62 interaction checks
+and 16 screenshots, including unsaved drafts and sticky diary/save controls,
+with zero check, render or layout failures.
+
+Package `../dist/forever_companion_1.4.7_sidebar_scroll_test.neko-plugin`
+passed official strict validation, ZIP CRC, payload verification and byte
+comparison of all 83 packaged source files. SHA-256:
+`c39b7f4b68cb876c3e876a8857fb808b44f99751beca5341f80d3e4718181273`.
+
 ## Save Bar Visibility (2026-11-05)
 
 Cycle, Emotion and Diary show their save bar only while configuration differs
