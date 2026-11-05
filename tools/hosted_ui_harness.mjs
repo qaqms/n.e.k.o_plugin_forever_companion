@@ -16,6 +16,7 @@ import { settingsChecks, selectSettings, openImport } from "./hosted_ui_settings
 import { directChecks } from "./hosted_ui_direct_checks.mjs"
 import { heatmapChecks } from "./hosted_ui_heatmap_checks.mjs"
 import { diaryChecks } from "./hosted_ui_diary_checks.mjs"
+import { memoryChecks } from "./hosted_ui_memory_checks.mjs"
 import { moodChecks } from "./hosted_ui_mood_checks.mjs"
 import { backupChecks } from "./hosted_ui_backup_checks.mjs"
 import { tooltipChecks } from "./hosted_ui_tooltip_checks.mjs"
@@ -1533,6 +1534,13 @@ async function main() {
         })
         report.screenshots.push(...diary.screenshots)
         report.interactions.push(...diary.checks)
+        if (process.argv.includes("--diary-memory")) {
+          const memory = await memoryChecks(browser, sources, origin, output, {
+            loadPage, inspectLayout, pagingOnly: process.argv.includes("--diary-memory-paging-only"),
+          })
+          report.screenshots.push(...memory.screenshots)
+          report.interactions.push(...memory.checks)
+        }
       }
       if (process.argv.includes("--emotion") || process.argv.includes("--emotion-only")) {
         const emotion = await emotionIntervalChecks(browser, sources, origin, output)

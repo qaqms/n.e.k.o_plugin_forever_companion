@@ -548,6 +548,26 @@ export const PANEL_STYLES = `
 
 .tm-diary { display: grid; gap: 10px; }
 .tm-diary-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.tm-memory-scopes {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-bottom: 1px solid var(--tm-border); margin-bottom: 12px;
+}
+.tm-memory-scope-tab { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.tm-memory-scope-count { font-size: 12px; font-variant-numeric: tabular-nums; }
+.tm-memory-scope-tab:disabled { cursor: wait; opacity: 0.65; }
+.tm-memory-scope-tab:focus-visible { outline: 2px solid var(--tm-focus); outline-offset: -2px; }
+.tm-memory { margin-top: 10px; border-top: 1px solid var(--tm-border); padding-top: 8px; font-size: 12px; color: var(--muted); }
+.tm-memory summary { cursor: pointer; overflow-wrap: anywhere; }
+.tm-memory-fields { display: grid; gap: 8px; margin: 10px 0; }
+.tm-memory-fields label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.tm-memory select, .tm-memory input, .tm-memory textarea {
+  font: inherit; color: var(--text); background: var(--tm-card-bg, transparent);
+  border: 1px solid var(--tm-border); border-radius: 4px; padding: 6px; min-width: 0; max-width: 100%;
+}
+.tm-memory-action { margin-top: 8px; }
+.tm-memory-correction, .tm-memory-evidence { white-space: pre-wrap; overflow-wrap: anywhere; }
+.tm-memory-editor { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.tm-memory textarea { width: 100%; min-height: 84px; resize: vertical; }
 .tm-diary-count { color: var(--muted); font-size: 12.5px; }
 
 /* 时光日记时间线：她的手记（暖调）与自动碎片（蓝调）混排，来源徽标 + 类型着色；
@@ -721,16 +741,16 @@ export const PANEL_STYLES = `
 .tm-settings-nav {
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-bottom: 1px solid var(--tm-border);
 }
-.tm-settings-tab, .tm-media-tab {
+.tm-settings-tab, .tm-media-tab, .tm-memory-scope-tab {
   box-sizing: border-box; min-width: 0; min-height: 44px; padding: 10px 8px;
   border: 0; border-bottom: 2px solid transparent; border-radius: 0;
   background: transparent; color: var(--muted); font: inherit; font-size: 13px; line-height: 1.5;
   overflow-wrap: anywhere; cursor: pointer; letter-spacing: 0;
 }
-.tm-settings-tab[aria-selected="true"], .tm-media-tab[aria-selected="true"] {
+.tm-settings-tab[aria-selected="true"], .tm-media-tab[aria-selected="true"], .tm-memory-scope-tab[aria-selected="true"] {
   border-bottom-color: var(--primary); color: var(--primary); font-weight: 600;
 }
-.tm-settings-tab:hover, .tm-media-tab:hover { background: var(--tm-accent-soft); }
+.tm-settings-tab:hover, .tm-media-tab:hover, .tm-memory-scope-tab:hover { background: var(--tm-accent-soft); }
 .tm-settings-section { display: grid; gap: 14px; min-width: 0; padding: 16px; }
 .tm-settings-section + .tm-settings-section { border-top: 1px solid var(--tm-border); }
 .tm-settings-section h3 { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }

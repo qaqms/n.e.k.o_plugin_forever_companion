@@ -242,6 +242,43 @@ def _entries(value, kind=""):
             _entries(item["quotes"])
         if kind == "journal":
             _entries(item.get("entries", []))
+        if "memory" in item:
+            _memory(item["memory"])
+
+
+def _memory(meta, *, nested=False):
+    _fields(meta, text=("type", "last_confirmed_at", "updated_at", "valid_until", "condition",
+                        "correction", "conflicts_with", "valid_through", "return_to_recent"),
+            counts=("schema", "confirmations"), flags=("pinned", "paused", "pending", "archived"),
+            lists=("evidence", "history", "undo"), objects=("suggestion",))
+    if meta.get("schema", 1) != 1:
+        raise BackupError("backup_version_unsupported")
+    if "type" in meta and meta["type"] not in {"preference", "temporary", "event", "boundary"}:
+        _invalid()
+    if "confirmations" in meta and not 1 <= meta["confirmations"] <= 10000:
+        _invalid()
+    if len(meta.get("evidence", [])) > 8 or len(meta.get("history", [])) > 20 or len(meta.get("undo", [])) > 10:
+        _invalid()
+    for evidence in meta.get("evidence", []):
+        _fields(evidence, text=("ts", "quote"))
+    for change in meta.get("history", []):
+        _fields(change, text=("ts", "action"))
+    if "suggestion" in meta:
+        _fields(meta["suggestion"], text=("ts", "issue", "reason"))
+    if nested and ("undo" in meta or "history" in meta):
+        _invalid()
+    for snapshot in meta.get("undo", []):
+        _fields(snapshot, text=("status",), flags=("had_memory", "had_status"), objects=("memory",), lists=("related",))
+        if not {"status", "had_memory", "had_status", "memory"} <= snapshot.keys():
+            _invalid()
+        _memory(snapshot.get("memory"), nested=True)
+        if len(snapshot.get("related", [])) > 10000:
+            _invalid()
+        for related in snapshot.get("related", []):
+            _fields(related, text=("ts", "changed_at"), flags=("had_memory",), objects=("memory",))
+            if not {"ts", "changed_at", "had_memory", "memory"} <= related.keys():
+                _invalid()
+            _memory(related.get("memory"), nested=True)
 
 
 def _tally(value):

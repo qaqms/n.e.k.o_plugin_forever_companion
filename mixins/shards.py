@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import asyncio
 import time
+from copy import deepcopy
 from typing import Any
 
 from plugin.sdk.plugin import Err, Ok, Result, SdkError
 
+from ..core.backup import json_bytes
 from ..core.cycle import (
     compute_phase_state,
     derive_cycle_params,
@@ -26,7 +28,6 @@ from ..core.journal import journal_entries, migrate_weekly_to_pages
 from ..core.onboarding import norm_guide_record
 from ..core.state import (
     _CURRENT_LANLAN_CACHE_TTL,
-    _DIARY_MAX_ENTRIES,
     _JOURNAL_ARCHIVE_MAX_PAGES,
     _JOURNAL_MAX_PAGES,
     _KNOWN_CATGIRLS_CACHE_TTL,
@@ -724,6 +725,8 @@ class ShardsMixin:
         前面的写不回滚（保持简单）：真失败极罕见，重试幂等。"""
         for res in results:
             if isinstance(res, Err):
+                if str(res.error) in {"memory_capacity_reached", "backup_busy"}:
+                    return res
                 # 失败细节已由 _store_write/_store_delete 统一出口留痕，此处不重复落日志
                 return Err(SdkError("persist_failed"))
         return None
@@ -739,10 +742,62 @@ class ShardsMixin:
         )
 
     async def _save_shard_diary(self, lanlan: str, shard: _LanlanShard) -> Result[None]:
-        # 内存与落盘保持同一截断语义：都只保留最近 _DIARY_MAX_ENTRIES 条，
-        # 避免本次会话 total 与重启后 total 不一致
-        shard.diary = list(shard.diary[-_DIARY_MAX_ENTRIES:])
-        return await self._store_write(_diary_key(lanlan), list(shard.diary), f"diary for {lanlan}")
+        # Keep history in one atomic Store value. The recent/archive boundary
+        # is a view, so a failed second write can never strand an old record.
+        if not shard.diary_save_lock.acquire(blocking=False):
+            return Err(SdkError("backup_busy"))
+        try:
+            return await self._write_diary_snapshot(lanlan, shard)
+        finally:
+            shard.diary_save_lock.release()
+
+    async def _write_diary_snapshot(
+        self, lanlan: str, shard: _LanlanShard, previous: list | None = None,
+    ) -> Result[None]:
+        snapshot = deepcopy(shard.diary)
+        size = len(json_bytes(snapshot))
+        if size > 16 * 1024 * 1024 and (previous is None or size >= len(json_bytes(previous))):
+            self.logger.warning("diary capacity reached for {}; existing records retained", lanlan)
+            return Err(SdkError("memory_capacity_reached"))
+        return await self._store_write(_diary_key(lanlan), snapshot, f"diary for {lanlan}")
+
+    async def _update_shard_diary(self, lanlan: str, shard: _LanlanShard, mutate) -> Result[Any]:
+        """Serialize mutation and persistence together across host event loops."""
+        if not shard.diary_save_lock.acquire(blocking=False):
+            return Err(SdkError("backup_busy"))
+        before = None
+        committed = False
+        try:
+            before = deepcopy(shard.diary)
+            value = mutate(shard.diary)
+            if shard.diary == before:
+                return Ok(value)
+            # PluginStore writes run in a worker thread. Keep the lock until
+            # that write finishes even if the host cancels this invocation.
+            writer = asyncio.create_task(self._write_diary_snapshot(lanlan, shard, before))
+            cancelled = None
+            while True:
+                try:
+                    saved = await asyncio.shield(writer)
+                    break
+                except asyncio.CancelledError as exc:
+                    if writer.cancelled():
+                        raise
+                    cancelled = exc
+            committed = not isinstance(saved, Err)
+            if isinstance(saved, Err):
+                shard.diary = before
+            if cancelled is not None:
+                raise cancelled
+            if isinstance(saved, Err):
+                return saved
+            return Ok(value)
+        except BaseException:
+            if before is not None and not committed:
+                shard.diary = before
+            raise
+        finally:
+            shard.diary_save_lock.release()
 
     async def _save_diary(self) -> Result[None]:
         """兼容包装：保存"当前"shard 的手记（无 lanlan 上下文的旧调用点/测试用）。"""

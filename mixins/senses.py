@@ -28,6 +28,7 @@ from ..core.fragments import (
     should_nudge_fight,
 )
 from ..core.journal import build_journal_prompt, journal_materials, journal_write
+from ..core.memory import apply_capture, extraction_candidates, memory_state, new_metadata
 from ..core.review import (
     append_review,
     build_review_prompt,
@@ -61,7 +62,6 @@ from ..core.state import (
     _FRAGMENT_MAX_DAILY_LIMIT,
     _FRAGMENT_MIN_DAILY_LIMIT,
     _FRAGMENT_RECALL_FOR_PROMPT,
-    _FRAGMENT_STATUS_SUPERSEDED,
     _HOST_LLM_MAX_TOKENS_FRAGMENT,
     _HOST_LLM_MAX_TOKENS_REVIEW,
     _HOST_LLM_TIMEOUT_FRAGMENT_SEC,
@@ -604,9 +604,8 @@ class SensesMixin:
         fragment_capture_spend(shard.cycle, day)
         await self._agent_tier_spend(lanlan, shard, slot)
         await self._save_shard_cycle(lanlan, shard)
-        # 已有记忆：recall_fragments 只给现行事实（status=active），最近 N 条带编号进
-        # prompt 供模型判"重复 / 取代"。空日记时是空列表，prompt 里明写「（无）」。
-        existing = recall_fragments(shard.diary, limit=_FRAGMENT_RECALL_FOR_PROMPT)
+        # 从全部历史选少量相关记录，附带最新几条作为语境；候选快照供回包后校验。
+        existing = extraction_candidates(shard.diary, user_text, limit=_FRAGMENT_RECALL_FOR_PROMPT)
         raw = await self._channel_chat(
             resolved,
             build_fragment_prompt(user_text, her_text, existing),
@@ -629,35 +628,27 @@ class SensesMixin:
         # 判"更新了某条"则新增并把旧条切到 superseded（旧条留在时间线上可追溯，只是不再
         # 当作现行事实被检索出来）。编号越界一律按 new 处理——宁可多记一条重复，也不能
         # 因为模型回了一个坏编号就把一条正确记忆标成失效。
-        relation = str(parsed.get("relation") or "new")
-        supersedes_ts = ""
-        if relation == "duplicate":
-            self.logger.info(
-                "fragment duplicate skipped: lanlan={} kind={}", lanlan, parsed.get("kind"),
-            )
-            return False
-        if relation == "supersede":
-            try:
-                target = int(parsed.get("target") or 0)
-            except (TypeError, ValueError):
-                target = 0
-            if 1 <= target <= len(existing):
-                supersedes_ts = str(existing[target - 1].get("ts") or "")
         record = fragment_record(
-            _now_utc().isoformat(timespec="seconds"),
+            _now_utc().isoformat(timespec="microseconds"),
             self._last_phase_name(shard),
             parsed,
-            supersedes=supersedes_ts,
         )
-        if supersedes_ts:
-            for item in shard.diary:
-                if str(item.get("ts") or "") == supersedes_ts:
-                    item["status"] = _FRAGMENT_STATUS_SUPERSEDED
-                    break
-        shard.diary.append(record)
+        record["memory"] = new_metadata(
+            parsed, record["ts"], user_text=user_text, local_now=_now_utc().astimezone(self._stats_tz()),
+        )
+        saved = await self._update_shard_diary(
+            lanlan, shard, lambda diary: apply_capture(diary, existing, parsed, record),
+        )
+        if isinstance(saved, Err):
+            return False
+        outcome = saved.value
+        if outcome == "duplicate":
+            return False
+        if outcome == "reinforced":
+            self.logger.info("fragment reinforced: lanlan={} kind={}", lanlan, parsed.get("kind"))
+            return False
         # 我的日记素材：碎片原话是"他说话方式"的最硬例证（含过激言行）
         self._feed_review_fragment(shard, record)
-        await self._save_shard_diary(lanlan, shard)
         # 1.3.0 第十轮隐私契约：旧版把用户对话原文直接打进日志文件（原话字段
         # 的 repr 形态），宿主规范（best-practices）禁止对话内容进日志。现在
         # 改记长度：面板日记页本来就有原话可见，日志只需定位"哪天记了哪条"
@@ -674,6 +665,8 @@ class SensesMixin:
         """吵架轻语：重度负面动作生效中又捕获到"过激/厌恶"类碎片时，
         低频提醒一句"你记得吗"（附一条相关的旧碎片作佐证）——她可以忽略，
         用不用、怎么用仍由她自己决定。"""
+        if memory_state(record) != "active":
+            return
         action = shard.mood.action if shard.mood.is_active() else ""
         if not should_nudge_fight(record, action, _PROACTIVE_PAUSE_ACTIONS):
             return

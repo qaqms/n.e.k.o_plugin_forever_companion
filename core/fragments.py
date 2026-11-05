@@ -9,10 +9,12 @@
 
 from __future__ import annotations
 
+import math
 import re
 from datetime import datetime, timedelta
 from typing import Any
 
+from .memory import memory_state, memory_text, metadata, recall_memories
 from .state import (
     _DIARY_MAX_ENTRIES,
     _FRAGMENT_EXTRACTION_PROMPT,
@@ -83,13 +85,20 @@ def _format_line(index: int, item: JsonObject) -> str:
     kind = str(item.get("kind") or "")
     quote = str(item.get("quote") or "")[:_FRAGMENT_QUOTE_MAX_CHARS]
     day = str(item.get("ts") or "")[:10]
-    return f"[{index}] [{kind}] {day} {quote}" if day else f"[{index}] [{kind}] {quote}"
+    line = f"[{index}] [{kind}] {day} {quote}" if day else f"[{index}] [{kind}] {quote}"
+    meta = metadata(item)
+    if meta:
+        line += f" (状态:{memory_state(item)}; 条件:{meta.get('condition') or '无'}"
+        if meta.get("correction"):
+            line += f"; 用户纠正后的结论:{memory_text(item)}"
+        line += ")"
+    return line
 
 
 def _format_existing(existing: list[JsonObject]) -> str:
     """把已有碎片排成编号清单塞进 prompt（编号就是模型回填的 target）。
 
-    调用方传的是 recall_fragments 的结果（时间倒序），所以编号 1 是最新一条——这一点
+    调用方传的是候选快照（时间倒序），所以编号 1 是最新一条——这一点
     必须在段落标题里写明，否则模型会把编号当成时间正序，把"更新"判反。
     空列表时明确写"（无）"——不能让模型对着一个空标题自己猜有没有记忆。
     """
@@ -108,7 +117,7 @@ def build_fragment_prompt(
 ) -> str:
     """组装碎片提取请求：主人的话是分析对象，她的回复只作语境（截断防 prompt 膨胀）。
 
-    existing = 已有碎片（调用方传 recall_fragments 的最近若干条），让模型判断这句是
+    existing = 已有碎片（调用方从全历史选取的相关候选），让模型判断这句是
     新的 / 重复的 / 更新了某条旧记忆；缺省 None 等价空列表（旧调用点与旧测试不受影响）。
     """
     context = f"（猫娘当时的回复：{her_text[:120]}）" if str(her_text or "").strip() else ""
@@ -124,7 +133,7 @@ def parse_fragment_response(raw: str) -> JsonObject | None:
 
     容忍模型在 JSON 前后附带解释文本（取第一个 {...} 块）；capture 缺省按 False
     处理（宁可漏记不可错记）；kind 不在类型表或缺 quote → None；
-    confidence 钳制到 [0,1]；relation 缺失/未知按 "new"，target 只在 supersede 时
+    confidence 钳制到 [0,1]；relation 缺失/未知按 "new"，target 在关系需要旧记录时
     解析（编号是否越界由调用方按「已有记忆」实际长度判定）。返回结构：
     {capture, kind, quote, note, confidence, relation, target}。
     """
@@ -144,7 +153,8 @@ def parse_fragment_response(raw: str) -> JsonObject | None:
     if not isinstance(data, dict):
         return None
     try:
-        confidence = max(0.0, min(1.0, float(data.get("confidence") or 0.0)))
+        confidence = float(data.get("confidence") or 0.0)
+        confidence = max(0.0, min(1.0, confidence)) if math.isfinite(confidence) else 0.0
     except (TypeError, ValueError):
         confidence = 0.0
     if not data.get("capture"):
@@ -161,12 +171,13 @@ def parse_fragment_response(raw: str) -> JsonObject | None:
     if relation not in _FRAGMENT_RELATIONS:
         relation = "new"
     target = 0
-    if relation == "supersede":
-        try:
-            target = int(data.get("target") or 0)
-        except (TypeError, ValueError):
-            target = 0
-    return {
+    if relation in {"supersede", "duplicate", "conflict"}:
+        value = data.get("target")
+        if type(value) is int:
+            target = value
+        elif isinstance(value, str) and re.fullmatch(r"\d{1,6}", value.strip()):
+            target = int(value)
+    result = {
         "capture": True,
         "kind": kind,
         "quote": quote,
@@ -175,6 +186,10 @@ def parse_fragment_response(raw: str) -> JsonObject | None:
         "relation": relation,
         "target": target,
     }
+    for key in ("memory_type", "valid_until", "condition"):
+        if isinstance(data.get(key), str):
+            result[key] = data[key].strip()[:120]
+    return result
 
 
 def fragment_record(
@@ -210,35 +225,11 @@ def recall_fragments(
 ) -> list[JsonObject]:
     """时光日记检索（她自主调用的"翻旧账/回忆喜好"工具的取数纯函数）。
 
-    只返回自动碎片（source=auto；她的手记不在此列）且仍处于 active 生命周期的条目；
-    kind 过滤、query 对 quote+note 做不区分大小写的子串匹配；按时间倒序
-    （最近的先想起），截 limit 条。limit 钳制到 1..30。
+    只返回自动碎片；默认排除休眠、暂停、待确认、到期及被更新的条目。
+    明确关键词查询可找回休眠记录，但不会恢复有效性或增加确认次数。
+    排序考虑相关性、保留、边界、确认及时间；旧记录仍按新近优先。
     """
-    try:
-        cap = max(1, min(30, int(limit)))
-    except (TypeError, ValueError):
-        cap = 10
-    wanted_kind = str(kind or "").strip()
-    needle = str(query or "").strip().lower()
-    hits: list[JsonObject] = []
-    for item in reversed(diary):
-        if str(item.get("source") or "") != "auto":
-            continue
-        # 生命周期闸：只把"现行事实"递给她。superseded 的旧条留在时间线上可追溯，
-        # 但不再冒充现状（例：先说"最喜欢咖啡"、后来"心悸戒了"）。旧记录缺 status
-        # 字段一律按 active 处理——1.4.2 及之前的存量碎片必须照常翻得到（零迁移）。
-        if str(item.get("status") or _FRAGMENT_STATUS_ACTIVE) != _FRAGMENT_STATUS_ACTIVE:
-            continue
-        if wanted_kind and str(item.get("kind") or "") != wanted_kind:
-            continue
-        if needle:
-            haystack = f"{item.get('quote') or ''} {item.get('note') or ''}".lower()
-            if needle not in haystack:
-                continue
-        hits.append(item)
-        if len(hits) >= cap:
-            break
-    return hits
+    return recall_memories(diary, str(kind or "").strip(), str(query or ""), limit)
 
 
 def build_review_prompt(items: list[JsonObject]) -> str:

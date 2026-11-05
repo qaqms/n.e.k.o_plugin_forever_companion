@@ -1,5 +1,67 @@
 # Isolated Hosted UI QA
 
+## Visible Time Diary Archive Entry (2026-11-05)
+
+Time Diary now shows Recent and Archive as adjacent tabs with live counts,
+including when the last recent record is archived. Both views use the same
+record management controls. The tabs support arrow keys, Home and End, retain
+the loading/error/retry behavior, and reset to Recent on role changes.
+
+Final hosted command: `node tools/hosted_ui_harness.mjs --diary-only
+--diary-pagination-only --diary-memory --typecheck
+--out ../dist/qa-memory-archive-entry-verified`.
+Result: 162 interaction checks, 44 screenshots, zero check, render or layout
+failures across all eight locales at 1280px and 390px. Added coverage verifies
+visible entries and counts after archiving the last recent record, keyboard
+navigation, failed archive loads and retry, pause/resume and keep/undo within
+the archive, and returning records to Recent. Pagination, polling, unsaved
+drafts and late replies after switching roles remain covered.
+Chinese desktop/narrow and English desktop/narrow screenshots were visually
+inspected. The focused lifecycle/i18n/link/package Python suite passed 108
+tests; the 33-module hosted link check and `git diff --check` passed.
+
+Package: `../dist/forever_companion_1.4.7_memory_lifecycle_test_v3.neko-plugin`
+(751,664 bytes). Official strict validation, ZIP CRC, payload hash verification
+and byte comparison of all 83 packaged source files passed. SHA-256:
+`6a8834d8bd8ca13c59ad7cc7fadeba3d8b011474b32317ec359c31aea180d416`.
+Use this package instead of v2 for the visible archive entry.
+
+Version remains 1.4.7. Host code and user storage were not modified.
+No commit, push, tag or Release was created.
+
+## Memory Lifecycle Test Package (2026-11-05)
+
+The full Python suite passed 1,221 tests with 39 conditional skips. Coverage
+includes archive retention and restart, grounded local-midnight expiry,
+24-hour reinforcement, legacy records without aging baselines, replacement
+chains, correction and undo, stale model replies, failed persistence,
+concurrent writes, cancellation during a write, capacity and backup validation.
+The pinned Ruff check, offline lockfile check and 33-module hosted link check
+passed. After the final UI adjustment, 47 i18n/link/package checks also passed.
+
+Final hosted command: `node tools/hosted_ui_harness.mjs --diary-only
+--diary-pagination-only --diary-memory --typecheck
+--out ../dist/qa-memory-lifecycle-verified`.
+Result: 130 interaction checks, 28 screenshots, zero check, render or layout
+failures. It covers all eight locales at 1280px and 390px, evidence, original
+text preservation, pause/resume, keep/undo, literal correction, failed saves,
+type/date selection, archive retry/restore, and command-menu reset. Paging
+checks preserve 112 loaded records and unsaved correction text across polling
+and management beyond the dashboard preview, and reject late replies after a
+role switch. The existing 145 diary regression cases passed in the preceding
+broad run; its command-menu failures were fixed and retested in this final run.
+Chinese desktop/narrow and English narrow screenshots were visually inspected.
+
+Package: `../dist/forever_companion_1.4.7_memory_lifecycle_test_v2.neko-plugin`
+(751,405 bytes). Official strict validation, ZIP CRC, payload hash verification
+and byte comparison of all 83 packaged source files passed. SHA-256:
+`9e141eeea5c98ba51a0729dec2d9c7eb89fc8f9de88a1f22f3fb24ea2b858605`.
+The earlier package without `_v2` predates the final command-menu fix; use `_v2`.
+
+Version remains 1.4.7. Host code and user storage were not modified.
+These are isolated tests; real-host import and model extraction remain user
+testing. No commit, push, tag or Release was created for this feature.
+
 ## 1.4.7 Version And Package (2026-11-04)
 
 The manifest, Python project, lockfile and README current version are 1.4.7.

@@ -294,6 +294,22 @@ export function installFixtureBridge(fixture) {
     replies.forEach(reply => reply())
   }
   const clone = value => JSON.parse(JSON.stringify(value))
+  const selectDiary = scope => {
+    const candidates = fixture.diary.map((item, index) => ({ item, index }))
+      .filter(({ item }) => !item.memory?.archived)
+      .sort((a, b) => String(b.item.memory?.return_to_recent || "").localeCompare(String(a.item.memory?.return_to_recent || "")) || a.index - b.index)
+    const recent = new Set(candidates.slice(0, 120).map(({ index }) => index))
+    return fixture.diary.filter((_, index) => scope === "all" || (scope === "archive" ? !recent.has(index) : recent.has(index)))
+  }
+  const refreshDiary = () => {
+    const state = fixture.context.state
+    const recent = selectDiary("recent")
+    state.diary_recent = clone(recent.slice(0, 12))
+    state.diary_total = recent.length
+    state.diary_archive_total = fixture.diary.length - recent.length
+    state.fragment_total = recent.filter(item => item.source === "auto").length
+  }
+  window.qaRefreshDiary = refreshDiary
   const chunkBytes = 768 * 1024
   const videoBytes = () => fixture.gallery.reduce((sum, item) => sum + (item.kind === "video" ? item.size : 0), 0)
   const mediaSummary = () => {
@@ -497,10 +513,47 @@ export function installFixtureBridge(fixture) {
     if (action === "get_journal") return { pages: args.scope === "archive" ? fixture.journalArchive : fixture.journal }
     if (action === "get_review") return { entries: args.scope === "archive" ? fixture.reviewArchive : fixture.review, progress: fixture.reviewProgress }
     if (action === "get_diary") {
-      const offset = Math.max(0, Math.min(Number(args.offset || 0), fixture.diary.length))
+      const source = selectDiary(args.scope)
+      const offset = Math.max(0, Math.min(Number(args.offset || 0), source.length))
       const limit = Math.max(1, Math.min(Number(args.limit ?? 10), 50))
-      const items = fixture.diary.slice(offset, offset + limit)
-      return { items, total: fixture.diary.length, offset, has_more: offset + items.length < fixture.diary.length }
+      const items = clone(source.slice(offset, offset + limit))
+      if (args.scope === "archive") items.forEach(item => { item.in_archive = true })
+      return { items, total: source.length, offset, has_more: offset + items.length < source.length }
+    }
+    if (action === "delete_diary_item") {
+      if (args.expected_lanlan && args.expected_lanlan !== state.lanlan) throw new Error("mood_changed")
+      const item = fixture.diary.find(item => item.ts === args.ts)
+      if (!item) throw new Error("fragment_not_found")
+      const operation = args.action || "delete"
+      if (operation === "delete") fixture.diary = fixture.diary.filter(entry => entry !== item)
+      else {
+        const before = clone(item)
+        if (before.memory) delete before.memory.undo
+        const meta = item.memory ||= {}
+        if (operation === "pin" || operation === "unpin") meta.pinned = operation === "pin"
+        if (operation === "pause" || operation === "resume") meta.paused = operation === "pause"
+        if (operation === "correct") { meta.correction = args.text; meta.pinned = true; item.status = "active"; delete meta.pending; delete meta.suggestion }
+        if (operation === "confirm") { meta.pinned = true; meta.paused = false; meta.pending = false; item.status = "active"; delete meta.valid_until; delete meta.suggestion }
+        if (operation === "archive" || operation === "unarchive") {
+          meta.archived = operation === "archive"
+          if (operation === "unarchive") meta.return_to_recent = new Date().toISOString()
+        }
+        if (operation === "classify") { meta.type = args.text; meta.pending = args.text === "temporary" && !meta.valid_until }
+        if (operation === "expire") { meta.type = "temporary"; meta.valid_until = `${args.text}T23:59:59Z`; meta.valid_through = args.text; meta.pending = false }
+        if (operation === "undo") {
+          const saved = meta.undo?.at(-1)
+          const undo = meta.undo?.slice(0, -1) || []
+          if (saved) {
+            Object.keys(item).forEach(key => { delete item[key] })
+            Object.assign(item, saved)
+            item.memory = { ...(item.memory || {}), undo }
+          }
+        } else meta.undo = [...(meta.undo || []), before].slice(-10)
+        item.memory_state = item.status === "superseded" ? "superseded"
+          : item.memory?.paused ? "paused" : item.memory?.pending ? "pending" : "active"
+      }
+      refreshDiary()
+      return { action: operation, removed: operation === "delete" ? 1 : 0, lanlan: state.lanlan }
     }
     if (action === "get_stats") return { ...fixture.stats, heatmap: fixture.heatmaps?.[args.year] || fixture.stats.heatmap, month: fixture.stats.month ? { ...fixture.stats.month, month: args.month || fixture.stats.month.month } : null }
     if (action === "get_capability_intro") return clone(fixture.intros[args.capability_id] || { found: false, id: args.capability_id })

@@ -84,6 +84,25 @@ export type DiaryItem = {
   entry?: string
   quote?: string
   note?: string
+  memory_state?: string
+  in_archive?: boolean
+  memory?: {
+    type?: string
+    pinned?: boolean
+    paused?: boolean
+    archived?: boolean
+    confirmations?: number
+    last_confirmed_at?: string
+    valid_until?: string
+    valid_through?: string
+    condition?: string
+    correction?: string
+    conflicts_with?: string
+    evidence?: Array<{ ts?: string; quote?: string }>
+    history?: Array<{ ts?: string; action?: string }>
+    undo?: Array<Record<string, any>>
+    suggestion?: { ts?: string; issue?: string; reason?: string }
+  }
 }
 
 // 个人日记页眉统计（journal_index 用）；entries 仅 journal_current / get_journal 返回
@@ -323,6 +342,7 @@ export type State = {
   calendar?: Calendar
   diary_recent?: DiaryItem[]
   diary_total?: number
+  diary_archive_total?: number
   fragment_total?: number
   journal_index?: JournalPageHeader[]
   // 藏书阁（1.3.0）：合订本概览；全量翻阅走 get_journal_archive 按需拉取

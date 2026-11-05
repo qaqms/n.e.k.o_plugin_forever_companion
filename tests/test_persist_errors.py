@@ -326,7 +326,7 @@ def test_diary_delete_and_clear_review_propagate_persist_errors(tm, boot_factory
     assert isinstance(res, tm.Err)
     assert str(res.error) == "persist_failed"
     assert store.data["diary@灵"] == diary, "写失败盘上必须原样"
-    assert p._get_shard("灵").diary == [], "内存当场生效（面板即时可见）"
+    assert p._get_shard("灵").diary == diary, "删除失败保留内存记录，避免面板假报删除"
 
     res2 = run(p.clear_review())
     assert isinstance(res2, tm.Err)

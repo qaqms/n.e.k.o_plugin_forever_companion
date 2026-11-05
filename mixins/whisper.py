@@ -720,13 +720,11 @@ class WhisperMixin:
         saves = [await self._save_shard_stats(lanlan, shard)]
         keep_diary = cfg.get("keep_diary", True) is not False
         if keep_diary:
-            shard.diary.append(
-                make_birthday_diary_record(
-                    _now_utc().isoformat(timespec="seconds"),
-                    self._last_phase_name(shard),
-                )
+            record = make_birthday_diary_record(
+                _now_utc().isoformat(timespec="microseconds"),
+                self._last_phase_name(shard),
             )
-            saves.append(await self._save_shard_diary(lanlan, shard))
+            saves.append(await self._update_shard_diary(lanlan, shard, lambda diary: diary.append(record)))
         persist_err = self._persist_error(*saves)
         if persist_err is not None:
             # 轻语已上线、水位已盖：落盘失败只影响面板回显，不回滚水位

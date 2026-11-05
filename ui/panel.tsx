@@ -85,6 +85,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   const [wizardClosed, setWizardClosed] = useState(false)
   const [backupRevision, setBackupRevision] = useState(0)
   const [recordsRevision, setRecordsRevision] = useState(0)
+  const [memoryRevision, setMemoryRevision] = useState(0)
   const resetLock = useRef(false)
   const [resetting, setResetting] = useState(false)
   const statsGeneration = useRef(0)
@@ -944,7 +945,8 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     })
     if (!ok) return
     try {
-      await props.api.call("delete_diary_item", { ts })
+      await props.api.call("delete_diary_item", { ts, expected_lanlan: state.lanlan || "" })
+      setRecordsRevision(value => value + 1)
       await props.api.refresh()
       toast.success(t("panel.diary.deleted", { defaultValue: "已删除" }))
     } catch (err) {
@@ -979,17 +981,23 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     }
   }
 
-  async function onLoadMoreDiary(offset: number) {
+  async function onLoadMoreDiary(offset: number, scope = "recent") {
+    const payload = unwrapCallResult(await props.api.call("get_diary", { limit: 50, offset, scope }))
+    const r = (payload || {}) as Record<string, any>
+    if (!Array.isArray(r.items)) throw new Error(t("panel.memory.loadFailed", { defaultValue: "记录加载失败，请重试" }))
+    return { items: r.items as DiaryItem[], hasMore: !!r.has_more, total: Number(r.total || 0) }
+  }
+
+  async function onManageMemory(ts: string, action: string, text = "") {
     try {
-      const payload = unwrapCallResult(await props.api.call("get_diary", { limit: 50, offset }))
-      const r = (payload || {}) as Record<string, any>
-      return {
-        items: Array.isArray(r.items) ? (r.items as DiaryItem[]) : [],
-        hasMore: !!r.has_more,
-      }
+      unwrapCallResult(await props.api.call("delete_diary_item", { ts, action, text, expected_lanlan: state.lanlan || "" }))
+      await props.api.refresh()
+      setMemoryRevision(value => value + 1)
+      toast.success(t("panel.memory.saved", { defaultValue: "记忆设置已保存" }))
+      return true
     } catch (err) {
-      console.warn("[forever_companion] load more diary failed:", err)
-      return { items: [] as DiaryItem[], hasMore: false }
+      toast.error(errorText(err, t))
+      return false
     }
   }
 
@@ -1523,6 +1531,8 @@ export default function Panel(props: PluginSurfaceProps<State>) {
               t={t}
               diary={state.diary_recent || []}
               diaryTotal={state.diary_total || 0}
+              diaryArchiveTotal={state.diary_archive_total || 0}
+              memoryRevision={memoryRevision}
               fragmentTotal={state.fragment_total || 0}
               journalIndex={state.journal_index || []}
               journalArchiveBrief={state.journal_archive_brief}
@@ -1531,6 +1541,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
               reviewBrief={state.review_brief}
               reviewArchiveBrief={state.review_archive_brief}
               onDeleteFragment={onDeleteFragment}
+              onManageMemory={onManageMemory}
               onLoadJournal={onLoadJournal}
               onLoadJournalArchive={onLoadJournalArchive}
 

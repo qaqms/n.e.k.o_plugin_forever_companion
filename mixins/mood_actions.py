@@ -12,6 +12,7 @@ ForeverCompanionPlugin——SDK 的工具发现遍历 type(self)（collect_llm_t
 from __future__ import annotations
 
 import time
+from copy import deepcopy
 from typing import Any
 
 from plugin.sdk.plugin import Err, Ok, Result, SdkError, llm_tool
@@ -19,6 +20,7 @@ from plugin.sdk.plugin import Err, Ok, Result, SdkError, llm_tool
 from ..core.affect import _MOOD_AFFECT_IMPULSES, _apply_affect_impulse, _current_affect
 from ..core.fragments import build_review_prompt, parse_review_response, recall_fragments
 from ..core.journal import assemble_journal_entry, has_journal_content, journal_write, normalize_journal_title
+from ..core.memory import memory_state, memory_text, metadata
 from ..core.state import (
     _ACTION_DEFAULT_MINUTES,
     _CHANNEL_BUDGET_REASON,
@@ -801,14 +803,15 @@ class MoodActionsMixin:
         if not text:
             return Err(SdkError("diary entry is empty"))
         record = {
-            "ts": _now_utc().isoformat(timespec="seconds"),
+            "ts": _now_utc().isoformat(timespec="microseconds"),
             "source": "self",
             "phase": self._last_phase_name(shard),
             "mood": str(mood or "").strip(),
             "entry": text[:500],
         }
-        shard.diary.append(record)
-        res_diary = await self._save_shard_diary(lanlan, shard)
+        res_diary = await self._update_shard_diary(lanlan, shard, lambda diary: diary.append(record))
+        if isinstance(res_diary, Err):
+            return self._persist_error(res_diary)
         # 相处统计：第一篇手记里程碑（已有值不覆盖，永远是最早那次）；
         # 与 first_journal/first_review 同款即时落盘（1.2.2 批次2 补齐缺口）
         shard.stats = record_milestone(shard.stats, "first_diary")
@@ -991,11 +994,17 @@ class MoodActionsMixin:
                         "kind": item.get("kind"),
                         "quote": item.get("quote"),
                         "note": item.get("note"),
+                        "meaning": memory_text(item),
+                        "condition": metadata(item).get("condition") or "",
+                        "memory_state": memory_state(item),
+                        "user_corrected": bool(metadata(item).get("correction")),
                     }
                     for item in items
                 ],
                 "hint": (
-                    "这些是你心里记着的、关于他的片段。用不用、怎么说，由你自己决定。"
+                    "这些是记着他的片段。meaning 是当前结论；user_corrected=true 时以用户纠正为准，"
+                    "quote 仅为历史原话。遵守 condition，dormant 表示久未确认，不代表仍然成立。"
+                    "历史冲突不代表已原谅。用不用、怎么说，由你自己决定。"
                     if items
                     else "这本日记里还没有匹配的记录。"
                 ),
@@ -1006,7 +1015,7 @@ class MoodActionsMixin:
         name="mood_check_memory",
         description=(
             "记忆自检：回头看看记着他的那些片段，有没有已经过时的、彼此矛盾的、"
-            "或者同一件事记了两遍的。只返回建议，不会动你的日记本——"
+            "或者同一件事记了两遍的。保存整理建议，不改原文或自动改变有效性——"
             "要不要处理、怎么处理，由你自己决定。"
             "想清理旧账、或觉得某件事自己记岔了的时候用。"
         ),
@@ -1035,7 +1044,10 @@ class MoodActionsMixin:
             want = max(2, min(_FRAGMENT_REVIEW_MAX_ITEMS, int(limit)))
         except (TypeError, ValueError):
             want = _FRAGMENT_REVIEW_DEFAULT_ITEMS
-        items = recall_fragments(shard.diary, limit=want)
+        items = deepcopy([
+            item for item in shard.diary
+            if item.get("source") == "auto" and memory_state(item) == "active"
+        ][-want:][::-1])
         if len(items) < 2:
             return Ok(
                 {
@@ -1078,21 +1090,33 @@ class MoodActionsMixin:
         if findings is None:
             # 解析失败不改任何状态、不占节流位：这次等于没发生，她可以再试
             return Err(SdkError("模型这次的回答读不懂，没有改动任何记录"))
-        result: list[JsonObject] = []
-        for item in findings:
-            index = int(item["index"])
-            if not 1 <= index <= len(items):
-                continue  # 编号越界：只丢这条建议，不影响其他发现
-            target = items[index - 1]
-            result.append(
-                {
-                    "ts": target.get("ts"),
-                    "kind": target.get("kind"),
-                    "quote": target.get("quote"),
-                    "issue": item["issue"],
-                    "reason": item["reason"],
+        def attach_suggestions(diary):
+            result = []
+            for finding in findings:
+                index = int(finding["index"])
+                if not 1 <= index <= len(items):
+                    continue
+                expected = items[index - 1]
+                # Do not attach an in-flight review to an edited/deleted record.
+                target = next((current for current in diary if current == expected), None)
+                if target is None:
+                    continue
+                result.append({
+                    "ts": target.get("ts"), "kind": target.get("kind"), "quote": target.get("quote"),
+                    "issue": finding["issue"], "reason": finding["reason"],
+                })
+                stamp = _now_utc().isoformat()
+                target["memory"] = {
+                    **metadata(target), "updated_at": stamp,
+                    "suggestion": {"ts": stamp, "issue": finding["issue"], "reason": finding["reason"]},
                 }
-            )
+                target["memory"].pop("undo", None)
+            return result
+
+        saved = await self._update_shard_diary(lanlan, shard, attach_suggestions)
+        if isinstance(saved, Err):
+            return self._persist_error(saved)
+        result = saved.value
         shard.last_fragment_review_ts = now
         return Ok(
             {

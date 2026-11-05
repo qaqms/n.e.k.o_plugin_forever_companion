@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import math
+import threading
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -273,9 +274,8 @@ _STATS_DAYS_MAX = 730
 # 月报封卷的保留上限：超出淘汰最旧（与个人日记/我的日记 52 篇同量级）
 _STATS_MONTHS_MAX = 24
 
-# 时光日记的保留条数（内存与落盘一致，每个角色各自一份）：
-# 0.7.0 起时间线混排"她的手记"(source=self) 与"自动碎片"(source=auto)，
-# 碎片由小模型按轮自动捕获，条数上限相应放宽
+# 时光日记近期视图条数；更早的记录在归档中保留，不再在保存时截断。
+# 手记与碎片仍共用每角色 diary@ 列表，原子写入包含完整历史及记忆使用状态。
 _DIARY_MAX_ENTRIES = 120
 
 # ---- 时光日记·自动碎片（0.7.0）----
@@ -334,23 +334,31 @@ note 用第三人称简短记录这件事（如"他说最喜欢她做的饭"，2
 - 只有明确表达才记，别过度解读玩笑和反话；confidence 是"值得记"的把握。
 - 再看下面「已有记忆」里有没有说同一件事的（编号 1 是最近一条，按时间倒序）：
   · 结论相同（同一个喜好/厌恶/约定又提了一遍）→ relation 填 "duplicate"，不要重复记；
-  · 结论相反或已更新（原先喜欢、现在不喜欢了；旧约定改了）→ relation 填 "supersede"，
-    并把那条的编号填进 target；
+  · 主人明确纠正旧结论或说明已经改变 → relation 填 "supersede"，并把旧条编号填进 target；
+  · 结论看起来矛盾但没有明确说明改变 → relation 填 "conflict"，并填 target；
   · 说的是另一件事 → relation 填 "new"。
 - 「已有记忆」为空，或里面没有对应条目，一律填 "new"。
 - 拿不准就填 "new"：宁可多记一条，也不能错删一条旧记忆。
+
+记忆使用规则：
+- duplicate 也要返回 target，指向同一结论、同一适用条件的旧记录，以便累计独立确认。
+- 只有主人明确纠正或说明旧结论已改变时才用 supersede；仅仅矛盾、指代不明时用 conflict 并填 target。
+- "喜欢咖啡"与"晚上不喝咖啡"适用条件不同，可以同时成立，不要互相取代。
+- 可增加 memory_type：preference=长期偏好，temporary=临时状态，event=历史事件，boundary=明确边界。
+- condition 可摘录原话中的适用条件，必须是原文子串；没有条件就留空。
+- 临时状态可增加 valid_until（原话明确的 YYYY-MM-DD 日期）；今天/今晚只在今天有效。
+  没有可核对的期限不要编造日期，系统会将临时记录列为待确认。
+- 历史上的过激言行是发生过的事件，不能因时间过去就判断已经原谅。
 
 只返回 JSON，不要附加任何解释文本。
 """
 
 # 关系判定的闭集（写入后治理）：new = 与已有记忆无关；duplicate = 同一结论又提一遍，
-# 不新增条目；supersede = 同一话题上被这句更新/推翻，旧条改标 superseded。
+# 不新增条目；supersede = 主人明确更新旧结论；conflict = 不确定的矛盾，双方待确认。
 # 未知取值一律按 new 处理——主体内容（kind/quote）合法时不该因关系字段坏了整条丢弃。
-_FRAGMENT_RELATIONS = frozenset({"new", "duplicate", "supersede"})
-# 塞进提取 prompt 的「已有记忆」条数。为什么是 10 而不是全量：碎片上限 120 条，全塞
-# 会让 prompt 膨胀十倍（每条 quote+note 至多 120 字），单次 token 成本与模型注意力都被
-# 摊薄；"又被提了一遍""改了"这类冲突几乎都发生在最近若干次记忆之间，10 条覆盖即可。
-# 拿不准的冲突宁可漏判（多记一条重复），也不要为了判全而把 prompt 撑爆。
+_FRAGMENT_RELATIONS = frozenset({"new", "duplicate", "supersede", "conflict"})
+# 提取候选仍最多 10 条：从全部历史中按词面相关性选取并保留最近候选，
+# 选完按时间倒序编号。归档不扩大模型提示词或增加后台模型调用。
 _FRAGMENT_RECALL_FOR_PROMPT = 10
 
 # ---- 记忆自检（mood_review_memory，写入后治理第二阶段）----
@@ -893,6 +901,7 @@ class _LanlanShard:
         "cycle",
         "mood",
         "diary",
+        "diary_save_lock",
         "journal",
         "journal_archive",
         "review_stats",
@@ -933,6 +942,7 @@ class _LanlanShard:
         self.cycle: JsonObject = {}
         self.mood = _MoodState()
         self.diary: list[JsonObject] = []
+        self.diary_save_lock = threading.Lock()
         self.journal: list[JsonObject] = []
         # 藏书阁（1.3.0）：活架淘汰下来的旧页只追加进独立键 journal_archive@，
         # 不随当前书 blob 重写；面板书架末尾的横放合订本即此列表（只读翻阅）

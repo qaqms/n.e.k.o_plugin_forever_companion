@@ -48,7 +48,7 @@ export async function diaryChecks(browser, sources, origin, output, { loadPage, 
           let visible = Math.min(total, 12)
           const expectedCalls = []
           while (visible < total) {
-            expectedCalls.push({ limit: 50, offset: visible })
+            expectedCalls.push({ limit: 50, offset: visible, scope: "recent" })
             await button.click()
             visible = Math.min(total, visible + 50)
             await frame.waitForFunction(count => document.querySelectorAll(".tm-tl-row").length === count, visible)

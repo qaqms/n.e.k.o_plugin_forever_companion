@@ -192,14 +192,15 @@ def test_reassert_proactive_off_when_drifted_back_on(plugin_factory) -> None:
 # ---------- 日记截断语义 ----------
 
 
-def test_diary_trims_memory_and_disk_consistently(tm, plugin_factory) -> None:
+def test_diary_preserves_memory_and_disk_history_consistently(tm, plugin_factory) -> None:
     p = plugin_factory()
     # 0.7.0 起时光日记混排碎片，上限放宽到 120：造 130 条验证截断仍生效
     p._diary = [{"ts": str(i), "entry": f"e{i}"} for i in range(130)]
     run(p._save_diary())
-    assert len(p._diary) == tm._DIARY_MAX_ENTRIES
+    assert len(p._diary) == 130
     # 0.5.0 起手记按角色分片落盘（diary@<lanlan>，测试环境角色解析回落 "default"）
-    assert len(p.store.data[tm._diary_key("default")]) == tm._DIARY_MAX_ENTRIES
+    assert len(p.store.data[tm._diary_key("default")]) == 130
+    assert p._diary[0]["entry"] == "e0"
     # 保留的是"最近"的条目
     assert p._diary[-1]["entry"] == "e129"
 

@@ -8,7 +8,7 @@ import { BOOK_STYLES } from "./styles_book"
 import type {
   DiaryItem, JournalPage, JournalPageHeader, JournalArchiveBrief, JournalWrite, ReviewArchiveBrief, ReviewBrief, ReviewEntry, ReviewProgress, TFunc,
 } from "./types"
-import { diaryWriteError, fragmentKindKey, journalTrendKey, toneLabelKey } from "./utils"
+import { diaryWriteError, fragmentKindKey, journalTrendKey, navigateTabs, toneLabelKey } from "./utils"
 
 type CatalogView = { query: string; page: number }
 
@@ -17,6 +17,8 @@ export function DiaryPane(props: {
   t: TFunc
   diary: DiaryItem[]
   diaryTotal: number
+  diaryArchiveTotal?: number
+  memoryRevision?: number
   fragmentTotal: number
   journalIndex: JournalPageHeader[]
   // 藏书阁（1.3.0）：活架写满下架的旧页合订本——概览进轮询，全量按需拉取；
@@ -34,10 +36,11 @@ export function DiaryPane(props: {
   // 全量按需拉取；面板据此在档案架末尾画那只档案盒，点开即只读翻阅
   reviewArchiveBrief?: ReviewArchiveBrief
   onDeleteFragment: (ts: string) => void
+  onManageMemory: (ts: string, action: string, text?: string) => Promise<boolean>
   onLoadJournal: () => Promise<JournalPage[]>
   // 失败回 null（区别于"真的还没有合订本"的空数组）：面板据此弹错，不再静默
   onLoadJournalArchive: () => Promise<JournalPage[] | null>
-  onLoadMoreDiary: (offset: number) => Promise<{ items: DiaryItem[]; hasMore: boolean }>
+  onLoadMoreDiary: (offset: number, scope?: string) => Promise<{ items: DiaryItem[]; hasMore: boolean; total?: number }>
   onInviteJournal: () => void
   onLoadReview: () => Promise<{ entries: ReviewEntry[]; progress: ReviewProgress }>
   // 档案室全量拉取（失败回 null 区别于真空列表，面板据此弹错不静默）
@@ -46,10 +49,10 @@ export function DiaryPane(props: {
   settingsChildren?: any
 }) {
   const {
-    t, diary, diaryTotal, fragmentTotal, journalIndex, journalArchiveBrief, invitePending, lanlan, reviewBrief,
+    t, diary, diaryTotal, diaryArchiveTotal, memoryRevision, fragmentTotal, journalIndex, journalArchiveBrief, invitePending, lanlan, reviewBrief,
     reviewArchiveBrief,
     journalWrite, journalSubmitting, reviewSubmitting,
-    onDeleteFragment, onLoadJournal, onLoadJournalArchive, onLoadMoreDiary, onInviteJournal,
+    onDeleteFragment, onManageMemory, onLoadJournal, onLoadJournalArchive, onLoadMoreDiary, onInviteJournal,
     onLoadReview, onLoadReviewArchive, onWriteReviewNow, settingsChildren,
   } = props
   const toast = useToast()
@@ -61,8 +64,22 @@ export function DiaryPane(props: {
   const [fullDiary, setFullDiary] = useState<DiaryItem[] | null>(null)
   const [diaryHasMore, setDiaryHasMore] = useState(false)
   const [diaryLoading, setDiaryLoading] = useState(false)
-  const timeline = fullDiary || diary
-  const canLoadMoreDiary = fullDiary === null ? diary.length < diaryTotal : diaryHasMore
+  const [diaryScope, setDiaryScope] = useState("recent")
+  const [diaryLoadError, setDiaryLoadError] = useState(false)
+  const diaryRequest = useRef(0)
+  const diaryRefreshNeeded = useRef(false)
+  const diaryFingerprint = JSON.stringify([diary, diaryTotal, diaryArchiveTotal])
+  const timeline = fullDiary || (diaryScope === "recent" ? diary : [])
+  const canLoadMoreDiary = fullDiary === null
+    ? (diaryScope === "recent" ? diary.length < diaryTotal : Number(diaryArchiveTotal || 0) > 0)
+    : diaryHasMore
+  useEffect(() => () => { diaryRequest.current += 1 }, [])
+  useEffect(() => {
+    if (fullDiary !== null) {
+      loadMore(diaryScope, true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [diaryFingerprint, memoryRevision])
   // ---- 个人日记：整本（目录数据源）+ 当前翻开页（null = 目录视图）----
   const [pages, setPages] = useState<JournalPage[]>([])
   const [bookLoaded, setBookLoaded] = useState(false)
@@ -177,7 +194,12 @@ export function DiaryPane(props: {
 
   // 切角色：重置时光日记分页与翻开的页码 + 藏书阁与我的日记状态，重拉日记本
   useEffect(() => {
+    diaryRequest.current += 1
+    diaryRefreshNeeded.current = false
+    setDiaryLoading(false)
+    setDiaryLoadError(false)
     setFullDiary(null)
+    setDiaryScope("recent")
     setDiaryHasMore(false)
     setOpenPageNo(null)
     setJournalCatalog({ query: "", page: 0 })
@@ -221,22 +243,54 @@ export function DiaryPane(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reviewBrief && reviewBrief.entries, reviewBrief && reviewBrief.last_ts])
 
-  async function loadMore() {
-    if (diaryLoading) return
+  async function loadMore(scope = diaryScope, replace = false) {
+    if (diaryLoading && !replace) return
+    const request = ++diaryRequest.current
+    if (replace) diaryRefreshNeeded.current = true
     setDiaryLoading(true)
+    setDiaryLoadError(false)
     try {
-      const base = fullDiary || diary
+      const base = replace ? [] : timeline
       const seen = new Set(base.map((item) => String(item.ts || "")))
-      const res = await onLoadMoreDiary(base.length)
-      const fresh = (res.items || []).filter((item) => !seen.has(String(item.ts || "")))
-      setFullDiary([...base, ...fresh])
-      setDiaryHasMore(!!res.hasMore)
+      const fresh: DiaryItem[] = []
+      const wanted = replace ? Math.max(50, timeline.length) : 50
+      let offset = base.length
+      let hasMore = false
+      do {
+        const res = await onLoadMoreDiary(offset, scope)
+        if (request !== diaryRequest.current) return
+        for (const item of res.items || []) {
+          const identity = String(item.ts || "")
+          if (!seen.has(identity)) {
+            seen.add(identity)
+            fresh.push(item)
+          }
+        }
+        offset += res.items.length
+        hasMore = !!res.hasMore && res.items.length > 0
+      } while (replace && hasMore && offset < wanted)
+      setFullDiary([...base, ...fresh.slice(0, wanted)])
+      setDiaryHasMore(hasMore || fresh.length > wanted)
+      diaryRefreshNeeded.current = false
     } catch (err) {
-      // 加载失败静默：按钮恢复可点，下次重试；console 留痕便于排查
-      console.warn("[forever_companion] load more diary failed:", err)
+      if (request === diaryRequest.current) {
+        setDiaryLoadError(true)
+        toast.error(t("panel.memory.loadFailed", { defaultValue: "记录加载失败，请重试" }))
+      }
     } finally {
-      setDiaryLoading(false)
+      if (request === diaryRequest.current) setDiaryLoading(false)
     }
+  }
+
+  function changeDiaryScope(scope: string) {
+    if (scope === diaryScope || diaryLoading) return
+    diaryRequest.current += 1
+    diaryRefreshNeeded.current = false
+    setDiaryScope(scope)
+    setFullDiary(null)
+    setDiaryHasMore(false)
+    setDiaryLoadError(false)
+    if (scope === "archive") loadMore(scope, true)
   }
 
   // 翻开合订本（1.3.0）：按需拉全量（brief 本数变化即视为过期），从最新一本读起。
@@ -283,17 +337,34 @@ export function DiaryPane(props: {
             label: t("panel.diary.tabTime", { defaultValue: "时光日记" }),
             content: (
               <Card title={t("panel.diary.title", { defaultValue: "时光日记" })}>
+                <div className="tm-memory-scopes" role="tablist" aria-label={t("panel.memory.scope", { defaultValue: "记录范围" })}>
+                  {["recent", "archive"].map((scope) => (
+                    <button key={scope} type="button" role="tab" id={`tm-memory-scope-${scope}`}
+                      className="tm-memory-scope-tab" aria-selected={diaryScope === scope ? "true" : "false"}
+                      aria-controls="tm-memory-records" tabIndex={diaryScope === scope ? 0 : -1}
+                      disabled={diaryLoading} onKeyDown={navigateTabs} onClick={() => changeDiaryScope(scope)}>
+                      <span>{scope === "recent" ? t("panel.memory.recent", { defaultValue: "近期" })
+                        : t("panel.memory.archive", { defaultValue: "归档" })}</span>
+                      <span className="tm-memory-scope-count">{scope === "recent" ? diaryTotal : diaryArchiveTotal || 0}</span>
+                    </button>
+                  ))}
+                </div>
+                <div id="tm-memory-records" role="tabpanel" aria-labelledby={`tm-memory-scope-${diaryScope}`} aria-busy={diaryLoading ? "true" : "false"}>
+                {diaryLoadError ? <Button onClick={() => loadMore(diaryScope, diaryRefreshNeeded.current || timeline.length === 0)}>
+                  {t("panel.memory.retry", { defaultValue: "重试" })}
+                </Button> : null}
                 {timeline.length > 0 ? (
                   <div className="tm-diary">
                     <div className="tm-diary-toolbar">
                       <span className="tm-diary-count">
-                        {t("panel.diary.summary", { defaultValue: "共 {total} 条 · 手记 {self} · 对话片段 {auto}" })
+                        {diaryScope === "archive" ? t("panel.memory.archiveCount", { defaultValue: "归档 {n} 条" }).replace("{n}", String(diaryArchiveTotal || 0))
+                          : t("panel.diary.summary", { defaultValue: "共 {total} 条 · 手记 {self} · 对话片段 {auto}" })
                           .replace("{total}", String(diaryTotal))
                           .replace("{self}", String(diaryTotal - fragmentTotal))
                           .replace("{auto}", String(fragmentTotal))}
                       </span>
                     </div>
-                    <TimelineView t={t} items={timeline} onDelete={onDeleteFragment} />
+                    <TimelineView t={t} items={timeline} onDelete={onDeleteFragment} onManage={onManageMemory} />
                     {canLoadMoreDiary ? (
                       <div className="tm-diary-more">
                         <Button onClick={() => { loadMore() }} disabled={diaryLoading}>
@@ -306,12 +377,15 @@ export function DiaryPane(props: {
                       <div className="tm-diary-end">{t("panel.diary.endReached", { defaultValue: "已显示全部记录" })}</div>
                     ) : null}
                   </div>
-                ) : (
+                ) : diaryLoading ? (
+                  <div className="tm-derived" role="status">{t("panel.diary.loadingMore", { defaultValue: "加载中…" })}</div>
+                ) : diaryLoadError ? null : (
                   <EmptyState
                     title={t("panel.diary.emptyTitle", { defaultValue: "暂无时光记录" })}
                     description={t("panel.diary.emptyDesc", { defaultValue: "这里会保存角色手记，以及从对话中提取的重要片段。" })}
                   />
                 )}
+                </div>
               </Card>
             ),
           },
@@ -478,8 +552,8 @@ export function DiaryPane(props: {
 }
 
 // 时光日记时间线：按日期分组的卡片流（组头吸顶），手记暖纸色、碎片蓝调气泡
-function TimelineView(props: { t: TFunc; items: DiaryItem[]; onDelete: (ts: string) => void }) {
-  const { t, items, onDelete } = props
+function TimelineView(props: { t: TFunc; items: DiaryItem[]; onDelete: (ts: string) => void; onManage: (ts: string, action: string, text?: string) => Promise<boolean> }) {
+  const { t, items, onDelete, onManage } = props
   const groups: Array<{ day: string; rows: DiaryItem[] }> = []
   for (const item of items) {
     const day = dayKeyOf(item.ts)
@@ -496,7 +570,7 @@ function TimelineView(props: { t: TFunc; items: DiaryItem[]; onDelete: (ts: stri
             <span className="tm-day-count">{t("panel.diary.dayCount", { defaultValue: "{n} 条" }).replace("{n}", String(group.rows.length))}</span>
           </div>
           {group.rows.map((item) => (
-            <DiaryRow key={String(item.ts || "")} t={t} item={item} onDelete={onDelete} />
+            <DiaryRow key={String(item.ts || "")} t={t} item={item} onDelete={onDelete} onManage={onManage} />
           ))}
         </div>
       ))}
@@ -506,8 +580,8 @@ function TimelineView(props: { t: TFunc; items: DiaryItem[]; onDelete: (ts: stri
 
 // 时间线单行：她手写的显示心情与正文，自动碎片显示类型徽标、原话摘录与删除按钮
 //（key 由列表处传入，受限运行时会把它并入 props 做类型检查，故声明在此）
-function DiaryRow(props: { key?: string; t: TFunc; item: DiaryItem; onDelete: (ts: string) => void }) {
-  const { t, item, onDelete } = props
+function DiaryRow(props: { key?: string; t: TFunc; item: DiaryItem; onDelete: (ts: string) => void; onManage: (ts: string, action: string, text?: string) => Promise<boolean> }) {
+  const { t, item, onDelete, onManage } = props
   const isAuto = String(item.source || "self") === "auto"
   if (isAuto) {
     return (
@@ -529,6 +603,7 @@ function DiaryRow(props: { key?: string; t: TFunc; item: DiaryItem; onDelete: (t
         </div>
         <div className="tm-tl-quote">「{item.quote}」</div>
         {item.note ? <div className="tm-tl-note">{item.note}</div> : null}
+        <MemoryControls t={t} item={item} onManage={onManage} />
       </div>
     )
   }
@@ -540,7 +615,86 @@ function DiaryRow(props: { key?: string; t: TFunc; item: DiaryItem; onDelete: (t
         <span className="tm-tl-ts">{fmtTs(item.ts)}</span>
       </div>
       <div className="tm-tl-entry">{item.entry}</div>
+      <MemoryControls t={t} item={item} onManage={onManage} />
     </div>
+  )
+}
+
+function MemoryControls(props: { t: TFunc; item: DiaryItem; onManage: (ts: string, action: string, text?: string) => Promise<boolean> }) {
+  const { t, item, onManage } = props
+  const meta = item.memory || {}
+  const auto = item.source === "auto"
+  const memoryType = meta.type || (item.kind === "like" ? "preference" : item.kind === "important" ? "event" : "boundary")
+  const [busy, setBusy] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState(meta.correction || "")
+  const [expiry, setExpiry] = useState(meta.valid_through || "")
+  useEffect(() => {
+    setText(meta.correction || "")
+    setExpiry(meta.valid_through || "")
+  }, [meta.correction, meta.valid_through])
+  const label = (key: string) => t(`panel.memory.${key}`, { defaultValue: key })
+  async function apply(action: string, value = "") {
+    if (busy) return
+    setBusy(true)
+    try { if (await onManage(String(item.ts || ""), action, value)) setEditing(false) }
+    finally { setBusy(false) }
+  }
+  const state = item.memory_state || item.status || "active"
+  return (
+    <details className="tm-memory">
+      <summary>{label("details")}{auto ? ` · ${label(state)}` : ""}{meta.pinned ? ` · ${label("pinned")}` : ""}</summary>
+      {auto ? (
+        <div className="tm-memory-fields">
+          <label>{label("type")}<select value={memoryType}
+            ref={(element: any) => { if (element) element.value = memoryType }}
+            disabled={busy} onChange={(event: any) => {
+              const kind = event.target.value
+              event.target.value = memoryType
+              apply("classify", kind)
+            }}>
+            {["preference", "temporary", "event", "boundary"].map(kind => <option key={kind} value={kind} selected={memoryType === kind}>{label(kind)}</option>)}
+          </select></label>
+          <div>{label("confirmations")} · {meta.confirmations || 1}</div>
+          {meta.last_confirmed_at ? <div>{label("lastConfirmed")} · {meta.last_confirmed_at.replace("T", " ").slice(0, 16)}</div> : null}
+          {meta.condition ? <div>{label("condition")} · {meta.condition}</div> : null}
+          {meta.correction ? <div className="tm-memory-correction">{label("correction")} · {meta.correction}</div> : null}
+          {meta.suggestion ? <div className="tm-memory-correction">{label("suggestion")} · {meta.suggestion.reason}</div> : null}
+          {meta.type === "temporary" ? <label>{label("expiry")}<input type="date" value={expiry} disabled={busy}
+            onChange={(event: any) => setExpiry(event.target.value)} />
+            <Button disabled={busy || !expiry} onClick={() => apply("expire", expiry)}>{label("save")}</Button>
+          </label> : null}
+          {meta.evidence && meta.evidence.length > 0 ? <details>
+            <summary>{label("evidence")}</summary>
+            {meta.evidence.map((entry, index) => <div key={String(index)} className="tm-memory-evidence">
+              <time dateTime={entry.ts}>{(entry.ts || "").slice(0, 10)}</time> · {entry.quote}
+            </div>)}
+          </details> : null}
+        </div>
+      ) : null}
+      <select className="tm-memory-action" aria-label={label("action")} value="choose" disabled={busy}
+        ref={(element: any) => { if (element) element.value = "choose" }}
+        onChange={(event: any) => {
+          const action = event.target.value
+          event.target.value = "choose"
+          if (action === "correct") setEditing(true)
+          else if (action && action !== "choose") apply(action)
+        }}>
+        <option key="choose" value="choose">{label("action")}</option>
+        {auto ? <option key="pin" value={meta.pinned ? "unpin" : "pin"}>{label(meta.pinned ? "unpin" : "pin")}</option> : null}
+        {auto ? <option key="pause" value={meta.paused ? "resume" : "pause"}>{label(meta.paused ? "resume" : "pause")}</option> : null}
+        {auto ? <option key="confirm" value="confirm">{label("confirm")}</option> : null}
+        {auto ? <option key="correct" value="correct">{label("correct")}</option> : null}
+        <option key="archive" value={meta.archived || item.in_archive ? "unarchive" : "archive"}>{label(meta.archived || item.in_archive ? "unarchive" : "archiveAction")}</option>
+        {meta.undo && meta.undo.length > 0 ? <option key="undo" value="undo">{label("undo")}</option> : null}
+      </select>
+      {editing ? <div className="tm-memory-editor">
+        <textarea aria-label={label("correction")} value={text} maxLength={500} disabled={busy}
+          onInput={(event: any) => setText(event.target.value)} />
+        <Button disabled={busy || !text.trim()} onClick={() => apply("correct", text)}>{label("save")}</Button>
+        <Button disabled={busy} onClick={() => { setEditing(false) }}>{label("cancel")}</Button>
+      </div> : null}
+    </details>
   )
 }
 

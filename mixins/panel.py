@@ -45,6 +45,7 @@ from ..core.cycle import (
 from ..core.fragments import diary_display_record
 from ..core.journal import archive_brief, page_header
 from ..core.media import GalleryMediaError
+from ..core.memory import MEMORY_ACTIONS, MemoryPolicyError, diary_partition, lifecycle_view, manage_memory
 from ..core.onboarding import build_readiness, make_guide_record, wizard_pending
 from ..core.review import (
     elapsed_days as review_elapsed_days,
@@ -260,9 +261,11 @@ class PanelEntriesMixin(MediaGalleryMixin):
                 # 生命周期状态（写入后治理）：缺省 active，与 recall_fragments 同口径。
                 # 面板用它区分现行碎片与已被更新的旧记录。
                 "status": str(item.get("status") or "active"),
+                **{key: value for key, value in lifecycle_view(item).items() if key in {"memory", "memory_state"}},
             }
 
-        auto_count = sum(1 for item in shard.diary if str(item.get("source") or "self") == "auto")
+        recent_diary = diary_partition(shard.diary)
+        auto_count = sum(1 for item in recent_diary if str(item.get("source") or "self") == "auto")
         # 模型通道状态灯（情绪页"模型通道"卡 + 总览共用）：三个小模型通道各自
         # 能否工作 + 休眠原因 + 实际走的那条路（transport）。语气走宿主情感端点
         # （enabled 判定），碎片/成文按各自 mode 走宿主管线或自定义直连
@@ -311,8 +314,9 @@ class PanelEntriesMixin(MediaGalleryMixin):
             # 语气分析模型槽位下拉选项（含各槽当前模型名；拉取失败时静态兜底）
             "tone_slot_options": await self._tone_slot_options(),
             "calendar": calendar,
-            "diary_recent": [_diary_view(item) for item in reversed(shard.diary[-12:])],
-            "diary_total": len(shard.diary),
+            "diary_recent": [_diary_view(item) for item in reversed(recent_diary[-12:])],
+            "diary_total": len(recent_diary),
+            "diary_archive_total": len(shard.diary) - len(recent_diary),
             "fragment_total": auto_count,
             # 个人日记（书页式）：index 供面板展示页数概览（极轻量，进 5s 轮询）；
             # 全量翻阅走 get_journal 入口按需拉取，不进轮询
@@ -1918,22 +1922,30 @@ class PanelEntriesMixin(MediaGalleryMixin):
             "properties": {
                 "limit": {"type": "integer", "description": tr("fields.limit", default="最多返回条数")},
                 "offset": {"type": "integer", "description": tr("fields.offset", default="跳过条数（倒序翻页用）")},
+                "scope": {"type": "string", "enum": ["", "recent", "archive", "all"]},
             },
         },
         metadata={"agent_hidden": True},
     )
-    async def get_diary(self, limit: int = 10, offset: int = 0, **_: Any):
+    async def get_diary(self, limit: int = 10, offset: int = 0, scope: str = "", **_: Any):
         lanlan, shard = await self._current_shard_async()
+        if scope not in {"", "recent", "archive", "all"}:
+            return Err(SdkError("memory_action_invalid"))
+        source = diary_partition(shard.diary, scope)
         limit = max(1, min(int(limit), 50))
-        offset = max(0, min(int(offset), len(shard.diary)))
+        offset = max(0, min(int(offset), len(source)))
         # 时间倒序分页：offset 跳过已看的，供面板"加载更多"追加
-        window = [diary_display_record(item) for item in list(reversed(shard.diary))[offset : offset + limit]]
+        window = [lifecycle_view(diary_display_record(item)) for item in list(reversed(source))[offset : offset + limit]]
+        if scope == "archive":
+            for item in window:
+                item["in_archive"] = True
         return Ok(
             {
                 "items": window,
-                "total": len(shard.diary),
+                "total": len(source),
                 "offset": offset,
-                "has_more": offset + len(window) < len(shard.diary),
+                "has_more": offset + len(window) < len(source),
+                "scope": scope or "recent",
                 "lanlan": lanlan,
             }
         )
@@ -1998,26 +2010,44 @@ class PanelEntriesMixin(MediaGalleryMixin):
             "type": "object",
             "properties": {
                 "ts": {"type": "string", "description": "要删除的碎片的 ts 时间戳"},
+                "action": {"type": "string", "enum": ["delete", *sorted(MEMORY_ACTIONS)]},
+                "text": {"type": "string", "maxLength": 500},
+                "expected_lanlan": {"type": "string"},
             },
             "required": ["ts"],
         },
         metadata={"agent_hidden": True},
     )
-    async def delete_diary_item(self, ts: str = "", **_: Any):
+    async def delete_diary_item(
+        self, ts: str = "", action: str = "delete", text: str = "", expected_lanlan: str = "", **_: Any,
+    ):
         lanlan, shard = await self._current_shard_async()
+        if expected_lanlan and expected_lanlan != lanlan:
+            return Err(SdkError("mood_changed"))
+        if action != "delete" and (not expected_lanlan or not self._store_ready or not self._state_trusted):
+            return Err(SdkError("memory_store_unavailable"))
         target = str(ts or "").strip()
         if not target:
             return Err(SdkError("ts_required"))
-        remaining = [item for item in shard.diary if str(item.get("ts") or "") != target]
-        removed = len(shard.diary) - len(remaining)
-        if not removed:
-            return Err(SdkError("fragment_not_found"))
-        shard.diary = remaining
-        res_diary = await self._save_shard_diary(lanlan, shard)
+        def update(diary):
+            matches = [item for item in diary if str(item.get("ts") or "") == target]
+            if not matches:
+                raise MemoryPolicyError("fragment_not_found")
+            if len(matches) != 1:
+                raise MemoryPolicyError("memory_ambiguous")
+            if action == "delete":
+                diary.remove(matches[0])
+            else:
+                manage_memory(diary, matches[0], action, text=text, now=_now_utc().astimezone(self._stats_tz()))
+
+        try:
+            res_diary = await self._update_shard_diary(lanlan, shard, update)
+        except MemoryPolicyError as exc:
+            return Err(SdkError(exc.code))
         persist_err = self._persist_error(res_diary)
         if persist_err is not None:
             return persist_err
-        return Ok({"removed": removed, "lanlan": lanlan})
+        return Ok({"removed": 1 if action == "delete" else 0, "action": action, "lanlan": lanlan})
 
     @ui.action(
         label=tr("actions.get_journal.label", default="查看个人日记"),

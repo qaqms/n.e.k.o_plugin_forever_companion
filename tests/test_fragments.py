@@ -9,8 +9,10 @@ _maybe_capture_fragments 的基线/水位/落盘/轻语集成行为。
 """
 
 import asyncio
+import copy
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -628,8 +630,8 @@ def _setup_review(p, reply_json: str, items: list[dict] | None = None):
     return shard
 
 
-def test_tool_check_suggests_without_touching_data(plugin_factory) -> None:
-    """自检只产出建议，一条数据都不许改（'不替她做决定'的代码化）。"""
+def test_tool_check_persists_suggestions_without_changing_original_or_validity(plugin_factory) -> None:
+    """自检建议落盘，原文和有效性仍由用户决定。"""
     p = plugin_factory()
     shard = _setup_review(
         p,
@@ -645,6 +647,77 @@ def test_tool_check_suggests_without_touching_data(plugin_factory) -> None:
     # 数据原样：条数、状态、内容都没变
     assert len(shard.diary) == 2
     assert [item["status"] for item in shard.diary] == ["active", "active"]
+    suggestion = shard.diary[-1]["memory"]["suggestion"]
+    assert suggestion["issue"] == "conflict"
+    assert suggestion["reason"] == findings[0]["reason"]
+    assert p.store.data["diary@default"][-1]["memory"]["suggestion"] == suggestion
+
+
+def test_capture_duplicate_strengthens_and_persists_only_after_independent_interval(plugin_factory, plugin_factory_full):
+    p = plugin_factory()
+    shard = _setup_capture(p, '{"capture": true, "kind": "like", "quote": "Coffee", "confidence": 0.9,'
+                              '"relation": "duplicate", "target": 1}')
+    stamp = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    shard.diary = [{"ts": stamp, "source": "auto", "kind": "like", "quote": "Coffee", "status": "active"}]
+    _reset_capture_gates(shard)
+    assert run(p._maybe_capture_fragments("default", shard)) is False
+    assert len(shard.diary) == 1 and shard.diary[0]["memory"]["confirmations"] == 2
+    first = copy.deepcopy(shard.diary)
+    _reset_capture_gates(shard)
+    assert run(p._maybe_capture_fragments("default", shard)) is False
+    assert shard.diary == first
+    assert p._pushed == []
+    restarted = plugin_factory_full(store_initial=copy.deepcopy(p.store.data))
+    assert restarted._current_shard().diary == first
+
+
+def test_failed_capture_save_rolls_back_without_review_material_or_nudge(plugin_factory, tm):
+    p = plugin_factory()
+    shard = _setup_capture(p, '{"capture": true, "kind": "overstep", "quote": "Bad words", "confidence": 0.9}')
+    shard.mood.action = "storm_surge"
+    shard.mood.started_at = time.time()
+    shard.mood.expires_at = time.time() + 600
+    before = copy.deepcopy(shard.review_stats)
+    original = p.store.set
+
+    async def fail_diary(key, value):
+        return tm.Err(tm.SdkError("disk full")) if key == "diary@default" else await original(key, value)
+
+    p.store.set = fail_diary
+    _reset_capture_gates(shard)
+    assert run(p._maybe_capture_fragments("default", shard)) is False
+    assert shard.diary == [] and shard.review_stats == before and p._pushed == []
+
+
+def test_review_save_failure_rolls_back_and_remains_retryable(plugin_factory, tm):
+    p = plugin_factory()
+    shard = _setup_review(p, '{"findings": [{"index": 1, "issue": "stale", "reason": "Old"}]}')
+    before = copy.deepcopy(shard.diary)
+
+    async def fail(*_args):
+        return tm.Err(tm.SdkError("disk full"))
+
+    p.store.set = fail
+    result = run(p.tool_check_memory())
+    assert str(result.error) == "persist_failed"
+    assert shard.diary == before and shard.last_fragment_review_ts == 0
+
+
+def test_review_cannot_attach_to_a_changed_or_deleted_record(plugin_factory):
+    p = plugin_factory()
+    shard = _setup_review(p, "")
+
+    async def edit_during_request(*_args, **_kwargs):
+        shard.diary[-1]["memory"] = {"correction": "User correction", "pinned": True}
+        shard.diary.pop(0)
+        return '{"findings": [{"index": 1, "issue": "stale", "reason": "Outdated reply"},' \
+               '{"index": 2, "issue": "stale", "reason": "Deleted record"}]}'
+
+    p._channel_chat = edit_during_request
+    result = run(p.tool_check_memory())
+    assert result.value["findings"] == []
+    assert len(shard.diary) == 1
+    assert shard.diary[0]["memory"] == {"correction": "User correction", "pinned": True}
 
 
 def test_tool_check_needs_two_items(plugin_factory) -> None:
