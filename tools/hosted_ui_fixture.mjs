@@ -633,7 +633,14 @@ export function installFixtureBridge(fixture) {
     window.qaMessages.push({ ...clone(message), receivedAt: performance.now() })
     try {
       let result
-      if (message.method === "refresh") { window.qaRefreshes += 1; result = clone(fixture.context) }
+      if (message.method === "refresh") {
+        window.qaRefreshes += 1
+        if (window.qaFailNext === "refresh") {
+          window.qaFailNext = ""
+          throw new Error("qa_refresh_failed")
+        }
+        result = clone(fixture.context)
+      }
       else if (message.method === "call") {
         const actionId = message.payload.actionId
         result = { plugin_id: "forever_companion", action_id: actionId, result: clone(dispatch(actionId, message.payload.args || {})) }

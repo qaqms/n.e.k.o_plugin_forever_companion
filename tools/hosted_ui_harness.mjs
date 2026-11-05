@@ -12,7 +12,7 @@ import { demoChecks } from "./hosted_ui_demo_checks.mjs"
 import { introChecks } from "./hosted_ui_intro_checks.mjs"
 import { appearanceChecks, expandAppearance } from "./hosted_ui_appearance_checks.mjs"
 import { videoChecks, recordFixture } from "./hosted_ui_video_checks.mjs"
-import { settingsChecks, selectSettings, openImport } from "./hosted_ui_settings_checks.mjs"
+import { settingsChecks, saveBarChecks, selectSettings, openImport } from "./hosted_ui_settings_checks.mjs"
 import { directChecks } from "./hosted_ui_direct_checks.mjs"
 import { heatmapChecks } from "./hosted_ui_heatmap_checks.mjs"
 import { diaryChecks } from "./hosted_ui_diary_checks.mjs"
@@ -657,6 +657,9 @@ async function themeChecks(browser, origin, output) {
         return colors
       })
       await check(`soft-default-theme-readable-and-keyboard-focus-${width}-${theme}`, async () => {
+        await selectSettings(plain.frame, "general")
+        await chooseOption(plain.frame, plain.frame.locator("#tm-settings-general .tm-select"), "Asia/Tokyo")
+        await selectSettings(plain.frame, "appearance")
         let measurements = await inspectPlainReadability(plain.frame)
         assert(measurements.length >= 3)
         for (const item of measurements) assert(item.contrast >= 4.5, JSON.stringify(item))
@@ -979,6 +982,8 @@ async function compactAndFooterChecks(browser, origin, output) {
         await loaded.page.screenshot({ path: join(output, `390x600-${locale}-savebar.png`), animations: "disabled" })
         return geometry
       })
+      // Footer geometry below exercises coexistence with an unsaved settings bar.
+      await chooseOption(loaded.frame, loaded.frame.locator("#tm-settings-general .tm-select"), "Europe/London")
       await check(`journal-navigation-labels-fit-${locale}-390x600`, async () => {
         const text = await loaded.page.evaluate(language => window.qaFixture.context.i18n.messages[language], locale)
         await loaded.frame.locator(".tm-tab").nth(TABS.indexOf("diary")).click()
@@ -1046,6 +1051,7 @@ async function compactAndFooterChecks(browser, origin, output) {
   for (const width of [1280, 390]) for (const height of [900, 600]) for (const theme of ["light", "dark"]) {
     const loaded = await loadPage(browser, origin, { locale: "en", wallpaper: theme === "dark" ? "dark" : "none", tab: "diary" }, width, height, theme)
     try {
+      await loaded.frame.locator('input[type="number"]').first().fill("61")
       for (const kind of ["journal", "review"]) {
         await check(`${kind}-footer-clear-of-savebar-${width}x${height}-${theme}`, async () => {
           await loaded.frame.getByRole("button", { name: kind === "journal" ? "Personal Journal" : "My Diary", exact: true }).click()
@@ -1100,6 +1106,7 @@ async function compactAndFooterChecks(browser, origin, output) {
   }
   const refreshed = await loadPage(browser, origin, { locale: "en", wallpaper: "none", tab: "diary" }, 390, 600, "light")
   try {
+    await refreshed.frame.locator('input[type="number"]').first().fill("61")
     await check("refresh-and-tab-roundtrip-preserve-footer-clearance", async () => {
       const openJournal = async () => {
         await refreshed.frame.getByRole("button", { name: "Personal Journal", exact: true }).click()
@@ -1495,6 +1502,9 @@ async function main() {
       if (process.argv.includes("--details")) report.screenshots.push(...await detailScreenshots(browser, origin, output))
       if (process.argv.includes("--calendar-diagnostics")) report.calendarDiagnostics = await calendarDiagnostics(browser, origin, output)
       if (process.argv.includes("--interactions") || process.argv.includes("--interactions-only")) {
+        const saveBars = await saveBarChecks(browser, sources, origin, output, { loadPage, inspectLayout })
+        report.interactions.push(...saveBars.checks)
+        report.screenshots.push(...saveBars.screenshots)
         report.interactions.push(...await interactionChecks(browser, origin, output))
         if (process.argv.includes("--gallery")) report.interactions.push(...await galleryChecks(browser, origin, output))
       }

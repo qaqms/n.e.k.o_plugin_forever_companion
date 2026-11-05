@@ -1,5 +1,38 @@
 # Isolated Hosted UI QA
 
+## Save Bar Visibility (2026-11-05)
+
+Cycle, Emotion and Diary show their save bar only while configuration differs
+from the saved baseline. Settings also includes unsaved appearance changes.
+The visibility check and write payload share the same difference calculation.
+Reverting all changes or saving successfully removes the bar and its footer
+clearance; failed or partially failed saves retain only the unsaved work.
+Settings responses are unwrapped before updating the baseline, so a failed
+context refresh does not leave a successfully saved form marked as dirty.
+A later matching context snapshot preserves edits started after that save.
+Backup restoration still explicitly resets the form.
+
+Verified commands:
+
+- `node tools/hosted_ui_harness.mjs --interactions-only --gallery --compact
+  --typecheck --out tools/out/savebar-dirty-final`: 75 interaction checks,
+  16 screenshots, zero check, render or layout failures.
+- `node tools/hosted_ui_harness.mjs --settings-only
+  --out tools/out/savebar-dirty-settings-final`: 101 interaction checks,
+  78 screenshots, zero check, render or layout failures across eight locales,
+  desktop/narrow widths and light/dark themes.
+- `node tools/hosted_ui_harness.mjs --theme-only
+  --out tools/out/savebar-dirty-theme-final`: 34 interaction checks passed.
+- `python -m pytest tests/test_savebar.py tests/test_save_surface.py
+  tests/test_save_chain_review.py -q`: 20 passed.
+- `node tools/check_hosted_link.mjs`: 33 modules linked without bare exports.
+
+Chinese desktop and narrow dark-theme clean/dirty views were visually
+inspected. Package `../dist/forever_companion_1.4.7_savebar_dirty_test.neko-plugin`
+passed official strict validation, ZIP CRC, payload verification and byte
+comparison of all 83 packaged source files. SHA-256:
+`e5a25c219939800953dc8cab4d5215654fa3260fb05b442109ee1256d15fbff3`.
+
 ## Modern Select Controls (2026-11-05)
 
 All plugin-panel selects now use the shared controlled combobox, including

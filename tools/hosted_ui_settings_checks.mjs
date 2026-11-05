@@ -24,6 +24,157 @@ export async function openStorage(frame) {
   if (!await drawer.evaluate(element => element.open)) await drawer.locator("summary").click()
 }
 
+export async function saveBarChecks(browser, sources, origin, output, { loadPage, inspectLayout }) {
+  const checks = []
+  const screenshots = []
+  const tabs = ["overview", "calendar", "diary", "moment", "mood", "features", "cycle", "settings"]
+  const text = sources.messages["zh-CN"]
+  async function check(name, operation) {
+    try {
+      await operation()
+      checks.push({ name, passed: true })
+      console.log(`PASS ${name}`)
+    } catch (error) {
+      checks.push({ name, passed: false, error: error.stack })
+      console.log(`FAIL ${name}: ${error.message}`)
+    }
+  }
+  for (const [width, theme] of [[1280, "light"], [390, "dark"]]) {
+    const loaded = await loadPage(browser, origin, { locale: "zh-CN", wallpaper: "none", tab: "cycle" }, width, 900, theme)
+    const { frame, page } = loaded
+    const navigate = async tab => frame.locator(".tm-tab").nth(tabs.indexOf(tab)).click()
+    const absent = async () => {
+      await frame.waitForSelector(".tm-save", { state: "detached" })
+      assert.equal(await frame.locator(".tm-content").evaluate(element => element.style.getPropertyValue("--tm-save-clearance")), "")
+    }
+    const present = async () => {
+      await frame.waitForSelector(".tm-save")
+      await frame.waitForFunction(() => parseFloat(document.querySelector(".tm-content").style.getPropertyValue("--tm-save-clearance")) > 0)
+      assert.equal(await frame.locator(".tm-save").count(), 1)
+    }
+    const capture = async id => {
+      const path = join(output, `${id}.png`)
+      const layout = await inspectLayout(frame)
+      const diagnostics = await page.evaluate(() => window.qaDiagnostics.filter(message => message.type === "neko-hosted-surface-error"))
+      await page.screenshot({ path, animations: "disabled" })
+      screenshots.push({ id, path, layout, errors: [...loaded.errors], diagnostics })
+      assert.deepEqual(loaded.errors, [])
+      assert.deepEqual(diagnostics, [])
+      assert(layout.documentOverflow <= 2 && layout.contentOverflow <= 2)
+      assert.deepEqual(layout.issues, [])
+    }
+    try {
+      await check(`savebar-clean-navigation-and-refresh-${width}`, async () => {
+        for (const tab of ["cycle", "mood", "diary", "settings"]) {
+          await navigate(tab)
+          await absent()
+          await capture(`savebar-${width}-${tab}-clean`)
+        }
+        const before = await page.evaluate(() => window.qaRefreshes)
+        await page.waitForFunction(value => window.qaRefreshes > value, before, { timeout: 6500 })
+        await absent()
+        assert.equal(await page.evaluate(() => window.qaMessages.filter(message =>
+          ["update_settings", "set_panel_appearance"].includes(message.payload?.actionId)).length), 0)
+      })
+      for (const [tab, key, label] of [
+        ["cycle", "cycle_length", "panel.settings.cycleLength"],
+        ["mood", "tone_min_interval_sec", "panel.settings.toneMinIntervalSec"],
+        ["diary", "fragments_daily_limit", "panel.settings.fragmentsDailyLimit"],
+        ["settings", "timezone", null],
+      ]) {
+        await check(`savebar-edit-revert-failure-save-${tab}-${width}`, async () => {
+          await navigate(tab)
+          if (tab === "settings") await selectSettings(frame, "general")
+          await absent()
+          const initial = await page.evaluate(key => window.qaFixture.context.state.settings[key], key)
+          const next = key === "timezone" ? "Asia/Tokyo" : initial + 1
+          const change = async value => key === "timezone"
+            ? chooseOption(frame, frame.locator("#tm-settings-general .tm-select"), value)
+            : frame.locator(".neko-field").filter({ has: frame.getByText(text[label], { exact: true }) }).locator('input[type="number"]').fill(String(value))
+          await change(next)
+          await present()
+          await capture(`savebar-${width}-${tab}-dirty`)
+          await change(initial)
+          await absent()
+          await change(next)
+          await present()
+          await navigate("calendar")
+          await absent()
+          await navigate(tab)
+          await present()
+          await page.evaluate(() => { window.qaFailNext = "update_settings" })
+          await frame.locator(".tm-save button").click()
+          await frame.waitForSelector('.neko-toast[data-tone="danger"]')
+          await present()
+          assert.equal(await page.evaluate(key => window.qaFixture.context.state.settings[key], key), initial)
+          // A successful write must hide the bar even if context refresh fails.
+          await page.evaluate(() => { window.qaFailNext = "refresh" })
+          await frame.locator(".tm-save button").click()
+          await absent()
+          assert.equal(await page.evaluate(key => window.qaFixture.context.state.settings[key], key), next)
+          await page.waitForFunction(() => window.qaFailNext === "")
+          // A later context confirmation of the save must preserve a new draft.
+          const later = key === "timezone" ? "Europe/Berlin" : next + 1
+          if (tab === "settings") await selectSettings(frame, "general")
+          await change(later)
+          const snapshot = await page.evaluate(() => window.qaFixture.context)
+          await frame.evaluate(context => window.__NekoRefreshHostedPayload(context), snapshot)
+          await frame.waitForTimeout(100)
+          await present()
+          if (key === "timezone") {
+            assert.equal(await frame.locator("#tm-settings-general .tm-select").getAttribute("data-value"), later)
+          } else {
+            assert.equal(await frame.locator(".neko-field").filter({ has: frame.getByText(text[label], { exact: true }) }).locator('input[type="number"]').inputValue(), String(later))
+          }
+          await change(next)
+          await absent()
+        })
+      }
+      await check(`savebar-appearance-revert-and-partial-saves-${width}`, async () => {
+        await navigate("settings")
+        await selectSettings(frame, "appearance")
+        await frame.locator(".tm-gallery-pick").nth(1).click()
+        await present()
+        // Other pages only save configuration, so an appearance draft stays on Settings.
+        await navigate("mood")
+        await absent()
+        await navigate("settings")
+        await present()
+        await frame.locator(".tm-appearance-save button").click()
+        await absent()
+        for (const failedAction of ["update_settings", "set_panel_appearance"]) {
+          await selectSettings(frame, "general")
+          const initial = await page.evaluate(() => window.qaFixture.context.state.settings.timezone)
+          const next = initial === "Asia/Tokyo" ? "Europe/London" : "Asia/Tokyo"
+          await chooseOption(frame, frame.locator("#tm-settings-general .tm-select"), next)
+          await selectSettings(frame, "appearance")
+          const background = await page.evaluate(() => window.qaFixture.appearance.bg_id)
+          const nextBackground = background ? "" : await frame.locator(".tm-gallery-tile[data-item-id]").first().getAttribute("data-item-id")
+          await frame.locator(background ? ".tm-gallery-none" : ".tm-gallery-tile[data-item-id] .tm-gallery-pick").first().click()
+          await page.evaluate(action => { window.qaFailNext = action }, failedAction)
+          const before = await page.evaluate(() => window.qaMessages.length)
+          await frame.locator(".tm-save button").click()
+          await frame.waitForFunction(() => !document.querySelector(".tm-save button")?.disabled)
+          await present()
+          assert.equal(await page.evaluate(() => window.qaFixture.context.state.settings.timezone),
+            failedAction === "update_settings" ? initial : next)
+          assert.equal(await page.evaluate(() => window.qaFixture.appearance.bg_id),
+            failedAction === "set_panel_appearance" ? background : nextBackground)
+          const retryBefore = await page.evaluate(() => window.qaMessages.length)
+          await frame.locator(".tm-save button").click()
+          await absent()
+          const calls = await page.evaluate(offset => window.qaMessages.slice(offset).filter(message =>
+            ["update_settings", "set_panel_appearance"].includes(message.payload?.actionId)), retryBefore)
+          assert.deepEqual(calls.map(message => message.payload.actionId), [failedAction])
+          assert.equal(await page.evaluate(offset => window.qaMessages.slice(offset).filter(message =>
+            ["update_settings", "set_panel_appearance"].includes(message.payload?.actionId)).length, before), 3)
+        }
+      })
+    } finally { await loaded.context.close() }
+  }
+  return { checks, screenshots }
+}
+
 export async function settingsChecks(browser, sources, origin, output, helpers) {
   const { loadPage, inspectLayout, recordFixture } = helpers
   const fixture = await recordFixture(browser, output, false)
@@ -66,7 +217,7 @@ export async function settingsChecks(browser, sources, origin, output, helpers) 
         assert(await frame.locator("#tm-settings-appearance").isVisible())
         assert(!await frame.locator("#tm-settings-general").isVisible())
         assert(!await frame.locator("#tm-settings-data").isVisible())
-        assert.equal(await frame.locator(".tm-settings .tm-save").count(), 1)
+        assert.equal(await frame.locator(".tm-settings .tm-save").count(), 0)
         assert.equal(await frame.locator(".tm-settings .neko-card").count(), 0)
         assert.equal(await frame.locator(".tm-settings-surface").count(), 1)
         assert.equal(await frame.locator(".tm-settings-surface .tm-save").count(), 0)
@@ -111,6 +262,7 @@ export async function settingsChecks(browser, sources, origin, output, helpers) 
         assert.equal(await page.evaluate(offset => window.qaMessages.slice(offset).filter(message =>
           ["set_panel_appearance", "update_settings", "gallery_remove"].includes(message.payload?.actionId)).length, offset), 0)
         await frame.locator('[data-item-id="qa-video"] .tm-gallery-pick').click()
+        await frame.waitForSelector(".tm-settings .tm-save")
         assert.equal(await frame.locator(".tm-appearance-save .tm-save-hint").innerText(), text["panel.appearance.unsavedHint"])
         await capture(loaded, `${id}-videos`)
       })
@@ -136,6 +288,7 @@ export async function settingsChecks(browser, sources, origin, output, helpers) 
         await frame.locator(".tm-save button").click()
         await page.waitForFunction(() => window.qaFixture.appearance.bg_id === "qa-video" &&
           window.qaFixture.context.state.settings.timezone === "Asia/Tokyo")
+        await frame.waitForSelector(".tm-save", { state: "detached" })
         const calls = await page.evaluate(offset => window.qaMessages.slice(offset).filter(message => message.method === "call"), before)
         assert.equal(calls.filter(message => message.payload.actionId === "set_panel_appearance").length, 1)
         assert.deepEqual(calls.find(message => message.payload.actionId === "update_settings").payload.args,
@@ -189,6 +342,7 @@ export async function settingsChecks(browser, sources, origin, output, helpers) 
       await selectMedia(edits.frame, "video")
       await edits.frame.locator('[data-item-id="qa-video"] .tm-gallery-pick').click()
       await edits.frame.locator(".tm-appearance-save button").click()
+      await edits.frame.waitForSelector(".tm-save", { state: "detached" })
       assert.equal(await edits.frame.locator("#tm-media-tab-image").getAttribute("aria-selected"), "true")
       assert.equal(await edits.frame.locator(".tm-gallery-active").getAttribute("data-item-id"), "qa-wallpaper")
     })

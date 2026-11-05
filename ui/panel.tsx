@@ -169,6 +169,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   // 插件再怎么改出厂默认都追不到这份存档上。2026-09-22 实机就卡在这：碎片出厂默认
   // 从 host 改成 custom，老存档里躺着的那份 host 把它压了一整天。
   const formBaseline = useRef<FormValues>(settingsToForm({}))
+  const formBackupRevision = useRef(backupRevision)
 
   // 表单与服务端快照同步的唯一入口：回填表单的同时把基线挪到同一份值上，
   // 两者任何时候都同源，"改没改过"才算得出真话
@@ -179,6 +180,10 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   }
 
   useEffect(() => {
+    // 保存响应已经推进基线时，后续相同快照不能覆盖用户刚开始的新修改。
+    if (formBackupRevision.current === backupRevision
+      && JSON.stringify(settingsToForm(settings)) === JSON.stringify(formBaseline.current)) return
+    formBackupRevision.current = backupRevision
     syncForm(settings)
   }, [
     backupRevision,
@@ -209,6 +214,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     settings.review_turns_threshold,
     settings.review_days_threshold,
     settings.agent_daily_budget,
+    settings.debug_mode,
     (settings as Record<string, any>).anniversary_inject,
   ])
 
@@ -811,28 +817,30 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     cancelLabel: t("panel.cancel", { defaultValue: "取消" }),
   }
 
-  // 设置落盘（周期/注入/情绪/日记/通用同一入口）：锚点未设与动作缺失都当场抛错，
-  // 由调用方翻成 toast
+  // 保存条与提交共用同一份差异；改回已保存值时自然清空。
+  const base = formBaseline.current as Record<string, any>
+  const current = form as Record<string, any>
+  const dirty: Record<string, any> = {}
+  for (const key of Object.keys(current)) {
+    const now = current[key]
+    const was = base[key]
+    const same = now === was || (typeof now === "object" && JSON.stringify(now) === JSON.stringify(was))
+    if (!same) dirty[key] = now
+  }
+  const settingsDirty = Object.keys(dirty).length > 0
+  const appearanceDirty = !appearanceEquals(draftAp, savedAp)
+
+  // 设置落盘（周期/注入/情绪/日记/通用同一入口）。
   async function postSettings() {
+    // 一个都没改：不发这一趟，更不写存档（写了就等于替用户把出厂默认钉死）
+    if (!settingsDirty) return
     if (!updateSettingsAction) {
       throw new Error(t("panel.errors.actionUnavailable", { defaultValue: "操作不可用（插件可能未运行）" }))
     }
     if (!DATE_RE.test(String(state.anchor_date || ""))) {
       throw new Error(t("panel.errors.setAnchorFirst", { defaultValue: "请先设置周期起点，再开启模拟" }))
     }
-    const base = formBaseline.current as Record<string, any>
-    const current = form as Record<string, any>
-    const dirty: Record<string, any> = {}
-    for (const key of Object.keys(current)) {
-      const now = current[key]
-      const was = base[key]
-      // 数组/对象按序列化比（phase_openers 这类是列表），标量按值比
-      const same = now === was || (typeof now === "object" && JSON.stringify(now) === JSON.stringify(was))
-      if (!same) dirty[key] = now
-    }
-    // 一个都没改：不发这一趟，更不写存档（写了就等于替用户把出厂默认钉死）
-    if (Object.keys(dirty).length === 0) return
-    const result = await props.api.call("update_settings", dirty)
+    const result = unwrapCallResult(await props.api.call("update_settings", dirty))
     // 用入口返回的最新快照立即回填表单，不依赖 context 重取
     const snap = (result && typeof result === "object" && (result as Record<string, any>).enabled !== undefined)
       ? (result as Partial<Settings>)
@@ -864,7 +872,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   async function saveSettingsPage() {
     if (savingAll) return
     setSavingAll(true)
-    const apDirty = !appearanceEquals(draftAp, savedAp)
+    const apDirty = appearanceDirty
     let failure: unknown = null
     try {
       await postSettings()
@@ -1504,7 +1512,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
               ) : null}
               <CycleSettingsCard t={t} settings={settings} form={form} updateForm={updateForm} lanlan={state.lanlan} />
               <InjectSettingsCard t={t} form={form} updateForm={updateForm} />
-              <SaveBar t={t} canSave={!!updateSettingsAction} onSave={saveSettings} />
+              <SaveBar t={t} canSave={!!updateSettingsAction && settingsDirty} onSave={saveSettings} />
             </div>
           ) : null}
           {activeTab === "mood" ? (
@@ -1525,7 +1533,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
                 channelStatus={state.channel_status}
                 agentUsage={state.agent_tier_usage}
               />
-              <SaveBar t={t} canSave={!!updateSettingsAction} onSave={saveSettings} />
+              <SaveBar t={t} canSave={!!updateSettingsAction && settingsDirty} onSave={saveSettings} />
             </div>
           ) : null}
           {activeTab === "diary" ? (
@@ -1559,7 +1567,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
               settingsChildren={(
                 <>
                   <DiarySettingsCard t={t} form={form} updateForm={updateForm} />
-                  <SaveBar t={t} canSave={!!updateSettingsAction} onSave={saveSettings} />
+                  <SaveBar t={t} canSave={!!updateSettingsAction && settingsDirty} onSave={saveSettings} />
                 </>
               )}
             />
@@ -1612,7 +1620,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
               canBackup={actions.some((action) => action.id === "data_backup")}
               backupDisabled={savingAll || apBusy || journalSubmitting || reviewSubmitting || resetting}
               onRestored={onBackupRestored}
-              footer={<SaveBar t={t} canSave={!!updateSettingsAction} saving={savingAll} onSave={saveSettingsPage} />}
+              footer={<SaveBar t={t} canSave={!!updateSettingsAction && (settingsDirty || appearanceDirty)} saving={savingAll} onSave={saveSettingsPage} />}
             >
               <AppearanceCard
                 key={`appearance-${mediaReset}`}
