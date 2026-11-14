@@ -1,4 +1,9 @@
 {
+  "panel.stale.loading": "Esperando el estado del complemento. El panel se actualiza al restablecerse la conexión.",
+  "panel.settings.gateway": "API de modelos del complemento",
+  "panel.settings.tone_slot_names.gateway": "API de modelos del complemento",
+  "panel.settings.gatewayHint": "Vincula el uso correspondiente en los detalles del complemento. No cambia de canal automáticamente. Cuenta para el límite diario; los fragmentos requieren al menos 300 segundos entre solicitudes.",
+  "panel.channel.unverified": "Pendiente de la primera solicitud",
   "panel.memory.scope": "Rango de registros",
   "panel.memory.recent": "Recientes",
   "panel.memory.archive": "Archivo",
@@ -46,6 +51,8 @@
   "panel.errors.memoryCapacityReached": "El diario alcanzó 16 MiB. Se conservaron los registros existentes. Exporta una copia y organízalos.",
   "actions.dataBackup.label": "Copia y restauración",
   "panel.backup.title": "Copia y restauración",
+  "panel.stale.busy": "Se están copiando o restaurando los datos. El panel ha pausado la actualización y muestra el último estado conocido.",
+  "panel.stale.unavailable": "El complemento se está reiniciando o no responde. Se muestra el último estado conocido; se actualizará automáticamente cuando vuelva.",
   "panel.backup.scope": "Datos guardados de todos los personajes e imágenes estáticas; excluye vídeos y fondos animados.",
   "panel.backup.export": "Exportar copia",
   "panel.backup.import": "Elegir copia",

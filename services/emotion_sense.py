@@ -99,8 +99,10 @@ class EmotionSenseService:
         # 能力中心接线（1.2.7）：开关判定经主类 _cap_effective（含按角色否决集）；
         # 未注入时回落旧公式（情绪引擎 ∧ 配置），保留服务单独可测性
         cap_enabled: Callable[..., bool] | None = None,
+        gateway_tone: Callable[..., Awaitable[Any]] | None = None,
     ) -> None:
         self._http = http
+        self._gateway_tone = gateway_tone
         self._api_base = api_base
         self._push = push
         self._cfg_getter = cfg_getter
@@ -203,6 +205,11 @@ class EmotionSenseService:
         改头像表情的副作用（本插件只收集情绪信号，不接管表情）。
         """
         slot = str(self._cfg_getter().get("slot") or "").strip()
+        if slot == "gateway":
+            if self._gateway_tone is None:
+                return None
+            raw = await self._gateway_tone(text, lanlan)
+            return self._parse_result(raw) if raw else None
         if slot and slot != "emotion":
             return await self._analyze_turn_tone_direct(text, slot)
         token = await self._get_csrf_token()
@@ -232,7 +239,7 @@ class EmotionSenseService:
         """读宿主 core_config.json（含明文 key），5 秒内存缓存；文件缺失/JSON 坏 → {}。"""
         cached_ts, cached_cfg = self._core_config_cache
         now_mono = time.monotonic()
-        if cached_cfg and now_mono - cached_ts < _CORE_CONFIG_CACHE_TTL:
+        if now_mono - cached_ts < _CORE_CONFIG_CACHE_TTL:
             return cached_cfg
         cfg: JsonObject = {}
         path = self._core_config_path()

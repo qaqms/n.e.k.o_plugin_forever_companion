@@ -79,7 +79,13 @@ def _deferred_call_ids(tree: ast.AST) -> set[int]:
                     deferred.add(id(inner))
         elif isinstance(node, ast.Call):
             fname = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
-            if fname in _COROUTINE_SINKS:
+            persistence_sink = (
+                isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "locks"
+                and node.func.attr == "finish"
+            )
+            if fname in _COROUTINE_SINKS or persistence_sink:
                 for arg in list(node.args) + [kw.value for kw in node.keywords]:
                     if isinstance(arg, ast.Call):
                         deferred.add(id(arg))
@@ -189,6 +195,20 @@ def test_no_sync_blocking_calls_inside_async_defs() -> None:
     assert not offenders, (
         "async 路径必须走 a* 对偶版，不得在事件循环里阻塞读盘：\n  " + "\n  ".join(offenders)
     )
+
+
+def test_persistence_finish_accepts_coroutine_but_unrelated_finish_does_not() -> None:
+    source = """
+class Example:
+    async def work(self):
+        return 1
+    async def caller(self):
+        await locks.finish(self.work())
+        other.finish(self.work())
+"""
+    offenders = _unawaited_async_calls([(PLUGIN_ROOT / "probe.py", ast.parse(source))])
+    assert len(offenders) == 1
+    assert "self.work()" in offenders[0]
 
 
 def test_only_unified_exits_touch_the_store() -> None:

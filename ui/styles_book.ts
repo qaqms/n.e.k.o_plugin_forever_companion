@@ -25,7 +25,6 @@ export const BOOK_STYLES = `
 .tmb-card .tm-derived { max-width: var(--tmb-col); width: 100%; margin-inline: auto; }
 .tm-review { width: 100%; max-width: var(--tmb-col); min-width: 0; margin: 0 auto; }
 
-/* 每个目录项都是一本可翻开的日记，日期和摘录可直接扫描。 */
 .tmb-shelf {
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
   width: 100%; max-width: var(--tmb-col); min-width: 0; margin: 0 auto;
@@ -90,7 +89,6 @@ export const BOOK_STYLES = `
 .tmb-card .tm-mood-dot { flex: 0 0 auto; width: 7px; height: 7px; box-shadow: none; }
 .tmb-chevron { flex: 0 0 auto; width: 6px; height: 6px; border-top: 1.5px solid currentColor; border-right: 1.5px solid currentColor; transform: rotate(45deg); margin-left: auto; }
 
-/* 归档入口单独成行，有明确的标签与时间范围。 */
 .tmb-stack {
   grid-column: 1 / -1; width: 100%; min-width: 0;
   display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
@@ -105,7 +103,6 @@ export const BOOK_STYLES = `
 .tmb-archive-icon::before { content: ""; position: absolute; left: -2px; right: -2px; top: -4px; height: 3px; border: 1px solid currentColor; border-radius: 1px; background: var(--tmb-paper); }
 .tmb-archive-icon::after { content: ""; position: absolute; top: 3px; left: 5px; width: 4px; border-top: 1px solid currentColor; }
 
-/* 正文行宽由阅读列控制，不再用装饰书脊、丝带占用空间。 */
 .tmb-book { width: 100%; max-width: var(--tmb-col); min-width: 0; margin: 0 auto; }
 .tmb-page {
   position: relative; display: flex; flex-direction: column; min-width: 0;
@@ -139,7 +136,6 @@ export const BOOK_STYLES = `
 .tmb-text { margin: 0; font-family: var(--tmb-round); font-size: 15px; line-height: 1.95; color: var(--tmb-ink); text-align: left; overflow-wrap: anywhere; }
 .tmb-text + .tmb-text { margin-top: 14px; }
 
-/* 原文在前，附栏在后；窄窗自然降为上下排。 */
 .tmb-file-cols { display: grid; grid-template-columns: minmax(0, 1fr) 156px; gap: 28px; flex: 1 1 auto; min-width: 0; }
 .tmb-file-main { min-width: 0; }
 .tmb-file-aside { min-width: 0; border-left: 1px solid var(--tmb-rule); padding-left: 18px; }
@@ -161,7 +157,6 @@ export const BOOK_STYLES = `
 .tmb-quote-kind { color: var(--tmb-ink-soft); font-size: 11px; }
 .tmb-quote-text { color: var(--tmb-ink); }
 
-/* 导航底色不透明，避免滚动正文从按钮背后透出。 */
 .tmb-foot {
   position: sticky; bottom: var(--tm-save-clearance, 0px); z-index: 4;
   margin: 28px -36px 0; padding: 12px 18px; border-top: 1px solid var(--tmb-line);
@@ -183,7 +178,6 @@ export const BOOK_STYLES = `
 .tmb-btn:disabled { color: var(--tmb-ink-soft); opacity: 0.45; cursor: default; }
 .tmb-ind, .tmb-leaf-ind { color: var(--tmb-ink-soft); font: 11.5px/1.5 var(--tmb-round); font-variant-numeric: tabular-nums; }
 
-/* 两种生成门槛并排陈列，留出日记目录的视觉主位。 */
 .tmb-meter { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 22px; padding: 0 0 20px; margin-bottom: 20px; border-bottom: 1px solid var(--tmb-line); }
 .tmb-meter-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; color: var(--tmb-ink-soft); font: 11.5px/1.6 var(--tmb-round); min-width: 0; }
 .tmb-meter-row:first-child { grid-column: 1; grid-row: 1; }

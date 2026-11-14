@@ -1020,7 +1020,7 @@ class MediaGalleryMixin:
         enumerate_keys = getattr(self.store, "keys", None)
         if callable(enumerate_keys):
             for prefix in _MEDIA_PREFIXES:
-                result = await enumerate_keys(prefix)
+                result = await self._store_keys(prefix)
                 if not isinstance(result, Ok) or not isinstance(result.value, list):
                     raise GalleryMediaError("video_read_failed")
                 if not all(isinstance(key, str) and key.startswith(prefix) for key in result.value):

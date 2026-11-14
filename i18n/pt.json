@@ -1,4 +1,9 @@
 {
+  "panel.stale.loading": "Aguardando o estado do plugin. O painel será atualizado quando a conexão voltar.",
+  "panel.settings.gateway": "API de modelos do plugin",
+  "panel.settings.tone_slot_names.gateway": "API de modelos do plugin",
+  "panel.settings.gatewayHint": "Vincule o uso correspondente nos detalhes do plugin. Não muda de canal automaticamente. Conta para o limite diário; os pedidos de fragmentos têm intervalo mínimo de 300 segundos.",
+  "panel.channel.unverified": "Aguardando a primeira solicitação",
   "panel.memory.scope": "Intervalo dos registros",
   "panel.memory.recent": "Recentes",
   "panel.memory.archive": "Arquivo",
@@ -46,6 +51,8 @@
   "panel.errors.memoryCapacityReached": "O diário atingiu 16 MiB. Os registros existentes foram mantidos. Exporte um backup e organize-os.",
   "actions.dataBackup.label": "Backup e restauração",
   "panel.backup.title": "Backup e restauração",
+  "panel.stale.busy": "Os dados estão sendo copiados ou restaurados. O painel pausou a atualização e mostra o último estado conhecido.",
+  "panel.stale.unavailable": "O plugin está reiniciando ou não está respondendo. Mostrando o último estado conhecido; ele será atualizado automaticamente quando voltar.",
   "panel.backup.scope": "Dados salvos de todos os personagens e imagens estáticas; exclui vídeos e fundos animados.",
   "panel.backup.export": "Exportar backup",
   "panel.backup.import": "Escolher backup",

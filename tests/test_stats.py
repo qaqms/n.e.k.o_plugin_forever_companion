@@ -403,16 +403,15 @@ def test_anniversary_push_respects_switch_and_dedupe(plugin_factory) -> None:
     """纪念日注入：节点当天推送一次 + 水位去重 + 开关关闭即静默。
 
     _maybe_anniversary_push 里的"今天"来自 _stats_today（真实时钟、本地时区），
-    而 days_together 用 first_seen 的 **UTC 日期** 减本地今日。故把 first_seen 锚到
-    「本地今天 − 29 天」的 UTC 正午，使今天恒为第 30 天，与真实日期和时区无关。
+    days_together 把 first_seen 折到同一时区的本地日期再相减。故把 first_seen 锚到
+    「本地今天 − 29 天」的本地正午，使今天恒为第 30 天，与真实日期和时区无关。
     """
-    from datetime import date, datetime, timedelta, timezone
+    from datetime import date, datetime, timedelta
 
     p = plugin_factory()
     shard = p._get_shard("default")
     today = date.fromisoformat(p._stats_today())
-    fs = datetime.combine(today - timedelta(days=29), datetime.min.time(), tzinfo=timezone.utc)
-    fs = fs.replace(hour=12)
+    fs = datetime.combine(today - timedelta(days=29), datetime.min.time()).replace(hour=12).astimezone()
     shard.stats["first_seen"] = fs.isoformat()
 
     # 推送成功：一条 read 轻语 + 水位盖戳
@@ -558,3 +557,22 @@ def test_debug_stats_seed_restore_clear_flow(plugin_factory) -> None:
     assert st.summary_payload(shard.stats, p._stats_today())["days_together"] == 0
     saved = run(p.store.get("stats@default"))
     assert st.summary_payload(saved.value, p._stats_today())["total_turns"] == 0
+
+
+def test_days_together_counts_from_local_day_of_first_seen() -> None:
+    """first_seen 存的是 UTC 时刻；曾直接取 UTC 日，东八区早上装好就算第 2 天、纪念日提前一天。"""
+    from datetime import timedelta, timezone
+
+    east = timezone(timedelta(hours=8))
+    # 本地 2026-11-14 07:00（UTC+8）首聊 = UTC 2026-11-13 23:00
+    stats = {"first_seen": "2026-11-13T23:00:00+00:00"}
+    assert st.days_together(stats, "2026-11-14", tz=east) == 1
+    assert st.anniversary_due(stats, "2026-12-12", tz=east) == (False, 0)
+    assert st.anniversary_due(stats, "2026-12-13", tz=east) == (True, 30)
+    week = next(b for b in st.badges_payload(stats, "2026-11-20", tz=east) if b.get("days") == 7)
+    assert week["unlocked"] and week["date"] == "2026-11-20"
+    # 西半球：本地 2026-11-14 20:00（UTC-5）= UTC 2026-11-15 01:00
+    west = timezone(timedelta(hours=-5))
+    assert st.days_together({"first_seen": "2026-11-15T01:00:00+00:00"}, "2026-11-14", tz=west) == 1
+    # 不带时区的旧串（演示数据写本地 00:00）按墙钟取日
+    assert st.days_together({"first_seen": "2026-11-14T00:00:00"}, "2026-11-14", tz=west) == 1

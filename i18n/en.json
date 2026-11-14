@@ -1,4 +1,9 @@
 {
+  "panel.stale.loading": "Waiting for plugin status. The panel refreshes automatically when the connection returns.",
+  "panel.settings.gateway": "Plugin Model API",
+  "panel.settings.tone_slot_names.gateway": "Plugin Model API",
+  "panel.settings.gatewayHint": "Bind the matching usage in the host's plugin details. No automatic channel switching. Counts toward the plugin's daily limit; fragment requests are at least 300 seconds apart.",
+  "panel.channel.unverified": "Awaiting the first request",
   "panel.memory.scope": "Record range",
   "panel.memory.recent": "Recent",
   "panel.memory.archive": "Archive",
@@ -46,6 +51,8 @@
   "panel.errors.memoryCapacityReached": "Diary storage reached 16 MiB. Existing records were kept. Export a backup and organize them first.",
   "actions.dataBackup.label": "Backup and restore",
   "panel.backup.title": "Backup and restore",
+  "panel.stale.busy": "Backing up or restoring data. The panel has paused refreshing and shows the last known state.",
+  "panel.stale.unavailable": "The plugin is restarting or not responding. Showing the last known state; it refreshes automatically once the plugin is back.",
   "panel.backup.scope": "Saved data for all characters and static images; excludes videos and animated wallpapers.",
   "panel.backup.export": "Export backup",
   "panel.backup.import": "Choose backup file",

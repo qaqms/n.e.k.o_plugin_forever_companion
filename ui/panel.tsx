@@ -18,6 +18,7 @@ import {
   normAppearance,
   settingsToForm,
 } from "./utils"
+import { usePanelSnapshot } from "./snapshot"
 import { PANEL_STYLES } from "./styles"
 import { CAPDEMO_STYLES } from "./styles_capdemo"
 import { DEFAULT_THEME_COLORS, readWallpaperTheme, themeColorVars } from "./theme"
@@ -25,12 +26,14 @@ import type { ThemeColors } from "./theme"
 import { StatusBar } from "./statusbar"
 import { OverviewPane } from "./overview"
 import { CalendarPane } from "./calendar"
-import { CycleSettingsCard } from "./settings_cycle"
-import { InjectSettingsCard } from "./settings_inject"
-import { MoodSettingsCard } from "./settings_mood"
-import { EmotionSenseSettingsCard } from "./settings_emotion"
-import { ChannelSettingsCard } from "./settings_tone"
-import { DiarySettingsCard } from "./settings_diary"
+import {
+  ChannelSettingsCard,
+  CycleSettingsCard,
+  DiarySettingsCard,
+  EmotionSenseSettingsCard,
+  InjectSettingsCard,
+  MoodSettingsCard,
+} from "./settings"
 import { SaveBar } from "./savebar"
 import { ManagePane } from "./manage"
 import { BackupPanel } from "./backup"
@@ -56,7 +59,9 @@ import type { DiaryItem, JournalPage, Heatmap, MonthReport, ReviewEntry, ReviewP
 import { unwrapCallResult, errorText, diaryWriteError } from "./utils"
 
 export default function Panel(props: PluginSurfaceProps<State>) {
-  const { actions, state, t } = props
+  const { actions, t } = props
+  const { state, rawState, staleFrame, frameUsable, hasState, api } = usePanelSnapshot(props)
+  props = { ...props, api }
   const status = state.status || {}
   const mood = state.mood || {}
   const settings = state.settings || {}
@@ -172,6 +177,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   // 从 host 改成 custom，老存档里躺着的那份 host 把它压了一整天。
   const formBaseline = useRef<FormValues>(settingsToForm({}))
   const formBackupRevision = useRef(backupRevision)
+  const formLanlan = useRef(state.lanlan)
 
   // 表单与服务端快照同步的唯一入口：回填表单的同时把基线挪到同一份值上，
   // 两者任何时候都同源，"改没改过"才算得出真话
@@ -183,11 +189,13 @@ export default function Panel(props: PluginSurfaceProps<State>) {
 
   useEffect(() => {
     // 保存响应已经推进基线时，后续相同快照不能覆盖用户刚开始的新修改。
-    if (formBackupRevision.current === backupRevision
+    if (formLanlan.current === state.lanlan && formBackupRevision.current === backupRevision
       && JSON.stringify(settingsToForm(settings)) === JSON.stringify(formBaseline.current)) return
+    formLanlan.current = state.lanlan
     formBackupRevision.current = backupRevision
     syncForm(settings)
   }, [
+    state.lanlan,
     backupRevision,
     settings.auto_derive,
     settings.cycle_length,
@@ -219,25 +227,6 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     settings.debug_mode,
     (settings as Record<string, any>).anniversary_inject,
   ])
-
-  // 面板打开期间周期性同步 context：宿主切换角色后自动跟上，情绪状态/阶段等外部变化
-  // （入口点触发、tick 到期、对话中的 LLM 工具调用）无需重进面板即可看到
-  useEffect(() => {
-    let alive = true
-    let refreshing = false
-    const refresh = () => {
-      if (!alive || document.hidden || refreshing) return
-      refreshing = true
-      Promise.resolve().then(() => props.api.refresh()).catch(() => {}).finally(() => { refreshing = false })
-    }
-    const timer = setInterval(refresh, 5000)
-    document.addEventListener("visibilitychange", refresh)
-    return () => {
-      alive = false
-      clearInterval(timer)
-      document.removeEventListener("visibilitychange", refresh)
-    }
-  }, [])
 
   // 外观（1.2.0）：面板打开时拉一次图库索引 + 已存参数（图片本体不进轮询）；
   // 旧版单图背景在后端入口内自动迁移进图库。拉取失败按默认外观处理，不弹错
@@ -908,6 +897,7 @@ export default function Panel(props: PluginSurfaceProps<State>) {
       return false
     }
     const turningOff = status.enabled !== false
+    const expectedLanlan = state.lanlan || ""
     const ok = await confirmDialog({
       title: turningOff ? t("panel.turnOff", { defaultValue: "关闭模拟" }) : t("panel.turnOn", { defaultValue: "开启模拟" }),
       message: t("actions.toggle.confirm", { defaultValue: "确定切换模拟总开关吗？" }),
@@ -916,7 +906,8 @@ export default function Panel(props: PluginSurfaceProps<State>) {
     })
     if (!ok) return false
     try {
-      await props.api.call("toggle")
+      // 传目标值与确认时的角色：确认框弹着时换了角色，后端拒绝而不是翻转另一个角色
+      await props.api.call("toggle", { expected_lanlan: expectedLanlan, enabled: !turningOff })
       await props.api.refresh()
       return true
     } catch (err) {
@@ -1407,6 +1398,12 @@ export default function Panel(props: PluginSurfaceProps<State>) {
   const surfaceAppearance = bgDataUrl ? draftAp : { ...draftAp, glass: 0, card_alpha: 100 }
   const rootStyle = Object.assign({ display: "contents" }, appearanceVars(surfaceAppearance), themeColorVars(themeColors)) as Record<string, string>
 
+  if (!frameUsable && !hasState) return (
+    <Page>
+      <Alert tone="info" message={t("panel.stale.loading", { defaultValue: "正在等待插件状态，连接恢复后会自动刷新。" })} />
+    </Page>
+  )
+
   if (state.backup_recovery_required) return (
     <Page>
       <div className="tm-settings">
@@ -1449,6 +1446,16 @@ export default function Panel(props: PluginSurfaceProps<State>) {
         onGotoMood={() => setTab("mood")}
       />
 
+      {staleFrame ? (
+        <div key="warn-stale" className="tm-warnstrip">
+          <Alert
+            tone="info"
+            message={rawState.backup_busy
+              ? t("panel.stale.busy", { defaultValue: "正在备份或恢复数据，面板暂停刷新，显示的是上一次的状态。" })
+              : t("panel.stale.unavailable", { defaultValue: "插件正在重启或暂时没有响应，显示的是上一次的状态，恢复后会自动刷新。" })}
+          />
+        </div>
+      ) : null}
       {status.error ? <div key="warn-error" className="tm-warnstrip"><Alert tone="danger" message={status.error} /></div> : null}
 
       <div key="body" className="tm-body">

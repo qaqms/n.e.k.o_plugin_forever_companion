@@ -37,6 +37,7 @@ CODE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 # 面板可达（ui/*.tsx 的 api.call / ActionButton 会消费其 Err 与 note）的后端文件
 PANEL_SURFACES = [
     ROOT / "mixins" / "panel.py",
+    ROOT / "mixins" / "dashboard.py",
     ROOT / "mixins" / "capabilities.py",
     ROOT / "mixins" / "shards.py",
 ]

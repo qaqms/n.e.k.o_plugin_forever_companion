@@ -1,5 +1,20 @@
 # Isolated Hosted UI QA
 
+## 1.4.8 Cumulative Fixes And Import Package (2026-11-14)
+
+Version declarations and the lockfile are synchronized to 1.4.8. Full pytest
+with the host module scanner enabled passed: 1340 passed, 39 skipped.
+CI-style Ruff 0.12.4 and offline lockfile consistency checks passed.
+Earlier batch-three browser reports cover 113 distinct scenarios with zero
+check, runtime or layout failures; they do not replace live-host acceptance.
+
+Package `../dist/forever_companion_1.4.8.neko-plugin` is 757,470 bytes.
+Official strict validation, ZIP CRC, payload hash verification and byte
+comparison of 82 packaged source files passed. The validator retains the
+non-blocking `plugin.models` whitelist warning documented in the release notes.
+SHA-256: `44493fb30e8fd8522291c53a42d0561b6fdc5b45541495b2c958ea6817280fd1`.
+Host source and user data were not modified.
+
 ## Sidebar Scroll Stability (2026-11-05)
 
 The sidebar previously lost its scroll position when switching modules:

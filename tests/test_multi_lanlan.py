@@ -123,6 +123,29 @@ def test_advance_after_set_anchor_still_shifts_clock(plugin_factory_full) -> Non
     assert value and value["advance_days"] == 1
 
 
+def test_advance_days_is_capped_and_panel_survives(plugin_factory_full) -> None:
+    """超大快进值曾触发 OverflowError，之后面板/开关/设首日全挂，只能 reset_all 连日记一起清。"""
+    from forever_companion.core.cycle import ADVANCE_DAYS_MAX
+
+    p = plugin_factory_full(http=_HostHttp(current="YUI"))
+    res = run(p.advance_days_entry(days=3_000_000))
+    assert res.value["advance_days"] == ADVANCE_DAYS_MAX
+    shard = p._get_shard("YUI")
+    # 旧版已经存下的超大值：计算口同样钳住，面板照常出图
+    shard.cycle["advance_days"] = 10**12
+    result = run(p.dashboard())
+    assert result["status"].get("error") is None
+    assert not hasattr(run(p.set_anchor(date="2026-09-03")), "error")
+
+
+def test_advance_days_rejects_non_integer(plugin_factory_full) -> None:
+    p = plugin_factory_full(http=_HostHttp(current="YUI"))
+    for bad in ("3", 1.5, True, None):
+        res = run(p.advance_days_entry(days=bad))
+        assert str(res.error) == "settings_value_invalid", bad
+    assert int(p._get_shard("YUI").cycle.get("advance_days") or 0) == 0
+
+
 # ---------- 旧版单角色数据迁移 ----------
 
 
@@ -555,3 +578,63 @@ def test_randomized_anchor_persists_across_refresh(plugin_factory_full, tm) -> N
 
     assert first == second
 
+
+
+# ---------- 破坏性入口的角色核对（确认框弹着时换了角色） ----------
+
+
+def test_toggle_rejects_stale_expected_lanlan(plugin_factory_full) -> None:
+    host = _HostHttp(current="YUI", known={"YUI", "小灵"})
+    p = plugin_factory_full(http=host)
+    yui = run(p._ensure_shard("YUI"))
+    ling = run(p._ensure_shard("小灵"))
+    yui.cycle["enabled"] = True
+    ling.cycle["enabled"] = False
+    run(p._resolve_current_lanlan())  # 面板最近一帧还是 YUI（缓存 15s）
+    host.current = "小灵"  # 确认框弹着时用户在宿主里换了角色
+
+    res = run(p.toggle(expected_lanlan="YUI", enabled=False))
+    assert str(res.error) == "mood_changed"
+    assert yui.cycle["enabled"] is True
+    assert ling.cycle["enabled"] is False
+
+
+def test_toggle_sets_target_state_instead_of_flipping(plugin_factory_full) -> None:
+    p = plugin_factory_full(http=_HostHttp(current="YUI"))
+    yui = run(p._ensure_shard("YUI"))
+    yui.cycle["enabled"] = False
+    # 面板以为是开着的、要关：目标值已是 False，不能被翻成 True
+    res = run(p.toggle(expected_lanlan="YUI", enabled=False))
+    assert not hasattr(res, "error")
+    assert p._enabled(yui) is False
+    # 不带目标值的旧调用方仍按翻转处理
+    run(p.toggle())
+    assert p._enabled(yui) is True
+
+
+def test_clear_entries_reject_stale_expected_lanlan(plugin_factory_full, tm) -> None:
+    host = _HostHttp(current="小灵", known={"YUI", "小灵"})
+    p = plugin_factory_full(http=host)
+    yui = run(p._ensure_shard("YUI"))
+    yui.diary = [{"ts": "2026-11-01T00:00:00+00:00", "entry": "YUI 的手记"}]
+    yui.stats = {"first_seen": "2026-10-01T00:00:00+00:00", "days": {"2026-10-01": {"turns": 3}}}
+    yui.review = [{"ts": "2026-11-01T00:00:00+00:00", "text": "一篇"}]
+    for entry in (p.clear_diary, p.clear_stats, p.clear_review):
+        res = run(entry(expected_lanlan="YUI"))
+        assert str(res.error) == "mood_changed", entry.__name__
+    assert yui.diary and yui.stats.get("days") and yui.review
+
+
+def test_clear_entries_resolve_role_fresh_past_cache(plugin_factory_full) -> None:
+    host = _HostHttp(current="YUI", known={"YUI", "小灵"})
+    p = plugin_factory_full(http=host)
+    yui = run(p._ensure_shard("YUI"))
+    ling = run(p._ensure_shard("小灵"))
+    yui.diary = [{"ts": "2026-11-01T00:00:00+00:00", "entry": "YUI 的手记"}]
+    ling.diary = [{"ts": "2026-11-01T00:00:00+00:00", "entry": "小灵的手记"}]
+    run(p._resolve_current_lanlan())
+    host.current = "小灵"
+    # 宿主动作列表不传角色名：也要按此刻的当前角色执行，而不是 15s 前缓存的 YUI
+    res = run(p.clear_diary())
+    assert res.value["lanlan"] == "小灵"
+    assert yui.diary and not ling.diary

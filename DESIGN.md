@@ -149,11 +149,17 @@
 - **提取通道**：挂进语气感知同一趟 recent 轮询（不增加 HTTP 次数），但**水位独立**
   （`last_fragment_marker`）——语气感知的 check_rate 抽样跳过的轮次仍会进碎片分析，
   碎片不吃概率抽样；提取必须走可自定义 prompt 的通道（宿主 /api/emotion/analysis
-  只做五分类，不适用）。1.3.2 起这条通道有两种走法：`mode=host`（默认）把请求交回
+  只做五分类，不适用）。原有走法：`mode=host`（默认）把请求交回
   **宿主自己的模型管线**（`aget_model_api_config` + `create_chat_llm_async`，与宿主
   内置插件同一条路，零配置即用、免费路由下也可用），`mode=custom` 才由插件读
-  `core_config.json` 拼端点直连；host 解析不出端点时自动回落直连。默认 summary 槽
-  （宿主记忆抽取同层级），两条路都给不出端点时功能自动休眠（节流 warning），其余不受影响
+  `core_config.json` 拼端点直连；host 解析不出端点时自动回落直连。默认 agent 槽，
+  两条路都给不出端点时功能自动休眠（节流 warning），其余不受影响。
+  可选 `mode=gateway` 经 `services/model_gateway.py` 调用公开 `ctx.models.get_client()`，
+  用途为 `fragments`；两本成文日记共用 `writing`，语气选 `slot=gateway` 时使用 `tone`。
+  manifest 的三个用途均非必需，由用户在宿主插件详情绑定；原有默认值不变。
+  网关仅持有实例凭据，不读取服务商配置、不自动回落到旧通道。
+  该模式沿用本地每日预算；片段保留 300 秒地板，语气只扣预算、不推迟片段节拍。
+  SDK 客户端每次从当前事件循环取得，生命周期清理由宿主负责，插件不跨循环缓存或逐请求关闭。
 - **宁漏勿错**：capture 缺省按 false、kind 不在类型表/缺 quote 即丢弃、置信度门槛
   （默认 0.6）、60s 最小间隔；全部面板可见、可单条删除（`delete_diary_item`）。
   时光日记与我的日记页面不提供整本清空按钮。
@@ -235,7 +241,7 @@
 日记存在的渠道都没有）。纯逻辑在 `review.py`（素材统计累加/双门槛判定/
 成文 prompt 组装/回复解析截断/篇目追加淘汰），模型调用与落盘由主类完成：
 
-- **素材纯本地累计**（平时零模型开销，随写随存进 `review@<角色>` 的 stats
+- **素材纯本地累计**（平时零模型开销，随写随存进 `review_stats@<角色>` 的小侧表
   字段，成文后原子清零）：互动轮数+valence 采样（`_handle_new_user_message`
   喂入）、她的语气标签分布（`_feed_tone_affect` weight=1.0 路径喂入，用户侧
   低权重传导不计）、情绪动作事件（`_apply_mood_action` origin=user/self 区分
@@ -271,12 +277,17 @@
   1.3.9 日记更新起 `review_brief.last_ts` 取最后成文时间，面板同时观察篇数与时间，
   使达到 52 篇后新篇替换旧篇仍会自动刷新；旧概要缺字段时按篇数判断。
   面板翻阅走已白名单的 get_review 加参数通道（1.3.0 藏书阁 403 教训同款防御）
-- **数据**：`review@<角色>` 一个 key 存 `{entries, stats}`（成文时篇目追加与
+- **数据**：`review@<角色>` 一个 key 存 `{entries, stats, revision}`（成文时篇目追加与
   stats 清零一次写入，避免中途崩溃错位）；保留 52 篇，写满后淘汰最旧一卷
   **搬进档案室 `review_archive@<角色>`**（1.3.0，与藏书阁同款纪律：只追加、
   独立 key、上限 104 卷再满才真删；清空/角色删除/prune 一并清）；
   调试入口 `debug_review`（素材统计 + 资格判定 + force 成文）、
   `debug_review_fill`（假卷宗注入/还原，entries 可给 53~60 走真实落盘链验溢出搬家）
+  素材变化写小侧表 `{...stats, _base: revision}`，只有修订号相等才在加载时覆盖完整快照的
+  stats。完整提交成功即使旧侧表留在盘上，也不会复活已消耗素材。首次使用侧表前先提交一次
+  完整快照；同角色两种保存共用跨线程锁，取消时等待完整提交结果后再释放。
+  备份携带两个 key，并校验修订号格式；旧版无修订号的数据照常读取。降级到旧插件会忽略
+  新侧表，丢掉最近完整快照之后的素材增量，已成文正文不受影响。
 
 ## 记忆治理（1.4.3）：写入后治理
 
@@ -421,13 +432,13 @@ UI context 三处被宿主解析，**动作返回值不在解析链里**（`call
 用户输入的密钥或私有 payload 写进日志或进程输出；诊断优先记**脱敏后的长度、
 ID 和错误类型**。本插件的落地形态：
 
-- **凭据面**：两种 `mode` 下明文 key 都会在插件进程内存里过一遍，区别只在来源——
+- **凭据面**：原有 `host/custom` 下明文 key 都会在插件进程内存里过一遍，区别只在来源——
   `host` 由宿主的 `aget_model_api_config` 现算后交回 `resolve_host_slot` 的返回 dict
   （再进 `_host_slot_cache` 存 5 秒），`custom` 由 `_resolve_tone_slot` 从
   `core_config.json` 拼出。`host` 这一侧插件不读配置文件、不推端点、不做地域改写，
   但这不等于"不碰 key"：客户端仍由插件调 `create_chat_llm_async` 构造并由插件发出
-  请求，所以**别把它写成凭据隔离**。真要插件不经手凭据，只有语气感知默认槽位那条
-  宿主回环端点（prompt 交进去、模型由宿主调）。两条路共守的不变量：key 永不写
+  请求，所以**别把旧模式写成凭据隔离**。语气感知默认槽位的宿主回环端点，以及新增
+  `gateway` 模式不经手服务商密钥；网关日志仅记录用途和异常类型。旧模式共守的不变量：key 永不写
   日志、永不进面板回显（debug 入口只显 `scheme://netloc/…` 与 model 名）、永不发给
   该 key 所属服务商以外的任何地址；
 - **异常面**：直连与宿主管线两条路的失败留痕都只准 `_exc_shape(exc)`（类型名 +
@@ -519,7 +530,10 @@ CHANGELOG，契约性变化改本文件正文——两边各司其职，不再�
 - SDK surfaces: `@neko_plugin`, `@plugin_entry`, `@llm_tool`, `@timer_interval`, `@lifecycle`,
   `push_message`, `self.store`, `self.config`, `tr()`
 - UI surfaces: `[[plugin.ui.panel]]` hosted-tsx `ui/panel.tsx`（state:read, config:read, action:call）。
-  面板为多文件模块结构：`panel.tsx` 入口组装 + `types.ts` / `utils.ts` / `styles.ts` 共享层
+  面板为多文件模块结构：`panel.tsx` 入口组装 + `snapshot.ts` 状态快照与轮询
+  + `types.ts` / `utils.ts` / `styles.ts` 共享层；后端 `mixins/dashboard.py` 负责只读快照与
+  模型状态，`mixins/panel.py` 保留动作和设置。dashboard 不再驱动主动搭话协调或日记邀请，
+  这些工作由 timer/get_status 继续处理。
   （styles.ts = 面板材质层；1.3.4 起统一中性表面、细边框，1.3.5 起默认浅蓝强调色与壁纸主题色联动，壁纸模式的顶栏、
   侧栏与保存条同源透明，不再叠加多层卡片底色），`styles_book.ts` 管两本日记的目录与阅读页：
   1.3.9 日记更新起使用浅蓝点缀、不透明纸面与独立明暗 token，第二个 `<style>` 并列注入；
@@ -540,7 +554,7 @@ CHANGELOG，契约性变化改本文件正文——两边各司其职，不再�
   页签清单与内容在 panel.tsx（`tabs` 数组 + 就地渲染的 cycle/mood/settings 三页）：
   顶级入口组件 `overview.tsx` 总览 / `calendar.tsx` 日历 / `diary.tsx` 三本日记 /
   `moment.tsx` 时光 / `features.tsx`+`capintro.tsx` 功能与页内介绍 /
-  `settings_cycle|inject|mood|emotion|tone|diary.tsx` 六张设置卡（由 panel.tsx 按页拼装）、
+  `settings.tsx` 六张设置卡（同一模块、由 panel.tsx 按页拼装）、
   `appearance.tsx` 面板外观 / `manage.tsx` 危险区与角色名单 / `birthdaycard.tsx`
   生日设置卡（`ui/moment.tsx` 与向导共用一份）/ `onboarding.tsx` 新手向导（六步：
   认识→开启→通道体检→记生日→看壁纸→收尾；guide 记录带版本号，改版后旧
@@ -573,7 +587,7 @@ CHANGELOG，契约性变化改本文件正文——两边各司其职，不再�
 - state/config: `[tide]` / `[mood]` / `[fragments]` / `[journal]` / `[review]` / `[stats]` / `[birthday]` / `[emotion_sense]` 配置段 +
   PluginStore 键（0.5.0 起按角色分片 `cycle@<角色名>` / `mood@<角色名>` / `diary@<角色名>` /
   `journal@<角色名>`（0.7.0 起，旧 `weekly@` 迁入后保留备份）/ `review@<角色名>`
-  （0.8.0 起，`{entries, stats}` 合一存储）/ `journal_archive@<角色名>` /
+  （完整 `{entries, stats, revision}` 快照）/ `review_stats@<角色名>`（带 `_base` 的素材增量）/ `journal_archive@<角色名>` /
   `review_archive@<角色名>`（1.3.0 起，藏书阁与档案室：淘汰搬家只追加、独立 key），加 `lanlan_index` / `settings` /
   `proactive_state` 三个全局键；1.2.0 起另有全局外观键 `panel_appearance` /
   `gallery_index` / `gallery_img/<id>`（旧单图 `panel_bg` 仅迁移读，保留备份））
@@ -581,6 +595,21 @@ CHANGELOG，契约性变化改本文件正文——两边各司其职，不再�
   plugin_runtime.auto_start=true 随宿主自动启动（切角色卡等操作会重启插件服务，
   不自动启动会静默消失），知情同意由 [tide].enabled=false fail-closed 保证
 - external integrations: 无外部服务
+
+### Store 与面板轮询
+
+- 所有 Store 的 `get/set/delete/keys` 经 `StoreAccess` 排队，使用公开 `close()` 释放
+  连接。宿主的 close 会关闭整个 Store 已登记的连接，因此操作和关闭共持一把跨线程锁，
+  禁止在其他读写进行时关闭；取消时等待操作与关闭完成，关闭失败不掩盖已提交的写入。
+  每次操作会重新建连，换取宿主短命定时事件循环下的有界连接数。
+- 可见面板每 5 秒刷新状态：五次调用 `poll_dashboard`，第六次完整 `api.refresh()`，
+  因此完整语言包和动作清单通常每 30 秒刷新一次。后台页签暂停，切回后立即刷新。
+  旧宿主未暴露精简入口时保留完整刷新。宿主动作授权仍先构建一次 dashboard，精简入口
+  复用最近一秒的授权快照；省下的是响应中的配置和八套语言包，不能消除宿主的授权调用。
+- 空、失败或 busy 帧保留上次状态与同角色草稿，并明确提示；恢复后继续刷新，换角色才
+  重置草稿。没有历史状态时显示等待提示。失联期间普通动作被前端拒绝，备份传输仍可继续。
+- 角色名单与槽位选项成功缓存 60 秒、失败缓存 5 秒；失败名单始终表示未知，不作为孤儿
+  删除证据。旧通道 core_config 的空结果也缓存 5 秒。当前角色的破坏性操作确认不走失败缓存。
 
 ## 壁纸主题色联动（正式 1.3.3，开发验收标记 1.3.5）
 
@@ -691,7 +720,8 @@ CHANGELOG，契约性变化改本文件正文——两边各司其职，不再�
   否则看播放时间变化。可见状态连续 4 秒无帧进展时先 seek，再重载同一来源一次，
   再次持续停滞则报错回退；后台暂停不计入停滞。长时间隐藏或失焦后 seek 刷新画面，
   新帧呈现前不显示旧解码帧。检测不能识别所有仍在持续呈帧的编码或 GPU 马赛克。
-  dashboard 仍为可见面板 5s 轮询；文档隐藏跳过、可见立即刷新，避免慢请求重叠。
+  dashboard 状态仍为可见面板 5s 轮询，完整上下文每六次刷新一次；
+  文档隐藏跳过、可见立即刷新，避免慢请求重叠。
 - 设置页内部按外观与壁纸、通用、数据管理分组，视图通过 `hidden` 切换而不卸载，
   草稿、导入任务、目录候选与容量输入保留；底部仍只有统一保存入口。
   外层复用卡片的细描边、圆角、阴影与单层透明材质，内部保持平面分区；
@@ -797,3 +827,116 @@ CHANGELOG，契约性变化改本文件正文——两边各司其职，不再�
 - 平台没有向插件派发用户聊天消息的通道（`@message(source="chat")` 无 emitter，属死代码），
   故采用 warthunder 已验证的总线轮询方案（`ctx.bus.memory.get_sync("default")` 读
   `type="user_message"` 记录），不修改平台代码。
+
+## 附录：面板样式备注（迁自 ui/styles*.ts 的 CSS 注释）
+
+`ui/` 下的 CSS 字符串会原样下发进面板 iframe，并计入宿主对面板运行时依赖的
+512 KiB 预算（`tests/test_ui_dependency_budget.py` 守着），所以样式文件里不再写
+CSS 注释，样式背后的取舍记在这里，按选择器检索。第三方图标的许可声明仍留在
+`ui/styles_capdemo.ts` 里与代码同处。
+
+### ui/styles.ts
+
+- `.tm-appearance-root`：Role colors stay inside the plugin; raw wallpaper colors remain available for swatches.
+- `.neko-page .neko-button:disabled`：宿主 kit 对禁用按钮用了 cursor: wait（Windows 上显示转圈忙碌光标），这里纠正为不可点击
+- `.tm-ring-orbit`：外圈细轨道：中性发丝环，阶段分布由边界小点表达
+- `.tm-moon`：中心月相盘：玻璃暗面 + 整面亮盘 + 同尺寸暗盘横向扫过（translateX 驱动盈亏）。 原则：暗面=与面板融合的玻璃（新月≈隐身），只有亮部是实体；扫掠暗盘与暗面同材质， 暗盘必须是实体遮盖（不透明渐变）--曾用 backdrop-filter 压暗下方亮盘，但面板运行环境 里该滤镜不生效：暗盘只剩自身 10~15% 透明渐变，该遮住的区域整个透出亮盘纹理（穿模）， 已改为实体暗玻璃。无球面罩层--发光体要 bloom 不要灰。
+- `.tm-moon-base`：新月轮廓光：右缘一线极淡亮边，让暗盘在月初也有月亮轮廓
+- `.tm-moon-lit`：内发光：让亮部像光源而不是纸片
+- `.tm-moon-shadow`：扫掠暗盘：与暗面同材质的实体暗玻璃（不透明），横向扫过遮住亮盘；边缘 0.5px 羽化。 禁止改回半透明+backdrop-filter--面板环境该滤镜不生效，暗区会整个透出亮盘（穿模）
+- `.tm-moon-pill`：月相盘中心的信息 pill：三视图文本
+- `.tm-ring-col`：圆环三视图指示点：让"点击切换"可发现，点本身也可直接点按切换
+- `.tm-statusbar-slim`：---- 精简状态条（0.9.0）：她是谁 · 一句话状态 · 心情胶囊 · 开关 ----
+- `.tm-statusbar-slim`：row-gap 5px：提示行换行后与主行的距离（column-gap 维持 12px）
+- `.tm-ov-hero`：---- 总览页（0.9.0）：陪伴仪表盘 ----
+- `.tm-bday-row`：生日设置卡（1.3.1 改版·二次，「时光」页）：纯设置项一行——日期按钮 + 自绘月历 （内嵌展开，非浮层：Card 玻璃层 overflow/backdrop-filter 会裁掉绝对定位层， 实机踩坑 2026-09-14）+ 纪念手记开关 + 清除（确认即保存，「保存」按钮与原生 date input 一并退役：原生弹层是浏览器 UI，「今天」改不了文案也改不了行为）。 总览生日卡的倒数/当天高亮形态已退役，对应样式随之下架。全 CSS 绘制、零 SVG。
+- `.tm-channel-row`：---- 模型通道卡（0.9.0）：通道行 + 状态灯 ----
+- `.tm-channel-control`：通道控件行：槽位与通道方式两个下拉并排分宽，窄窗下换行各占一行（1.3.2 前每行 只有一个下拉、无需排版规则，加 mode 旋钮后必须给，否则两个控件竖着堆成两条）
+- `.tm-mood-pill`：连续心情胶囊：心情词文字直接可见；胶囊底色随 valence 内联（暖琥珀/灰蓝/中性灰）， 光晕大小与呼吸速度随 arousal 内联
+- `.tm-status-hints`：关闭状态细提示（1.1.7）：状态条卡片内第二行（.tm-statusbar 本就 flex-wrap， 整宽子元素自动换行）。替代旧的两条独立 Alert 条与卡片间悬浮提示行—— 提示收进卡片内部后，状态条与内容区之间不再有任何夹缝元素
+- `.tm-tabs`：小窗滚动（终态）：宿主插件详情窗口高度不够时，shell（100vh + overflow:hidden）会把末页页签裁掉且无从触达——导航栏自身可滚即可。 滚动条本体彻底隐藏（用户反馈：看得见反而不如纯滚动手感舒服）， 滚轮/触控板/拖滑块照常；scrollbar-width:none 不占 gutter，侧栏宽度 不被吃。历经三版演进：常驻细条→悬停浮现（:hover 命不中槽、改 pointer 右缘命中带）→无条纯滚，停在这版别再回头
+- `.tm-content`：滚动条静默化（panel.tsx contentHot/contentScrolling）：槽 8px 恒占位 避免浮现抽动，轨道/滑块默认全透明即隐形；.tm-content-hot（悬停槽位 或滚动中）才着色。 ⚠两坑：①不用 scrollbar-color/scrollbar-width 非 auto 值——Chromium 下一 设它们就整体屏蔽 ::-webkit-scrollbar 定制，垂直条退回 ~17px 经典宽吃宽度； ②overflow-x 必须显式 hidden——overflow-y:auto 会把 visible 的 overflow-x 连坐成 auto，入场动画 translateX/1fr min-content 等几 px 瞬时溢出都会弹 横向条（日历页反馈同因）。页面不横滚；长热力图的滚动独立在图内。
+- `.tm-cal-wd`：minmax(0,1fr)：1fr 隐式最小 auto 不收缩到 min-content 以下，小窗撞线
+- `.tm-cal-cell[data-phase="luteal"], .tm-cal-cell[data-phase="before_start"]`：锚点前的日子按平稳期着色（cycle.py 的标签映射同语义），灰格改为中性底
+- `.tm-save`：保存条吸底：设置页滚动到底部仍可见，磨砂底与面板一致；负外边距抵消 .tm-content 内边距实现通栏
+- `.tm-reserve-help::after`：无 help 文案的 Field 预留一行 help 的高度（12px×1.5=18px），保证同一 Grid 内各词条等高、底部对齐
+- `.tm-pane .neko-input, .tm-pane .neko-select`：Chromium 下同样式的 select 比 input 高 2px，统一控件高度，保证设置项等高对齐
+- `.tm-timeline`：时光日记时间线：她的手记（暖调）与自动碎片（蓝调）混排，来源徽标 + 类型着色； 按日期分组的组头吸顶，扫读时始终知道自己在看哪一天
+- `.tm-tl-quote`：碎片原话的"他说的话"气泡：左侧竖线 + 淡蓝底，和她的正文一眼区分
+- `.tm-journal-toolbar`：个人日记/我的日记工具行 + 心情圆点（复用状态栏配色算法）。 1.3.0：目录与书页改拟真书本（书脊/纸页），样式见 ui/styles_book.ts
+- `.tm-review`：我的日记：素材进度条（下一份评价攒了多少轮）+ 设置子卡标题
+- `@keyframes tm-pane-in`：1.3.0：旧「米色卡片」书页（.tm-book* / .tm-paper）已整体换成拟真书本， 书架/纸页/丝带/朱印一律见 ui/styles_book.ts
+- `.tm-bg`：============================================================ 面板外观（1.2.0：图片图库 + 可调背景） ============================================================
+- `.tm-bg`：Only the image is filtered; the independent dim layer must remain unaffected.
+- `.tm-has-bg .tm-body, .tm-has-bg .tm-statusbar`：整体字体显示强度：只作用于正文继承链上的文字（按钮/徽标等自带色的组件不受影响）； 低浓度自动加深投影保证可读。color-mix 不支持的老浏览器回退原 --text
+- `.tm-settings`：Settings use flat sections; hidden views stay mounted during imports.
+- `.tm-appearance`：Appearance gallery and adjustments share one column.
+- `.tm-gallery`：图库网格：缩略图平铺 + 左上「不用壁纸」格 + 角标/删除钮
+- `.tm-gallery-thumbless`：无缩略图（旧迁移图回填前的窗口期）：棋盘格占位
+- `.tm-adjust-grid`：背景调节：填充/位置/滑杆组；未选壁纸时整组降透明度（控件已 disabled）
+- `.tm-ico`：============================================================ 纯 CSS 线框图标（hosted 运行时不支持 SVG，颜色随 currentColor） ============================================================
+- `.tm-ico-calendar`：日历：圆角边框 + 顶部横线
+- `.tm-ico-cycle`：周期：圆环 + 轨道上的小点（呼应状态栏圆环的今日标记）
+- `.tm-ico-inject`：注入：消息气泡里两行字
+- `.tm-ico-mood`：情绪：半填充圆（愉悦度双向条的冷暖两极意象）
+- `.tm-ico-overview`：总览：四象限网格（仪表盘意象）
+- `.tm-ico-features`：功能管理（1.2.7）：两行开关意象（轨道 + 错位的旋钮）
+- `.tm-ico-settings`：设置：齿轮意象（外圈 + 中心圆点）
+- `.tm-ico-diary`：日记：本子轮廓 + 左侧装订线
+- `.tm-ico-manage`：管理：三条滑轨 + 两个滑块圆点
+- `.tm-hero-card`：---- Companion statistics ----
+- `行内 strut（基础字号行高 ~19px）撑高——10px 格子行实际 ~20.5px，行距翻倍且左侧`：---- 自适应悬停提示（AdaptiveTip）：tip 单例挂在 document.body 的 fixed 元素 ---- 坐标按触发元与提示框的实际宽高计算，避让四边；放不下的长说明在框内滚动。 必须挂 body：.tm-heat-scroll 的 container-type 与 .neko-card 的 backdrop-filter 都会劫持 fixed 后代的包含块（视口坐标被按容器内坐标解释，实测偏移 ~180px）， 卡片 overflow:hidden 还会裁剪——body 无 transform/filter 祖先，fixed 即真视口系
+- `.tm-tip-wrap`：包裹层保留盒模型（量测坐标用）。display:block + line-height:0：inline-block 会被 行内 strut（基础字号行高 ~19px）撑高——10px 格子行实际 ~20.5px，行距翻倍且左侧 星期标签列（11.5px 节距）与之渐行错位；压掉 strut 后包裹层高度即内容本高。 hero 统计卡/徽章卡的包裹层在 flex/grid 上下文里不含行内内容，不受影响
+- `.tm-hero`：hero 数字区：相伴天数大数字 + 纪念日进度环（氛围卡内上半区）。 与下方统计卡的间距 12→18px：统计卡与 hero 同为玻璃质感，间距小了糊成一片
+- `.tm-hero-ring`：纪念日进度环：conic-gradient 填充 + 玻璃内芯（数字居中）。 内芯 inset 6px → 实际 52px，数字/单位行盒必须 ≤52（曾写死 line-height:64px， 52px 容器里塞 64px 行盒 + baseline 对齐 → 整组字下溢、数字中心偏离圆心）； line-height:1 让文字盒=字号，align-items:center 把盒中心压到圆心
+- `.tm-stat-strip`：统计玻璃小卡（氛围卡内底边距由卡片接管）
+- `.tm-badge-wall`：---- 相处徽章墙（成就卡片式 2.0）：横向 4 列卡片（窄面板降列），月光蓝主调 ---- 天数类按难度升级月相（新月→半月→满月→星拱月→潮汐月）， 事件类专属图形（羽毛笔/书页/信封）；未解锁整卡灰化剪影 + 进度条
+- `.tm-badge-wall`：徽章墙横向排列：4 列 × 2 行，窄面板逐级降列
+- `.tm-ach-icon`：The dark icon base provides contrast for the silver moon glyphs.
+- `.tm-ach-bar`：相伴进度条：未解锁时显示当前相伴天数占目标的进度
+- `.tm-ach:not(.tm-ach-on) .tm-ach-icon`：未解锁：整卡灰化剪影。图标底座换成中性灰夜空（不白不黑）， 不再用深海军蓝灰化后的偏黑底
+- `.tm-glyph`：---- 徽章图形：月相五档 + 羽毛笔/书页/信封（配色走月光银蓝）----
+- `.tm-glyph-crescent`：新月：银蓝圆盘 + mask 切出一弯（镂空处透出底座夜空色，不产生色差）
+- `.tm-glyph-half`：半月：右半亮面
+- `.tm-glyph-full`：满月：圆满亮盘 + 光晕
+- `.tm-glyph-orbit`：星拱月：满月居中 + 环拱星光点
+- `.tm-glyph-tide`：潮汐月：新月上浮 + 两道涌动潮水线
+- `.tm-glyph-quill-body`：羽毛笔：斜笔杆（圆角长条旋转）+ 笔尖三角
+- `.tm-glyph-book-page`：书页：摊开双页（两个带折角的梯形）+ 两行字线
+- `.tm-glyph-letter`：信封：矩形底 + 盖片三角 + 封口圆点
+- `.tm-heat`：Seven weekday rows with fixed gaps; long histories scroll only inside the chart.
+- `.tm-gh`：Reserve 32px for weekdays and use the actual week count, including 53-week years.
+- `.tm-gh-monthrow`：Month groups occupy the same columns as their dates.
+- `.tm-gh-monthslot:last-child .tm-gh-month`：Keep the final label inside the date grid even for a one-week partial month.
+- `.tm-gh-body`：主体：左侧星期标签列 + 周列区
+- `.tm-heat-future`：未来/窗口外占位：透明格保持列高对齐
+- `.tm-heat-cell`：格子本体
+- `.tm-heat-footer`：底部脚注：说明文案 + 图例（GitHub 同款右下角布局）
+- `.tm-heat-legend .tm-heat-cell`：The legend keeps its own size outside the chart's sizing container.
+- `.tm-month-nav`：---- 月报 ----
+- `.tm-month-voice`：本月声音：玻璃引言卡（渐变顶边 + 大引号 + 衬线引文）
+- `.tm-ico-moment`：时光页签图标：时钟（圆 + 指针）
+- `.tm-ico-target`：靶心：日历选日模式按钮
+- `.tm-ob-step`：---- 新手引导向导（1.2.6）----
+- `.tm-guide-progress`：---- 就绪清单（1.2.6）----
+- `.tm-features-pane`：功能管理页（1.2.7）：能力行列表 + LLM 徽标侧栏 + 高级选项说明
+- `.tm-feat-cols`：1.2.7 单页化：三组卡横向并排（4/2/3 行，总高≈最高列）+ 高级选项单行窄条； 窄窗回落双栏/单栏
+- `.tm-feat-label`：Function introductions keep plain reading sections separate from their framed demo.
+- `.tm-sw`：---- 动画开关 TmSwitch（1.3.1）：统一替换宿主 Kit 原生 checkbox 开关 ---- 经典顺滑型：滑块 0.25s 缓动平移、轨道同步渐变换色；开启态浅蓝与面板 淡蓝磨砂底同族（#93c5fd/#60a5fa 系）。small 档供状态条/引导行等窄位。
+- `.tm-sw-input`：隐藏原生 checkbox 但保留键盘可达（focus-visible 环画在轨道上）
+- `.neko-page:not(.tm-has-bg)`：Plain mode separates soft control fills from readable text; wallpaper roles stay unchanged.
+- `.neko-page.tm-has-bg`：Wallpaper materials are independent of the operating system theme.
+
+### ui/styles_capdemo.ts
+
+- `.tm-demo[data-mode="before"] :is(`：The comparison is semantic: before stays neutral, while after separates incoming context, background processing, and the resulting state.
+- `.tm-demo[data-phase="0"] :is(.tm-demo-conversation > .tm-demo-incoming, .tm-demo-calendar, .tm-demo-host, .tm-demo-mood-in, .tm-demo-fast-lane, .tm-demo-quote-stack, .tm-demo-invitation, .tm-demo-review-sources)`：Semantic objects settle between beats; decorative movement never carries the only explanation.
+
+### ui/styles_book.ts
+
+- `.tmb-shelf`：每个目录项都是一本可翻开的日记，日期和摘录可直接扫描。
+- `.tmb-stack`：归档入口单独成行，有明确的标签与时间范围。
+- `.tmb-book`：正文行宽由阅读列控制，不再用装饰书脊、丝带占用空间。
+- `.tmb-file-cols`：原文在前，附栏在后；窄窗自然降为上下排。
+- `.tmb-foot`：导航底色不透明，避免滚动正文从按钮背后透出。
+- `.tmb-meter`：两种生成门槛并排陈列，留出日记目录的视觉主位。

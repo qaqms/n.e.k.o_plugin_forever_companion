@@ -30,6 +30,8 @@ def _channel_mode(cfg: JsonObject) -> str:
     面板回显三处都要读它，判据必须只有一份——写错值不该把用户悄悄退回旧的直连行为，
     所以这里只认 custom 一个例外，其余一律 host。
     """
+    if str(cfg.get("mode") or "").strip() == "gateway":
+        return "gateway"
     return (
         _CHANNEL_MODE_CUSTOM
         if str(cfg.get("mode") or "").strip() == _CHANNEL_MODE_CUSTOM

@@ -28,7 +28,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, tzinfo
 from typing import Any
 
 from .fragments import diary_display_record
@@ -276,25 +276,45 @@ def streaks(stats: JsonObject, today: str) -> tuple[int, int]:
     return longest, current
 
 
-def days_together(stats: JsonObject, today: str) -> int:
+def first_seen_day(stats: JsonObject, tz: tzinfo | None = None) -> date | None:
+    """相伴起点的本地日期，与 today、逐日明细用同一把时区尺。
+
+    first_seen 落盘的是 UTC 时刻，直接取 .date() 得到的是 UTC 日：东八区早上首聊会被
+    算到前一天、西半球晚上首聊算到后一天，纪念日跟着提前/推后一天递。tz=None 按系统
+    本地时区（与 [tide].timezone="auto" 时插件折算 today 的口径一致）；不带时区的旧串
+    （演示数据写的是本地 00:00）按本地墙钟原样取日。
+    """
+    try:
+        parsed = datetime.fromisoformat(str(stats.get("first_seen") or ""))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.date()
+    try:
+        return parsed.astimezone(tz).date()
+    except (OverflowError, OSError, ValueError):
+        return parsed.date()
+
+
+def days_together(stats: JsonObject, today: str, *, tz: tzinfo | None = None) -> int:
     """已相伴天数：today − first_seen 的本地日期差 + 1（安装当天算第 1 天）。"""
-    first = _parse_iso_ts(stats.get("first_seen"))
+    first = first_seen_day(stats, tz)
     if first is None:
         return 0
     try:
         anchor = date.fromisoformat(today)
     except ValueError:
         return 0
-    return max(0, (anchor - first.date()).days + 1)
+    return max(0, (anchor - first).days + 1)
 
 
-def next_anniversary(stats: JsonObject, today: str) -> tuple[int, int]:
+def next_anniversary(stats: JsonObject, today: str, *, tz: tzinfo | None = None) -> tuple[int, int]:
     """下一个纪念日：(第 N 天, 距今天数)。纪念日 = 30/100/200/365/500/730/… 天。
 
     规则：从相伴第 1 天起，每逢满 30 的倍数或满 365 的倍数即纪念日；
     返回第一个"今天或之后"的节点；已相伴不足 30 天时首个节点是第 30 天。
     """
-    total = days_together(stats, today)
+    total = days_together(stats, today, tz=tz)
     if total <= 0:
         return 0, 0
     candidates: list[int] = []
@@ -307,20 +327,19 @@ def next_anniversary(stats: JsonObject, today: str) -> tuple[int, int]:
     return node, max(0, node - total)
 
 
-def badges_payload(stats: JsonObject, today: str) -> list[JsonObject]:
+def badges_payload(stats: JsonObject, today: str, *, tz: tzinfo | None = None) -> list[JsonObject]:
     """徽章墙数据：相伴天数类 + 事件类，每枚 {id, unlocked, date, days?}。
 
     未解锁的占位（unlocked=false）让面板灰显，形成"还差 X 天"的期待感。
     """
-    total = days_together(stats, today)
+    total = days_together(stats, today, tz=tz)
+    first = first_seen_day(stats, tz)
     out: list[JsonObject] = []
     for badge_id, days in _MILESTONE_DAY_BADGES:
         unlocked = total >= days
         achieved = ""
-        if unlocked:
-            first = _parse_iso_ts(stats.get("first_seen"))
-            if first is not None:
-                achieved = (first.date() + timedelta(days=days - 1)).isoformat()
+        if unlocked and first is not None:
+            achieved = (first + timedelta(days=days - 1)).isoformat()
         out.append({"id": badge_id, "days": days, "unlocked": unlocked, "date": achieved})
     milestones = stats.get("milestones") if isinstance(stats.get("milestones"), dict) else {}
     for event_id in _MILESTONE_EVENT_FIELDS:
@@ -329,11 +348,11 @@ def badges_payload(stats: JsonObject, today: str) -> list[JsonObject]:
     return out
 
 
-def summary_payload(stats: JsonObject, today: str) -> JsonObject:
+def summary_payload(stats: JsonObject, today: str, *, tz: tzinfo | None = None) -> JsonObject:
     """数字摘要条（徽章墙顶部的关键数字）。"""
-    total = days_together(stats, today)
+    total = days_together(stats, today, tz=tz)
     longest, current = streaks(stats, today)
-    _node, until_next = next_anniversary(stats, today)
+    _node, until_next = next_anniversary(stats, today, tz=tz)
     return {
         "days_together": total,
         "next_anniversary_in": until_next if total > 0 else 0,
@@ -352,7 +371,9 @@ def _heat_empty() -> JsonObject:
     return {"months": [], "days": [], "years": [], "year": 0, "start": "", "end": ""}
 
 
-def heatmap_payload(stats: JsonObject, today: str, year: int | str | None = None) -> JsonObject:
+def heatmap_payload(
+    stats: JsonObject, today: str, year: int | str | None = None, *, tz: tzinfo | None = None,
+) -> JsonObject:
     """热力图数据（GitHub 式**日历年视图**）：默认当年，可指定已度过的年份。
 
     格子起点 = max(首条互动日 first_seen, 视图年 1 月 1 日)——相识之前的日子
@@ -368,18 +389,15 @@ def heatmap_payload(stats: JsonObject, today: str, year: int | str | None = None
         return _heat_empty()
     # 起点 = first_seen 与最早明细日中的更早者（首装当天还没有已完结天时，
     # first_seen 就是唯一依据；明细被保留窗口淘汰后以存量最早日为起点）
-    first: date | None = None
-    candidates = [str(stats.get("first_seen") or "")[:10]]
+    first = first_seen_day(stats, tz)
     day_keys = sorted(day for day, _bucket in _iter_days(stats))
     if day_keys:
-        candidates.append(day_keys[0])
-    for cand in candidates:
         try:
-            parsed = date.fromisoformat(cand)
+            earliest = date.fromisoformat(day_keys[0])
         except ValueError:
-            continue
-        if first is None or parsed < first:
-            first = parsed
+            earliest = None
+        if earliest is not None and (first is None or earliest < first):
+            first = earliest
     if first is None:
         return _heat_empty()
     years = list(range(anchor.year, first.year - 1, -1))
@@ -594,13 +612,13 @@ def seal_due_months(stats: JsonObject, today: str, *, diary: list[JsonObject] | 
     return fresh, sealed
 
 
-def anniversary_due(stats: JsonObject, today: str) -> tuple[bool, int]:
+def anniversary_due(stats: JsonObject, today: str, *, tz: tzinfo | None = None) -> tuple[bool, int]:
     """纪念日注入判定：今天是否恰好是相伴第 N 天（N 为 30/100/… 节点）。
 
     去重水位 anniversary.last_pushed（YYYY-MM-DD）防止当天重复注入。
     只判定不改水位——主类推送成功后再调 mark_anniversary_pushed。
     """
-    total = days_together(stats, today)
+    total = days_together(stats, today, tz=tz)
     if total <= 0:
         return False, 0
     is_node = total >= 30 and (total % 30 == 0 or total % 365 == 0)

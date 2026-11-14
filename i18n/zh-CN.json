@@ -1,4 +1,9 @@
 {
+  "panel.stale.loading": "正在等待插件状态，连接恢复后会自动刷新。",
+  "panel.settings.gateway": "插件模型 API",
+  "panel.settings.tone_slot_names.gateway": "插件模型 API",
+  "panel.settings.gatewayHint": "在宿主插件详情中绑定对应模型用途。不自动改用其他通道；计入本插件每日上限，片段调用间隔至少 300 秒。",
+  "panel.channel.unverified": "等待首次调用验证",
   "panel.memory.scope": "记录范围",
   "panel.memory.recent": "近期",
   "panel.memory.archive": "归档",
@@ -46,6 +51,8 @@
   "panel.errors.memoryCapacityReached": "日记存储达到 16 MiB 上限，未删除旧记录；请先导出备份并整理",
   "actions.dataBackup.label": "备份与恢复",
   "panel.backup.title": "备份与恢复",
+  "panel.stale.busy": "正在备份或恢复数据，面板暂停刷新，显示的是上一次的状态。",
+  "panel.stale.unavailable": "插件正在重启或暂时没有响应，显示的是上一次的状态，恢复后会自动刷新。",
   "panel.backup.scope": "全部角色的已保存数据与静态图片；不含视频及动态壁纸。",
   "panel.backup.export": "导出备份",
   "panel.backup.import": "选择备份文件",

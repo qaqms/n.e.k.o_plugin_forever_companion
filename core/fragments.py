@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 import re
+import unicodedata
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -194,6 +195,24 @@ def parse_fragment_response(raw: str) -> JsonObject | None:
         if isinstance(data.get(key), str):
             result[key] = data[key].strip()[:300 if key == "resolution_quote" else 120]
     return result
+
+
+_QUOTE_NOISE = re.compile(r"[\W_]+")
+
+
+def _quote_key(text: Any) -> str:
+    return _QUOTE_NOISE.sub("", unicodedata.normalize("NFKC", str(text or "")).casefold())
+
+
+def quote_grounded(quote: Any, source: Any) -> bool:
+    """模型给的 quote 是否真出自主人原话 source（提取 prompt 要求逐字摘录）。
+
+    不核对的话，模型编出来的一句会以「他说「……」」的原话形态写进时光日记，吵架轻语
+    和翻旧账检索都会把它当证据递给她。比对前做 NFKC + 去标点空白 + 大小写折叠，
+    全半角、标点、空格出入不算编造；凑不上就丢（宁漏勿错）。
+    """
+    key = _quote_key(quote)
+    return bool(key) and key in _quote_key(source)
 
 
 def fragment_record(

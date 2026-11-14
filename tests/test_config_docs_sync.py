@@ -234,9 +234,9 @@ def test_ui_form_fallbacks_match_shipped_defaults() -> None:
 def test_ui_budget_input_range_matches_backend_bounds(tm) -> None:
     """面板数字框的 min/max 要和后端取值口同一把尺子：前端放行而后端拒收，用户只会
     看到一个读不懂的错误码；反过来则把配置里本来允许的区间挡在门外。"""
-    src = (PLUGIN_ROOT / "ui" / "settings_tone.tsx").read_text(encoding="utf-8")
+    src = (PLUGIN_ROOT / "ui" / "settings.tsx").read_text(encoding="utf-8")
     anchor = src.find("value={form.agent_daily_budget}")
-    assert anchor >= 0, "ui/settings_tone.tsx 里找不到 agent 预算输入框"
+    assert anchor >= 0, "ui/settings.tsx 里找不到 agent 预算输入框"
     window = src[anchor:anchor + 200]
 
     bounds = dict(re.findall(r"(min|max)=\{(\d+)\}", window))
@@ -249,7 +249,7 @@ def test_ui_fragments_limit_range_matches_backend_bounds() -> None:
 
     与 agent 预算那道门同理，但这里的失败症状更隐蔽：前端写小了，用户以为能设
     500 却只能到 300；前端写大了，用户填的值会被后端静默钳回边界，而面板读回
-    后又像是"自己改了"。常量分散在 core/state.py 与 ui/settings_diary.tsx 两处，
+    后又像是"自己改了"。常量分散在 core/state.py 与 ui/settings.tsx 两处，
     机器门比记忆可靠。
     """
     from forever_companion.core.state import (
@@ -257,9 +257,9 @@ def test_ui_fragments_limit_range_matches_backend_bounds() -> None:
         _FRAGMENT_MIN_DAILY_LIMIT,
     )
 
-    src = (PLUGIN_ROOT / "ui" / "settings_diary.tsx").read_text(encoding="utf-8")
+    src = (PLUGIN_ROOT / "ui" / "settings.tsx").read_text(encoding="utf-8")
     anchor = src.find("value={form.fragments_daily_limit}")
-    assert anchor >= 0, "ui/settings_diary.tsx 里找不到碎片日限输入框"
+    assert anchor >= 0, "ui/settings.tsx 里找不到碎片日限输入框"
     window = src[anchor:anchor + 260]
 
     bounds = dict(re.findall(r"(min|max)=\{(\d+)\}", window))

@@ -162,7 +162,7 @@ def test_reset_waits_for_inflight_operations_and_blocks_new_ones(plugin_factory_
         future = executor.submit(run, plugin.reset_all())
         assert entered.wait(2)
         try:
-            assert str(run(plugin.dashboard()).error) == "backup_busy"
+            assert run(plugin.dashboard()) == {"backup_busy": True}
             assert str(run(plugin.data_backup(op="export")).error) == "backup_busy"
             assert str(run(plugin.reset_all()).error) == "backup_busy"
         finally:

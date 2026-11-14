@@ -439,6 +439,12 @@ _REVIEW_ARCHIVE_MAX_ENTRIES = 104
 _REVIEW_MIN_TURNS_FORCED = 10
 # 成文素材：最近对话摘样的轮数上限（成文时一次性从宿主 recent 拉取）
 _REVIEW_SAMPLE_TURNS = 8
+# 自动成文退避：模型已被调用却没写成（回复解析不出/落盘失败/异常）时推迟下一次自动
+# 尝试，10 分钟起逐次翻倍、封顶 6 小时，写成即清零。不退避的话同一份素材每趟 tick
+# （10 秒）重试一次，agent 档日预算十几分钟就烧光，付费槽位更是没有上限
+_REVIEW_RETRY_BASE_SEC = 600
+_REVIEW_RETRY_MAX_SEC = 6 * 3600
+_REVIEW_RETRY_REASONS = frozenset({"compose_failed", "persist_failed", "compose_raised"})
 # 每轮 valence 采样的截断上限（防极端值拉爆均值）
 _REVIEW_AFFECT_SAMPLES_MAX = 200
 # 评价成文 prompt（直连槽位 chat completion）：中性观察者口吻，客观、不粉饰、
@@ -509,7 +515,7 @@ _TONE_SLOT_PREFIXES = {
 # 所以本文件下面自己记一本 [agent_tier].daily_budget 的账，别指望宿主那套计数替我们刹车。
 _CHANNEL_MODE_HOST = "host"
 _CHANNEL_MODE_CUSTOM = "custom"
-_CHANNEL_MODES = frozenset({_CHANNEL_MODE_HOST, _CHANNEL_MODE_CUSTOM})
+_CHANNEL_MODES = frozenset({_CHANNEL_MODE_HOST, _CHANNEL_MODE_CUSTOM, "gateway"})
 # 碎片与成文**都默认 host + agent 档**（1.3.3 修订轮定，两条形同一路）：host 只决定
 # "用谁的配置和客户端"，端点/模型名/身份都由宿主给出，插件不读盘；而免费路由只放行 agent
 # 档，所以 custom 或 summary 档对新用户都等于必休眠。开不了口的前提是"量被管住"——
@@ -910,6 +916,8 @@ class _LanlanShard:
         "journal",
         "journal_archive",
         "review_stats",
+        "review_revision",
+        "review_save_lock",
         "review",
         "review_archive",
         "stats",
@@ -941,6 +949,8 @@ class _LanlanShard:
         "last_extreme_invite_ts",
         "pending_review_write",
         "review_write_result",
+        "review_retry_after",
+        "review_fail_streak",
         "pending_journal_write",
         "journal_write_result",
     )
@@ -960,6 +970,8 @@ class _LanlanShard:
         # 我的日记（0.8.0）：review_stats = 成文素材统计（随写随存，成文后清零
         # 重新累计，见 review.py）；review = 已成文的评价篇目（时间正序列表）
         self.review_stats: JsonObject = {}
+        self.review_revision = ""
+        self.review_save_lock = threading.Lock()
         self.review: list[JsonObject] = []
         # 档案室（1.3.0）：活架攒满 52 篇后淘汰的旧卷宗，只读翻阅；与 journal_archive 同法
         self.review_archive: list[JsonObject] = []
@@ -968,6 +980,9 @@ class _LanlanShard:
         # 都只存内存：插件重启即弃，面板写作中态随之消失，用户可重新点击
         self.pending_review_write = 0.0
         self.review_write_result: JsonObject | None = None
+        # 自动成文退避（见 _REVIEW_RETRY_*）：下一次允许自动尝试的时刻与连败次数，只存内存
+        self.review_retry_after = 0.0
+        self.review_fail_streak = 0
         self.pending_journal_write: JsonObject | None = None
         self.journal_write_result: JsonObject | None = None
         # 相处统计（1.1.0，stats.py）：按天聚合的长期累计（徽章/热力图/月报），

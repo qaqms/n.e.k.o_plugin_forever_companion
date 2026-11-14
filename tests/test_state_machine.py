@@ -309,6 +309,28 @@ def test_poll_picks_latest_user_message_among_mixed_records(plugin_factory) -> N
     assert res == (3.0, "刚说的", True, "default")  # 第 4 元 = 归属角色（记录无 lanlan 字段时回落当前角色）
 
 
+def test_tick_skips_bus_messages_from_before_startup(plugin_factory) -> None:
+    """切角色卡等会重启插件，总线却保留约 1 小时：重启后最近那条不能再算一轮、再注入一次。"""
+    from types import SimpleNamespace
+
+    p = plugin_factory(tide_extra={"enabled": True, "inject_mode": "every_user_message"})
+    shard = p._get_shard("default")
+    before = p._started_at_wall - 30
+    records = [SimpleNamespace(payload={"type": "user_message", "content": "重启前说的", "_ts": before})]
+    p.ctx.bus = SimpleNamespace(memory=SimpleNamespace(get=lambda **kw: list(records)))
+
+    res = run(p.tick())
+    assert res.value["injected"] is False
+    assert not shard.stats.get("days"), "启动前的消息不计轮"
+    assert shard.last_injected_message_ts == before
+
+    after = p._started_at_wall + 5
+    records.append(SimpleNamespace(payload={"type": "user_message", "content": "重启后说的", "_ts": after}))
+    res = run(p.tick())
+    assert res.value["injected"] is True
+    assert sum(int(day.get("turns") or 0) for day in shard.stats["days"].values()) == 1
+
+
 def test_poll_empty_bucket_returns_none_and_heartbeats(plugin_factory) -> None:
     from types import SimpleNamespace
 

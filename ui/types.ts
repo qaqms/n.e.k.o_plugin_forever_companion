@@ -262,7 +262,7 @@ export type JournalWrite = {
 // 模型通道状态灯（dashboard channel_status）：dormant_reason ∈ ""(正常) /
 // free_route / no_model / disabled（"正常"的下发值是空串，没有 "ok" 这个字面量）；
 // transport = 这次实际走的那条路（host=复用宿主 LLM 管线，direct=插件直连该槽端点）。
-// 缺 transport（后端未下发）不参与回落判定：见 settings_tone.tsx 的 channelLight
+// 缺 transport（后端未下发）不参与回落判定：见 settings.tsx 的 channelLight
 export type ChannelStatusItem = { enabled?: boolean; dormant_reason?: string; transport?: string }
 export type ChannelStatus = { tone?: ChannelStatusItem; fragments?: ChannelStatusItem; review?: ChannelStatusItem }
 
@@ -334,6 +334,7 @@ export type StatsState = {
 
 export type State = {
   backup_recovery_required?: boolean
+  backup_busy?: boolean
   status?: Status
   anchor_date?: string
   advance_days?: number

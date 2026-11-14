@@ -1,4 +1,9 @@
 {
+  "panel.stale.loading": "正在等待外掛狀態，連線恢復後會自動重新整理。",
+  "panel.settings.gateway": "外掛模型 API",
+  "panel.settings.tone_slot_names.gateway": "外掛模型 API",
+  "panel.settings.gatewayHint": "在宿主外掛詳情中綁定對應模型用途。不自動改用其他通道；計入本外掛每日上限，片段呼叫間隔至少 300 秒。",
+  "panel.channel.unverified": "等待首次呼叫驗證",
   "panel.memory.scope": "記錄範圍",
   "panel.memory.recent": "近期",
   "panel.memory.archive": "歸檔",
@@ -46,6 +51,8 @@
   "panel.errors.memoryCapacityReached": "日記儲存達到 16 MiB 上限，舊記錄未刪除；請先匯出備份並整理",
   "actions.dataBackup.label": "備份與還原",
   "panel.backup.title": "備份與還原",
+  "panel.stale.busy": "正在備份或還原資料，面板暫停更新，顯示的是上一次的狀態。",
+  "panel.stale.unavailable": "外掛正在重新啟動或暫時沒有回應，顯示的是上一次的狀態，恢復後會自動更新。",
   "panel.backup.scope": "所有角色的已儲存資料與靜態圖片；不含影片及動態桌布。",
   "panel.backup.export": "匯出備份",
   "panel.backup.import": "選擇備份檔案",

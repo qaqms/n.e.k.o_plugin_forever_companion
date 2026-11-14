@@ -91,6 +91,8 @@ class MoodActionsMixin:
         # 注入与情绪链路整场静默死掉（数据不毁，但没人来救）。tick 第一步就
         # 是本方法（面板轮询/入口调用同样先经此），把门控放这里即恢复自愈；
         # 纯属性读取零成本，_retrusting 防重入与 _ensure_shard 门控共享
+        if self._shutting_down:
+            return  # 停止中：开关已还给用户，不能再被这一趟重新暂停
         if not self._state_trusted and not self._retrusting and self._store_ready:
             await self._retrust_state()
         # 非阻塞取锁：本方法在 async 路径里被调用，阻塞等锁会卡住所在事件循环
@@ -171,7 +173,7 @@ class MoodActionsMixin:
         """
         return sorted(
             lanlan
-            for lanlan, shard in self._shards.items()
+            for lanlan, shard in list(self._shards.items())  # 快照：别的线程可能正在加角色
             if shard.loaded
             and self._mood_enabled(shard)
             and shard.mood.is_active()
@@ -470,7 +472,7 @@ class MoodActionsMixin:
         # 必须随本次动作一起落盘，而不是等下一条用户消息才冲刷
         res_stats = await self._save_shard_stats(name, shard)
         if self._review_enabled(shard):
-            res_review = await self._save_shard_review(name, shard)
+            res_review = await self._save_review_material(name, shard)
         else:
             res_review = Ok(None)
         # 立即同步最新选择，避免等待常规注入时工具记录已经到期。
@@ -906,9 +908,8 @@ class MoodActionsMixin:
             return Err(SdkError("情绪系统未开启"))
         if not has_journal_content(events, thoughts, feelings, extra):
             return Err(SdkError("journal is empty: fill at least one of events/thoughts/feelings/extra"))
-        if shard.pending_journal_write is not None or lanlan in self._journal_writing:
+        if shard.pending_journal_write is not None or not self._claim_writer(self._journal_writing, lanlan):
             return Err(SdkError("个人日记正在生成，请等待完成后再写"))
-        self._journal_writing.add(lanlan)
         try:
             return await self._write_journal_entry(
                 lanlan,

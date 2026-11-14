@@ -499,7 +499,7 @@ def test_fragment_capture_falls_back_to_direct_when_host_unavailable(plugin_fact
         "model": "m", "api_key": "k", "base_url": "http://local:11434/v1"
     }
     posted = []
-    p._post_chat_completion = lambda *a, **kw: posted.append(a) or '{"capture": true, "kind": "important", "quote": "q", "confidence": 0.9}'
+    p._post_chat_completion = lambda *a, **kw: posted.append(a) or '{"capture": true, "kind": "important", "quote": "最喜欢你做的饭", "confidence": 0.9}'
     assert run(p._maybe_capture_fragments("default", shard)) is True
     assert posted and posted[0][0] == "http://local:11434/v1"
 

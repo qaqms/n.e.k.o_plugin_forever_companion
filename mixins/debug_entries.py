@@ -903,8 +903,8 @@ class DebugEntriesMixin:
     def _debug_stats_brief(self, shard: _LanlanShard, today: str) -> JsonObject:
         """debug_stats 回显用的统计概要（与面板时光页同源的派生视图）。"""
         return {
-            "summary": summary_payload(shard.stats, today),
-            "heat_days": len(heatmap_payload(shard.stats, today).get("days") or []),
+            "summary": summary_payload(shard.stats, today, tz=self._stats_tz()),
+            "heat_days": len(heatmap_payload(shard.stats, today, tz=self._stats_tz()).get("days") or []),
         }
 
     async def _debug_force_activity(

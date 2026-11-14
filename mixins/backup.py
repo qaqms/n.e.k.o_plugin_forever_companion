@@ -16,7 +16,13 @@ from plugin.sdk.plugin import Err, Ok, SdkError, plugin_entry, tr, ui
 
 from ..core import backup, backup_files
 from ..core.appearance import legacy_to_gallery
-from ..core.cycle import derive_cycle_params, parse_anchor_date, resolve_today, validate_cycle_params
+from ..core.cycle import (
+    ADVANCE_DAYS_MAX,
+    derive_cycle_params,
+    parse_anchor_date,
+    resolve_today,
+    validate_cycle_params,
+)
 from ..services.data_guard import DataGate
 
 _TTL = 30 * 60
@@ -67,7 +73,7 @@ class BackupMixin:
         enumerate_keys = getattr(self.store, "keys", None)
         if not callable(enumerate_keys):
             raise backup.BackupError("backup_store_unavailable")
-        result = await enumerate_keys()
+        result = await self._store_keys()
         if not isinstance(result, Ok):
             raise backup.BackupError("backup_store_unavailable")
         records = {}
@@ -149,7 +155,7 @@ class BackupMixin:
                 if params.get("auto_derive", True):
                     numeric = derive_cycle_params(numeric["cycle_length"])
                 validate_cycle_params(anchor=anchor, **numeric)
-                if not 0 <= int(cycle.get("advance_days") or 0) <= 1_000_000:
+                if not 0 <= int(cycle.get("advance_days") or 0) <= ADVANCE_DAYS_MAX:
                     raise ValueError
             resolve_today(tide.get("timezone", "auto"))
         except (ValueError, TypeError, OverflowError):
@@ -313,7 +319,9 @@ class BackupMixin:
         self, op: str = "", upload_id: str = "", size: int = 0, offset: int = 0,
         data_b64: str = "", confirm: bool = False, token: str = "", **_: Any,
     ):
-        if not self._data_gate.enter(exclusive=True):
+        # 独占：等面板轮询/定时器里在飞的共享调用收尾（期间不再放新的进门），超时才回 busy，
+        # 面板据此退避重试（拒在门口、什么都没做，重试安全）
+        if not await self._data_gate.acquire(exclusive=True, timeout=self._data_gate.EXCLUSIVE_WAIT_SEC):
             return Err(SdkError("backup_busy"))
         try:
             if self._data_gate.blocked and op != "recover":

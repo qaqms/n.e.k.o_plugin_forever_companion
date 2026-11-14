@@ -151,8 +151,14 @@ def test_write_review_persist_failure_rolls_back_and_retries(tm, boot_factory, m
     assert store.data["review@default"] == persisted, "盘上仍是旧内容"
     assert not shard.stats.get("milestones", {}).get("first_review"), "写失败不得记 first_review 里程碑"
 
-    # 写通道恢复 → 重试成功（幂等不因失败永久卡死），这次里程碑也落盘
+    # 写通道恢复 → 退避期满后重试成功（幂等不因失败永久卡死），这次里程碑也落盘。
+    # 退避期内自动路径不再调模型（否则每趟 tick 都花一次调用重写同一篇）
     store._fail_set.clear()
+    assert run(p._maybe_write_review("default", shard)) == (False, "backoff")
+    from forever_companion.core.state import _REVIEW_RETRY_BASE_SEC
+
+    later = tm.time.time() + _REVIEW_RETRY_BASE_SEC + 1
+    monkeypatch.setattr(tm.time, "time", lambda: later)
     written2, reason2 = run(p._maybe_write_review("default", shard))
     assert (written2, reason2) == (True, "written")
     assert len(shard.review) == 2

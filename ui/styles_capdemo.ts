@@ -292,8 +292,6 @@ THE SOFTWARE.
 .tm-demo-review-page .tm-demo-review-destination { font-size: 10px; color: var(--muted); }
 .tm-demo-review-page > .tm-demo-small-tag { margin-top: auto; }
 
-/* The comparison is semantic: before stays neutral, while after separates
-   incoming context, background processing, and the resulting state. */
 .tm-demo[data-mode="before"] :is(
   .tm-demo-context[data-open="true"], .tm-demo-date-gate[data-enabled="true"],
   .tm-demo-tool-call[data-enabled="true"], .tm-demo-analysis-lane[data-enabled="true"],
@@ -394,7 +392,6 @@ THE SOFTWARE.
   box-shadow: 0 0 0 2px color-mix(in srgb, #15803d 20%, transparent);
 }
 
-/* Semantic objects settle between beats; decorative movement never carries the only explanation. */
 .tm-demo[data-phase="0"] :is(.tm-demo-conversation > .tm-demo-incoming, .tm-demo-calendar, .tm-demo-host, .tm-demo-mood-in, .tm-demo-fast-lane, .tm-demo-quote-stack, .tm-demo-invitation, .tm-demo-review-sources) { animation: tm-demo-arrive .9s ease both; }
 .tm-demo .tm-demo-answer, .tm-demo .tm-demo-activity-output, .tm-demo .tm-demo-fragment-book,
 .tm-demo .tm-demo-review-page, .tm-demo .tm-demo-mood-out, .tm-demo .tm-demo-analysis-result {

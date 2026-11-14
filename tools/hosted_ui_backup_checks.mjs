@@ -56,7 +56,7 @@ export async function backupChecks(browser, sources, origin, output, { loadPage,
         assert.equal(await count("apply"), 1)
         await frame.waitForFunction(() => !document.querySelector(".tm-bg"))
         await frame.locator("#tm-settings-tab-general").click()
-        assert.equal(await frame.locator("#tm-settings-general select").first().inputValue(), "Europe/London")
+        assert.equal(await frame.locator("#tm-settings-general .tm-select").first().getAttribute("data-value"), "Europe/London")
         await frame.locator("#tm-settings-tab-data").click()
         assert(await section.locator(".tm-backup-path").isVisible())
       })

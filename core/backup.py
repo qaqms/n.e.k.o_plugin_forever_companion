@@ -342,9 +342,13 @@ def _record(key, value, known):
         _entries(value, "journal" if key.startswith(("journal@", "journal_archive@")) else "")
     elif key.startswith("review@"):
         _fields(value, lists=("entries",), objects=("stats",))
+        if "revision" in value and not re.fullmatch(r"[a-f0-9]{32}", str(value["revision"])):
+            _invalid()
         _entries(value.get("entries", []))
         _review_stats(value.get("stats", {}))
     elif key.startswith("review_stats@"):
+        if "_base" in value and not re.fullmatch(r"[a-f0-9]{32}", str(value["_base"])):
+            _invalid()
         _review_stats(value)
     elif key.startswith("stats@"):
         _stats(value)

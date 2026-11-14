@@ -232,6 +232,53 @@ def test_maybe_write_review_gates(plugin_factory) -> None:
         monkey.undo()
 
 
+def test_auto_review_backs_off_after_failed_compose(plugin_factory, tm, monkeypatch) -> None:
+    """模型回了解析不出正文的内容：过去素材不清零、熔断还记成功，每趟 tick 重调一次模型。"""
+    from forever_companion.core.state import _REVIEW_RETRY_BASE_SEC
+
+    p = _with_turns(plugin_factory(), 60)
+    shard = p._get_shard("default")
+    now = [1_000_000.0]
+    replies = ['{"title": "只有标题"}', '{"title": "只有标题"}', "他最近对她很温柔。"]
+    calls = []
+
+    def fake_post(*a, **k):
+        calls.append(1)
+        return replies[min(len(calls), len(replies)) - 1]
+
+    monkeypatch.setattr(tm.time, "time", lambda: now[0])
+    monkeypatch.setattr(p, "_resolve_tone_slot", lambda cfg, slot: {"base_url": "http://x", "api_key": "k", "model": "m"})
+    monkeypatch.setattr(p, "_post_chat_completion", fake_post)
+
+    assert run(p._maybe_write_review("default", shard)) == (False, "compose_failed")
+    assert len(calls) == 1
+    assert shard.review_retry_after == now[0] + _REVIEW_RETRY_BASE_SEC
+    # 退避期内：不调模型
+    assert run(p._maybe_write_review("default", shard)) == (False, "backoff")
+    assert len(calls) == 1
+    # 期满再败：间隔翻倍
+    now[0] += _REVIEW_RETRY_BASE_SEC + 1
+    assert run(p._maybe_write_review("default", shard)) == (False, "compose_failed")
+    assert shard.review_fail_streak == 2
+    assert shard.review_retry_after == now[0] + 2 * _REVIEW_RETRY_BASE_SEC
+    # 写成即清零
+    now[0] += 2 * _REVIEW_RETRY_BASE_SEC + 1
+    assert run(p._maybe_write_review("default", shard)) == (True, "written")
+    assert shard.review_fail_streak == 0 and shard.review_retry_after == 0.0
+
+
+def test_manual_review_ignores_auto_backoff(plugin_factory, tm, monkeypatch) -> None:
+    p = _with_turns(plugin_factory(), 60)
+    shard = p._get_shard("default")
+    shard.review_retry_after = tm.time.time() + 3600
+    shard.review_fail_streak = 3
+    monkeypatch.setattr(p, "_resolve_tone_slot", lambda cfg, slot: {"base_url": "http://x", "api_key": "k", "model": "m"})
+    monkeypatch.setattr(p, "_post_chat_completion", lambda *a, **k: "他最近对她很温柔，几乎每天都会主动来聊天。")
+    written, reason = run(p._maybe_write_review("default", shard, force=True))
+    assert reason != "backoff"
+    assert shard.review_fail_streak == 3  # 手动成败不改自动退避账
+
+
 def test_get_and_clear_review_entries(plugin_factory, tm) -> None:
     p = _with_turns(plugin_factory(), 30)
     shard = run(p._ensure_shard("default"))
@@ -497,11 +544,13 @@ def test_dashboard_exposes_review_writing_and_invite_pending(plugin_factory) -> 
     shard = p._get_shard("default")
     shard.pending_review_write = 1.0
     shard.review_write_result = {"ts": 2.0, "written": True, "reason": "written"}
+    # Timer supervision owns invitations; opening a panel only reads state.
+    run(p._supervise_once())
     payload = run(p.dashboard())
     brief = payload["review_brief"]
     assert brief["writing"] is True
     assert brief["last_result"]["written"] is True
-    # dashboard 头部先跑 _supervise_once：空日记本的周期邀请节奏判定为 due，
+    # 定时器跑 _supervise_once：空日记本的周期邀请节奏判定为 due，
     # 一趟例行递邀后挂起位会被点亮——顺带证明回流通道活着
     assert payload["journal_invite_pending"] is True
 

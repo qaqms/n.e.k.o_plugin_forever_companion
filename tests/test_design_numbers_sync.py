@@ -74,7 +74,7 @@ def test_design_timer_line_matches_decorator_seconds():
 
 def test_panel_poll_interval_matches_design():
     """ui/panel.tsx 的 dashboard 轮询毫秒值必须与 DESIGN.md 写的秒数一致。"""
-    tsx = PANEL_TSX.read_text(encoding="utf-8")
+    tsx = PANEL_TSX.read_text(encoding="utf-8") + (PANEL_TSX.parent / "snapshot.ts").read_text(encoding="utf-8")
     polls = {int(n) for n in re.findall(
         r"setInterval\(\s*(?:[A-Za-z_$][\w$]*|\(\)\s*=>\s*\{.*?\})\s*,\s*(\d+)\s*\)",
         tsx, re.S,

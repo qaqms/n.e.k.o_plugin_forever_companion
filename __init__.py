@@ -601,6 +601,11 @@ class ForeverCompanionPlugin(
 ):
     def __init__(self, ctx: Any) -> None:
         super().__init__(ctx)
+        from .services.model_gateway import ModelGateway
+        from .services.store_access import StoreAccess
+
+        self._store_access = StoreAccess(logger=lambda: self.logger)
+        self._model_gateway = ModelGateway(self.ctx, logger=lambda: self.logger)
         self._init_data_backup()
         self._tide_cfg: JsonObject = {}
         self._phases_cfg: JsonObject = {}
@@ -657,7 +662,7 @@ class ForeverCompanionPlugin(
         # 都会白构造一次 ImportError）；None = 未解析，config_change 时清空重解析
         self._proactive_api_base_cache: str | None = None
         # 面板"语气分析模型槽位"下拉选项缓存（60s TTL，面板 5s 轮询不必每次拉宿主）；
-        # None = 未拉取过；失败不缓存（与 _fetch_known_catgirls 同例）
+        # None = 未拉取或失败；失败缓存 5s（与 _fetch_known_catgirls 同例）
         self._tone_slot_options_cache: tuple[list[JsonObject] | None, float] = (None, -1000.0)
         # 宿主管线槽位解析缓存（1.3.2）：slot → (解析结果或 None, 取到时刻)。宿主侧
         # aget_model_api_config 每次都重开 core_config.json，而面板 5s 轮询 + tick 都会
@@ -676,6 +681,8 @@ class ForeverCompanionPlugin(
         # 首条日志恰在 0.0 附近时"仅一次/每 5 分钟"门控会误判为已记录而吞掉日志。
         self._last_bus_error_logged = -1000.0
         self._last_bus_heartbeat_logged = -1000.0
+        # 总线消息的启动基线（墙钟，与总线记录的 _ts 同源）：早于此刻的消息只对齐水位，见 tick
+        self._started_at_wall = time.time()
         # 碎片捕获"槽位未解析休眠"warning 的节流水位（同哨兵纪律）
         self._last_fragment_dormant_logged = -1000.0
         # 我的成文"槽位未解析休眠"warning 的节流水位（同上）
@@ -685,6 +692,13 @@ class ForeverCompanionPlugin(
         self._review_writing: set[str] = set()
         self._journal_writing: set[str] = set()
         self._supervise_lock = threading.Lock()
+        # 跨线程锁（命令循环 / tide_tick / diary_write_tick 三条线程各自一个事件循环，见
+        # services/locks.py）：主动搭话水位的暂停/恢复/加固、成文在飞登记、分片首次载入
+        self._proactive_lock = threading.Lock()
+        self._writer_lock = threading.Lock()
+        self._shard_load_lock = threading.Lock()
+        # 停止中：宿主停插件不等定时器线程退出，置位后 tick/监督/水位同步一律不再动手
+        self._shutting_down = False
         self._init_media_gallery()
         self._last_tool_health_ts = 0.0
         # 调试模式（[tide].debug_mode）：活动快照覆写与调试入口注册水位；
@@ -707,6 +721,7 @@ class ForeverCompanionPlugin(
             # （含按角色否决集）；未注入时服务回落旧公式（情绪引擎∧配置），
             # 独立测试可省略本参数
             cap_enabled=lambda cap_id, shard=None: self._cap_effective(cap_id, shard=shard),
+            gateway_tone=lambda text, lanlan: self._gateway_tone_chat(text, lanlan),
             phase_state=lambda shard=None: self._current_phase_state(shard),
             # 语气感知收尾落盘（1.2.2 批次2）：_feed_tone_affect 除心情外还把
             # 当日语气分布喂进 stats 与我的日记素材（纯内存），过去只靠"下一条
@@ -809,7 +824,7 @@ class ForeverCompanionPlugin(
         if not self._cap_effective("anniversary", lanlan=lanlan):
             return False
         today = self._stats_today()
-        due, total = anniversary_due(shard.stats, today)
+        due, total = anniversary_due(shard.stats, today, tz=self._stats_tz())
         if not due:
             return False
         self.push_message(
@@ -944,6 +959,7 @@ class ForeverCompanionPlugin(
         # 熔断一并复位：用户在宿主里新配了服务商（免费路由→付费）正是最常见的
         # "我刚改好了，再试一次"，不该被上一轮的连拒继续挡着
         self._channel_break = {}
+        self._model_gateway.status.clear()
         self._sync_debug_entries()
         # 锚点/周期参数变了，重新校验一次并报告（针对当前角色 shard）
         try:
@@ -957,12 +973,16 @@ class ForeverCompanionPlugin(
     async def diary_write_tick(self, **_: Any):
         # Host timers own separate threads/loops; tasks created in tide_tick would
         # be cancelled when its asyncio.run returns.
+        if self._shutting_down:
+            return Ok({"status": "shutting_down"})
         await self._drain_pending_review_writes()
         await self._drain_pending_journal_writes()
         return Ok({"status": "drained"})
 
     @timer_interval(id="tide_tick", seconds=10, auto_start=True)
     async def tick(self, **_: Any):
+        if self._shutting_down:
+            return Ok({"injected": False, "reason": "shutting_down"})
         # 协调监督优先于 enabled 拦截：暂停中的主动搭话必须始终有人接管
         await self._supervise_once()
         # 能力中心（1.2.7）：工具显隐每趟对一次表（纯内存差集比对，无变化
@@ -975,7 +995,8 @@ class ForeverCompanionPlugin(
         # 在空闲期每天空转数千次。
         # 副作用：从未开启过模拟的新角色不会经 tick 注册进 lanlan_index
         # （另一注册路径是情绪工具归因），可接受——无状态可展示。
-        any_shard_enabled = any(bool(shard.cycle.get("enabled")) for shard in self._shards.values())
+        # list() 先拍快照：其他线程（面板/工具）可能正往 _shards 里加角色
+        any_shard_enabled = any(bool(shard.cycle.get("enabled")) for shard in list(self._shards.values()))
         if not any_shard_enabled and not bool((self._tide_cfg or {}).get("enabled", False)):
             return Ok({"injected": False, "reason": "disabled"})
         current = await self._resolve_current_lanlan()
@@ -988,11 +1009,17 @@ class ForeverCompanionPlugin(
         if latest is not None:
             ts, text, is_voice, msg_lanlan = latest
             msg_shard = await self._ensure_shard(msg_lanlan)
-            if ts > msg_shard.last_injected_message_ts:
-                self.logger.info("user message observed: lanlan={} is_voice={}", msg_lanlan, is_voice)
-            # 消息归属角色未开启模拟时不驱动其 shard（per-shard 的 fail-closed）
-            if self._enabled(msg_shard):
-                injected = await self._handle_new_user_message(ts, text, msg_lanlan)
+            if ts < self._started_at_wall:
+                # 本进程启动前就在总线上的消息：总线由插件服务托管、保留约 1 小时，而切角色卡/
+                # 改设置都会重启插件，内存水位归零后会把上一个进程处理过的那条再算一轮、再注入
+                # 一次。只对齐水位，不计轮不注入（重启空档里真没处理过的那一条也随之略过）
+                msg_shard.last_injected_message_ts = max(msg_shard.last_injected_message_ts, ts)
+            else:
+                if ts > msg_shard.last_injected_message_ts:
+                    self.logger.info("user message observed: lanlan={} is_voice={}", msg_lanlan, is_voice)
+                # 消息归属角色未开启模拟时不驱动其 shard（per-shard 的 fail-closed）
+                if self._enabled(msg_shard):
+                    injected = await self._handle_new_user_message(ts, text, msg_lanlan)
         # 阶段变化的开场白（不依赖用户消息，独立检查）：
         # 只对当前角色 shard 检查，避免对未查看的角色主动搭话
         opener_sent = False

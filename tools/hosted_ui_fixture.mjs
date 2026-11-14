@@ -3,7 +3,7 @@ import { deflateSync } from "node:zlib"
 const TODAY = "2026-10-02"
 const SAMPLE = "\u6d4b\u8bd5\u8bb0\u5f55\uff1a\u4eca\u5929\u7684\u76f8\u5904\u5f88\u5b89\u9759\u3002\u665a\u4e0a\u4e00\u8d77\u804a\u4e86\u4e00\u4f1a\u513f\uff0c\u8bb0\u4f4f\u4e86\u4e00\u4e9b\u5c0f\u4e8b\u3002"
 const ACTIONS = [
-  "toggle", "update_settings", "set_anchor", "advance_days", "reset_all",
+  "toggle", "update_settings", "set_anchor", "advance_days", "reset_all", "poll_dashboard",
   "get_diary", "clear_diary", "delete_diary_item", "get_journal",
   "invite_journal", "get_review", "write_review_now", "clear_review",
   "get_stats", "clear_stats", "get_panel_gallery", "get_gallery_image",
@@ -643,7 +643,8 @@ export function installFixtureBridge(fixture) {
       }
       else if (message.method === "call") {
         const actionId = message.payload.actionId
-        result = { plugin_id: "forever_companion", action_id: actionId, result: clone(dispatch(actionId, message.payload.args || {})) }
+        if (actionId === "poll_dashboard") window.qaRefreshes += 1
+        result = { plugin_id: "forever_companion", action_id: actionId, result: clone(actionId === "poll_dashboard" ? fixture.context.state : dispatch(actionId, message.payload.args || {})) }
       } else throw new Error(`Unsupported fixture method: ${message.method}`)
       const actionId = message.method === "call" ? message.payload.actionId : message.method
       const imageId = actionId === "get_gallery_image" ? message.payload.args.item_id : ""

@@ -14,6 +14,7 @@ import asyncio
 import time
 from copy import deepcopy
 from typing import Any
+from uuid import uuid4
 
 from plugin.sdk.plugin import Err, Ok, Result, SdkError
 
@@ -59,6 +60,7 @@ from ..core.state import (
     _weekly_key,
 )
 from ..core.stats import backfill_day
+from ..services import locks
 
 JsonObject = dict[str, Any]
 
@@ -77,6 +79,11 @@ _STORE_AGENT_DEFAULTS_MIGRATION = "migration_agent_defaults_100_v1"
 class ShardsMixin:
     """per-lanlan 状态分片：存取、当前角色解析、配置覆盖层、持久化。"""
 
+    # 跨线程锁的最长等待（秒，见 services/locks.py）：分片首次载入是几次本地 Store 读；
+    # 时光日记写锁的持有方可能正在等一次落盘
+    _SHARD_LOAD_WAIT_SEC = 10.0
+    _DIARY_LOCK_WAIT_SEC = 15.0
+
     # ==========================================
     # 分片基建：shard 存取 / 当前角色解析
     # ==========================================
@@ -88,7 +95,9 @@ class ShardsMixin:
         """
         shard = self._shards.get(lanlan)
         if shard is None:
-            shard = self._shards[lanlan] = _LanlanShard()
+            # setdefault 一步到位：两条线程同时首次碰到同一角色时，get-再赋值会各建一个、
+            # 后写的顶掉先写的，先拿到的那份改动就落在了孤儿对象上
+            shard = self._shards.setdefault(lanlan, _LanlanShard())
         shard.lanlan = lanlan  # 1.2.7：能力中心按角色解析否决集需 shard 自报家门
         return shard
 
@@ -110,6 +119,19 @@ class ShardsMixin:
         shard = self._get_shard(lanlan)
         if shard.loaded:
             return shard
+        # 首次载入串行化：两条线程同时载入同一分片时，后完成的一方会拿较早读到的盘上内容
+        # 覆盖先完成一方之后已经发生的改动。拿到锁后复查；超时（不应发生）退回旧行为
+        held = await locks.acquire(self._shard_load_lock, self._SHARD_LOAD_WAIT_SEC)
+        try:
+            if shard.loaded:
+                return shard
+            return await self._load_shard(lanlan, shard)
+        finally:
+            if held:
+                self._shard_load_lock.release()
+
+    async def _load_shard(self, lanlan: str, shard: _LanlanShard) -> _LanlanShard:
+        """从 Store 载入一个分片（调用方 _ensure_shard 持 _shard_load_lock）。"""
         cycle_res = await self._store_read(_cycle_key(lanlan))
         if isinstance(cycle_res, Ok) and isinstance(cycle_res.value, dict):
             shard.cycle = dict(cycle_res.value)
@@ -146,18 +168,23 @@ class ShardsMixin:
             shard.journal_archive = [
                 dict(item) for item in archive_res.value if isinstance(item, dict)
             ]
-        # 我的日记（0.8.0）：已成文篇目 + 累计中的素材统计合并存一个 key
-        #（成文时篇目追加与 stats 清零原子地一次写入；独立 stats key 仅作
-        # 旧数据兼容读取，不再写入）
+        # Full snapshots atomically add entries and reset materials. A compact
+        # material sidecar is current only when it names that snapshot's revision.
         review_res = await self._store_read(_review_key(lanlan))
         if isinstance(review_res, Ok) and isinstance(review_res.value, dict):
             raw_review = review_res.value
             shard.review = [dict(item) for item in raw_review.get("entries") or [] if isinstance(item, dict)]
             stats = raw_review.get("stats")
             shard.review_stats = dict(stats) if isinstance(stats, dict) else {}
+            shard.review_revision = str(raw_review.get("revision") or "")
+            if shard.review_revision:
+                material = await self._store_read(_review_stats_key(lanlan))
+                if isinstance(material, Ok) and isinstance(material.value, dict):
+                    if material.value.get("_base") == shard.review_revision:
+                        shard.review_stats = {key: value for key, value in material.value.items() if key != "_base"}
         else:
             stats_res = await self._store_read(_review_stats_key(lanlan))
-            if isinstance(stats_res, Ok) and isinstance(stats_res.value, dict):
+            if isinstance(stats_res, Ok) and isinstance(stats_res.value, dict) and "_base" not in stats_res.value:
                 shard.review_stats = dict(stats_res.value)
         # 档案室（1.3.0）：活架淘汰下来的旧卷宗合档，只读翻阅；与藏书阁同法载入
         review_archive_res = await self._store_read(_review_archive_key(lanlan))
@@ -241,17 +268,19 @@ class ShardsMixin:
 
         孤儿判定的唯一权威来源。带 Accept-Language: zh-CN 让宿主跳过 persona
         翻译开销（我们只取 key，不读人设正文）。成功结果缓存 60s；任何失败
-        （不可达/结构异常）返回 None 表示"未知"且不缓存——调用方必须把未知
+        （不可达/结构异常）返回 None 表示"未知"并缓存 5s——调用方必须把未知
         按"非孤儿"处理，绝不可因宿主暂时不可达而误标/误删。
         """
         names, ts = self._known_catgirls_cache
-        if names is not None and time.monotonic() - ts < _KNOWN_CATGIRLS_CACHE_TTL:
+        ttl = _KNOWN_CATGIRLS_CACHE_TTL if names is not None else 5.0
+        if time.monotonic() - ts < ttl:
             return names
         payload = await self._proactive_http(
             "GET", "/api/characters", headers={"Accept-Language": "zh-CN"}
         )
         catgirls = payload.get("猫娘") if isinstance(payload, dict) else None
         if not isinstance(catgirls, dict):
+            self._known_catgirls_cache = (None, time.monotonic())
             return None
         names = {str(k) for k in catgirls}
         self._known_catgirls_cache = (names, time.monotonic())
@@ -276,6 +305,31 @@ class ShardsMixin:
     async def _current_shard_async(self) -> tuple[str, _LanlanShard]:
         """面板/用户入口的作用对象：始终跟随宿主当前角色（无手动选中态）。"""
         name = await self._resolve_current_lanlan()
+        return name, await self._ensure_shard(name)
+
+    def _claim_writer(self, writing: set[str], lanlan: str) -> bool:
+        """成文在飞登记：查重与登记一步完成（三条线程都会来抢，分两步会两路同时开写）。
+
+        登记成功返回 True，调用方写完后 writing.discard(lanlan)。
+        """
+        with self._writer_lock:
+            if lanlan in writing:
+                return False
+            writing.add(lanlan)
+            return True
+
+    async def _confirmed_current_shard(self, expected_lanlan: Any = "") -> tuple[str, _LanlanShard] | None:
+        """清空/开关类入口的作用对象：绕过 15s 缓存现取宿主当前角色，再核对确认时看到的角色。
+
+        确认框弹着的时候用户可能在宿主里换了角色；不核对就会把另一个角色的数据清掉。
+        返回 None = 角色已变，调用方回 mood_changed。expected_lanlan 为空时只做现取
+        （宿主动作列表等拿不到角色名的调用方）。
+        """
+        self._current_lanlan_cache = ("", -1000.0)
+        name = await self._resolve_current_lanlan()
+        expected = str(expected_lanlan or "").strip()
+        if expected and expected != name:
+            return None
         return name, await self._ensure_shard(name)
 
     # ---- 同步属性代理：指向"当前 shard"（最近解析 → default）----
@@ -388,7 +442,7 @@ class ShardsMixin:
         # 不可信会话只写内存——此刻落盘就是幻影覆写（不写配置文件，见上）
         if not str(tide.get("anchor_date") or "").strip():
             today = self._today_str(tide)
-            for lanlan, shard in self._shards.items():
+            for lanlan, shard in list(self._shards.items()):  # 循环里有 await：先拍快照
                 if shard.loaded and not str(shard.cycle.get("anchor_date") or "").strip():
                     params = self._effective_cycle_settings(shard)
                     anchor = randomized_default_anchor(
@@ -542,7 +596,7 @@ class ShardsMixin:
                 "store became ready after an untrusted load: reloading persisted "
                 "state before accepting any write"
             )
-            for shard in self._shards.values():
+            for shard in list(self._shards.values()):
                 shard.loaded = False
             self._lanlan_index = []
             self._settings_override = {}
@@ -692,7 +746,7 @@ class ShardsMixin:
         """
         if not self._store_ready:
             self.logger.warning("store not ready: {} not persisted", label)
-        res = await self.store.set(key, value)
+        res = await self._store_access.call(self.store, "set", key, value)
         if isinstance(res, Err):
             self.logger.warning("persist {} failed: {}", label, res.error)
         return res
@@ -701,7 +755,7 @@ class ShardsMixin:
         """统一读取：store.get 返回 Err（DB 抖动/读失败）时留痕，与"值不存在
         （Ok(None)）"区分——过去读失败被静默按缺省处理，表现为"数据全空"且零日志。
         只加日志，不改变降级行为：调用方拿到原始 Result，仍按缺省继续。"""
-        res = await self.store.get(key)
+        res = await self._store_access.call(self.store, "get", key)
         if not isinstance(res, Ok):
             self.logger.warning("store read failed for {}: {}", key, res.error)
         return res
@@ -713,10 +767,13 @@ class ShardsMixin:
         过去 prune 之外的删除（图库删图等）直连 store.delete 全部零留痕。"""
         if not self._store_ready:
             self.logger.warning("store not ready: {} not deleted", label)
-        res = await self.store.delete(key)
+        res = await self._store_access.call(self.store, "delete", key)
         if isinstance(res, Err):
             self.logger.warning("delete {} failed: {}", label, res.error)
         return res
+
+    async def _store_keys(self, prefix: str = ""):
+        return await self._store_access.call(self.store, "keys", prefix)
 
     @staticmethod
     def _persist_error(*results: Result[None]) -> Err | None:
@@ -762,8 +819,12 @@ class ShardsMixin:
         return await self._store_write(_diary_key(lanlan), snapshot, f"diary for {lanlan}")
 
     async def _update_shard_diary(self, lanlan: str, shard: _LanlanShard, mutate) -> Result[Any]:
-        """Serialize mutation and persistence together across host event loops."""
-        if not shard.diary_save_lock.acquire(blocking=False):
+        """Serialize mutation and persistence together across host event loops.
+
+        另一路（碎片捕获/手记工具/面板整理）正在写时排队等，而不是立刻失败：
+        过去她写手记或生日纪念手记恰好撞上一次碎片落盘，就直接以 backup_busy 丢掉。
+        """
+        if not await locks.acquire(shard.diary_save_lock, self._DIARY_LOCK_WAIT_SEC):
             return Err(SdkError("backup_busy"))
         before = None
         committed = False
@@ -848,9 +909,30 @@ class ShardsMixin:
         )
 
     async def _save_shard_review(self, lanlan: str, shard: _LanlanShard) -> Result[None]:
-        """我的日记落盘：成文篇目与素材统计合并写进一个 key（stats 随篇目一起走，
-        成文时原子清零——两个独立 key 反而会在中途崩溃时出现篇目已加而 stats
-        未清的错位；加载侧对旧独立 stats key 只读迁移）。
+        if not await locks.acquire(shard.review_save_lock, self._DIARY_LOCK_WAIT_SEC):
+            return Err(SdkError("backup_busy"))
+        try:
+            return await locks.finish(self._write_review_snapshot(lanlan, shard))
+        finally:
+            shard.review_save_lock.release()
+
+    async def _save_review_material(self, lanlan: str, shard: _LanlanShard) -> Result[None]:
+        if not await locks.acquire(shard.review_save_lock, self._DIARY_LOCK_WAIT_SEC):
+            return Err(SdkError("backup_busy"))
+        try:
+            if not shard.review_revision:
+                return await locks.finish(self._write_review_snapshot(lanlan, shard))
+            return await self._store_write(
+                _review_stats_key(lanlan),
+                {**deepcopy(shard.review_stats), "_base": shard.review_revision},
+                f"review material for {lanlan}",
+            )
+        finally:
+            shard.review_save_lock.release()
+
+    async def _write_review_snapshot(self, lanlan: str, shard: _LanlanShard) -> Result[None]:
+        """Full diary snapshot: entries, cleared materials, and a new revision
+        commit in one key. Older material sidecars then become inapplicable.
 
         1.3.0 档案室：与 _save_shard_journal 同款兜底——内存里超出活架上限的
         旧卷（磁盘残留/调试注入超长等一切截断路径）先搬进档案室再写篇目 blob；
@@ -859,11 +941,14 @@ class ShardsMixin:
         if len(shard.review) > _REVIEW_MAX_ENTRIES:
             overflow = shard.review[:-_REVIEW_MAX_ENTRIES]
         shard.review = list(shard.review[-_REVIEW_MAX_ENTRIES:])
+        revision = uuid4().hex
         res_review = await self._store_write(
             _review_key(lanlan),
-            {"entries": list(shard.review), "stats": dict(shard.review_stats)},
+            {"entries": list(shard.review), "stats": deepcopy(shard.review_stats), "revision": revision},
             f"review for {lanlan}",
         )
+        if isinstance(res_review, Ok):
+            shard.review_revision = revision
         if not overflow:
             return res_review
         res_archive = await self._append_review_archive(lanlan, shard, overflow)

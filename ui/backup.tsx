@@ -41,8 +41,18 @@ export function BackupPanel(props: {
     if (err instanceof Error && err.message === "backup_recovery_required") setRecovery(true)
   }
 
+  // backup_busy = 后端排队等独占闸超时（面板轮询/定时器正占着），拒在门口什么都没做：
+  // 每一步（含分片，按 offset 幂等）都可以退避重试，不必整次导入作废
   async function call(args: Record<string, any>, signal?: AbortSignal) {
-    return unwrapCallResult(await api.call("data_backup", args, { timeoutMs: 120000, signal }))
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return unwrapCallResult(await api.call("data_backup", args, { timeoutMs: 120000, signal }))
+      } catch (err) {
+        if (!(err instanceof Error) || err.message !== "backup_busy" || attempt >= 5 || signal?.aborted) throw err
+        await new Promise((resolve) => setTimeout(resolve, Math.min(500 * 2 ** attempt, 4000)))
+        if (signal?.aborted) throw new Error("backup_cancelled")
+      }
+    }
   }
 
   async function discard() {

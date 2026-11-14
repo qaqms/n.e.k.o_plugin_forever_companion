@@ -351,6 +351,24 @@ def tm():
     return forever_companion
 
 
+@pytest.fixture(autouse=True)
+def _fast_lock_waits(monkeypatch):
+    """跨线程锁与数据闸的等待在测试里压到几十毫秒。
+
+    用例常在同一线程里占住一把锁/闸，再断言另一路被拒；生产值（秒级）会让它们白等到
+    超时。专测等待行为的用例自行调大。
+    """
+    from forever_companion.mixins.host_coord import HostCoordMixin
+    from forever_companion.mixins.shards import ShardsMixin
+    from forever_companion.services.data_guard import DataGate
+
+    monkeypatch.setattr(DataGate, "EXCLUSIVE_WAIT_SEC", 0.05)
+    monkeypatch.setattr(DataGate, "SHARED_WAIT_SEC", 0.05)
+    monkeypatch.setattr(ShardsMixin, "_DIARY_LOCK_WAIT_SEC", 0.05)
+    monkeypatch.setattr(ShardsMixin, "_SHARD_LOAD_WAIT_SEC", 0.5)
+    monkeypatch.setattr(HostCoordMixin, "_PROACTIVE_LOCK_WAIT_SEC", 0.5)
+
+
 @pytest.fixture
 def default_tide():
     return dict(DEFAULT_TIDE)

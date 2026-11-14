@@ -104,7 +104,12 @@ async function loadSources(pluginRoot, hostRoot) {
   return {
     compiled, messages, intros: loadFixtureIntros(pluginRoot), dependencies: dependencies.map(({ path, bytes }) => ({ path, bytes })), dependencyBytes: bytes,
     sourceHash: createHash("sha256").update(bundle).digest("hex"),
-    runtime: readFileSync(join(hostRoot, HOSTED, "ui-kit/runtime.js"), "utf8"),
+    runtime: `const createPluginDisplayClient = (function () {
+const module = { exports: {}, nekoPluginDisplayFactoryOnly: true };
+${readFileSync(join(hostRoot, "static/plugin-ui-sdk/display.js"), "utf8")}
+return module.exports;
+})();
+${readFileSync(join(hostRoot, HOSTED, "ui-kit/runtime.js"), "utf8")}`,
     styles: readFileSync(join(hostRoot, HOSTED, "ui-kit/styles.css"), "utf8"),
   }
 }
@@ -143,7 +148,10 @@ function parentDocument(sources, parameters, origin) {
       ? `/plugin/forever_companion/ui/${"0".repeat(64)}.webm`
       : parameters.direct === "unsafe" ? "https://invalid.example/private.webm" : sources.qaDirectPath
   }
-  const child = documentFor(sources, fixture.context, origin, parameters.tab || "overview")
+  const initial = parameters.initialState
+    ? { ...fixture.context, state: parameters.initialState === "busy" ? { backup_busy: true } : {} }
+    : fixture.context
+  const child = documentFor(sources, initial, origin, parameters.tab || "overview")
   return `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden}iframe{display:block;width:100vw;height:100vh;border:0}</style></head><body><iframe id="hosted" title="Isolated Hosted TSX QA" sandbox="allow-scripts"></iframe><script>
 const fixture = ${escapeScript(JSON.stringify(fixture))};
 fixture.context.host = { origin: window.location.origin };
@@ -215,13 +223,13 @@ async function loadPage(browser, origin, parameters, width, height, theme, motio
   const frame = page.frames().find(item => item.parentFrame() === page.mainFrame())
   assert(frame, "Hosted iframe is missing")
   try {
-    await frame.waitForSelector(".tm-tabs", { timeout: 15000 })
+    await frame.waitForSelector(parameters.initialState ? ".neko-alert" : ".tm-tabs", { timeout: 15000 })
   } catch (error) {
     console.error("FRAME STARTUP", JSON.stringify({ errors, frames: page.frames().map(item => item.url()), text: await frame.locator("body").innerText().catch(() => "") }))
     throw error
   }
   await frame.waitForTimeout(150)
-  if (parameters.tab && parameters.tab !== "overview") await frame.locator(".tm-tab").nth(TABS.indexOf(parameters.tab)).click()
+  if (!parameters.initialState && parameters.tab && parameters.tab !== "overview") await frame.locator(".tm-tab").nth(TABS.indexOf(parameters.tab)).click()
   await frame.waitForTimeout(170)
   return { context, page, frame, errors }
 }

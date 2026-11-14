@@ -20,6 +20,10 @@ from zoneinfo import ZoneInfo
 
 PHASE_ORDER = ("menstrual", "follicular", "ovulatory", "luteal")
 
+# 快进天数上限（约 2700 年）：再大 today + timedelta 会越过 date.max 抛 OverflowError，
+# 面板/状态/日历全部跟着崩。写入口按它钳，计算口也按它钳（兜住旧版已存下的超大值）
+ADVANCE_DAYS_MAX = 1_000_000
+
 # 阶段的展示顺序按周期日排列；判定优先级：潮汐期 > 活跃期 > 其余按区间
 _PHASE_TONE = {
     "menstrual": "danger",
@@ -198,7 +202,7 @@ def compute_phase_state(
         ovulation_day=ovulation_day,
         ovulation_window=ovulation_window,
     )
-    effective = today + timedelta(days=max(0, int(advance_days)))
+    effective = today + timedelta(days=min(max(0, int(advance_days)), ADVANCE_DAYS_MAX))
     delta_days = (effective - anchor).days
 
     # 锚点在未来的情况：还没开始第一轮，视为未进入周期

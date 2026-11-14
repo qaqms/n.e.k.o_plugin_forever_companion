@@ -310,13 +310,13 @@ def test_nudge_only_for_heavy_actions_and_nudge_kinds() -> None:
 # ---------- 主链路集成 ----------
 
 
-def _setup_capture(p, reply_json: str, marker: str = "2:new") -> None:
+def _setup_capture(p, reply_json: str, marker: str = "2:new", user_text: str = "我最喜欢你做的饭") -> None:
     """给插件实例挂上碎片捕获的最小桩：recent 轮次、槽位解析、直连回复。"""
     shard = p._current_shard()
 
     async def fake_poll(shard_, *, lanlan="", peek=False, advance=True):
         shard_.last_recent_marker = marker
-        return ("我最喜欢你做的饭", "真的吗嘿嘿")
+        return (user_text, "真的吗嘿嘿")
 
     p._poll_recent_turns = fake_poll
     p._resolve_tone_slot = lambda cfg, slot, _seen=frozenset(): {
@@ -332,6 +332,31 @@ def test_capture_baseline_first_run_does_not_analyze(plugin_factory) -> None:
     # 首趟：基线未建立，只记水位不落碎片
     assert run(p._maybe_capture_fragments("default", shard)) is False
     assert shard.last_fragment_marker == "2:new"
+    assert shard.diary == []
+
+
+def test_quote_grounded_tolerates_punctuation_width_and_case() -> None:
+    from forever_companion.core.fragments import quote_grounded
+
+    said = "其实……我最讨厌香菜了！ＯＫ？"
+    assert quote_grounded("我最讨厌香菜了", said)
+    assert quote_grounded("我最讨厌香菜了。", said)  # 标点出入
+    assert quote_grounded("香菜了！ok", said)  # 全半角/大小写
+    assert not quote_grounded("我最喜欢香菜", said)  # 改写/编造
+    assert not quote_grounded("……", said)  # 只剩标点：无从对证
+    assert not quote_grounded("", said)
+
+
+def test_capture_drops_quote_not_in_user_message(plugin_factory) -> None:
+    """模型编出来的「原话」不能写进时光日记：吵架轻语/翻旧账会把它当证据递给她。"""
+    p = plugin_factory()
+    shard = _setup_capture(
+        p,
+        '{"capture": true, "kind": "overstep", "quote": "你真烦人", "confidence": 0.95}',
+        user_text="我最喜欢你做的饭",
+    )
+    shard.last_fragment_marker = "1:old"
+    assert run(p._maybe_capture_fragments("default", shard)) is False
     assert shard.diary == []
 
 
@@ -362,6 +387,7 @@ def test_capture_nudge_during_fight(plugin_factory) -> None:
     shard = _setup_capture(
         p,
         '{"capture": true, "kind": "overstep", "quote": "滚开 别烦我", "note": "凶我", "confidence": 0.9}',
+        user_text="滚开，别烦我",
     )
     shard.last_fragment_marker = "1:old"
     # 情绪风暴生效中（非限时校验：expires_at=0 视为不校验到期）
@@ -379,6 +405,7 @@ def test_capture_no_nudge_when_calm(plugin_factory) -> None:
     shard = _setup_capture(
         p,
         '{"capture": true, "kind": "overstep", "quote": "滚开", "confidence": 0.9}',
+        user_text="滚开",
     )
     shard.last_fragment_marker = "1:old"
     assert run(p._maybe_capture_fragments("default", shard)) is True
@@ -547,6 +574,7 @@ def test_capture_duplicate_skips_new_record(plugin_factory) -> None:
         p,
         '{"capture": true, "kind": "like", "quote": "最喜欢下雨天", "confidence": 0.9,'
         ' "relation": "duplicate"}',
+        user_text="我最喜欢下雨天",
     )
     shard.diary = [
         {"ts": "old-ts", "source": "auto", "kind": "like", "quote": "最喜欢下雨天",
@@ -565,6 +593,7 @@ def test_capture_supersede_marks_old_record(plugin_factory) -> None:
         p,
         '{"capture": true, "kind": "dislike", "quote": "咖啡戒了，心悸", "confidence": 0.9,'
         ' "relation": "supersede", "target": 1}',
+        user_text="咖啡戒了，心悸得厉害",
     )
     shard.diary = [
         {"ts": "old-ts", "source": "auto", "kind": "like", "quote": "最喜欢咖啡",
@@ -590,6 +619,7 @@ def test_capture_supersede_out_of_range_keeps_old_active(plugin_factory) -> None
         p,
         '{"capture": true, "kind": "like", "quote": "新的一句", "confidence": 0.9,'
         ' "relation": "supersede", "target": 9}',
+        user_text="新的一句",
     )
     shard.diary = [
         {"ts": "old-ts", "source": "auto", "kind": "like", "quote": "旧的一句",
@@ -656,7 +686,7 @@ def test_tool_check_persists_suggestions_without_changing_original_or_validity(p
 def test_capture_duplicate_strengthens_and_persists_only_after_independent_interval(plugin_factory, plugin_factory_full):
     p = plugin_factory()
     shard = _setup_capture(p, '{"capture": true, "kind": "like", "quote": "Coffee", "confidence": 0.9,'
-                              '"relation": "duplicate", "target": 1}')
+                              '"relation": "duplicate", "target": 1}', user_text="I like Coffee")
     stamp = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
     shard.diary = [{"ts": stamp, "source": "auto", "kind": "like", "quote": "Coffee", "status": "active"}]
     _reset_capture_gates(shard)
@@ -873,7 +903,7 @@ def test_capture_still_gets_turn_after_tone_advanced_watermark(plugin_factory) -
         "model": "m", "api_key": "k", "base_url": "http://x",
     }
     p._post_chat_completion = lambda *a, **k: (
-        '{"capture": true, "kind": "like", "quote": "喜欢下雨天", "confidence": 0.9}'
+        '{"capture": true, "kind": "like", "quote": "更喜欢晴天", "confidence": 0.9}'
     )
     holder = {"turn": "我最近总在下雨天出门"}
 
@@ -900,4 +930,4 @@ def test_capture_still_gets_turn_after_tone_advanced_watermark(plugin_factory) -
     shard.last_fragment_analysis_ts = 0.0
     assert run(p._maybe_capture_fragments("default", shard)) is True
     assert len(shard.diary) == 1
-    assert shard.diary[0]["quote"] == "喜欢下雨天"
+    assert shard.diary[0]["quote"] == "更喜欢晴天"

@@ -71,10 +71,77 @@ export async function saveBarChecks(browser, sources, origin, output, { loadPage
           await capture(`savebar-${width}-${tab}-clean`)
         }
         const before = await page.evaluate(() => window.qaRefreshes)
-        await page.waitForFunction(value => window.qaRefreshes > value, before, { timeout: 6500 })
+        await page.waitForFunction(value => window.qaRefreshes > value || window.qaMessages.some(message =>
+          message.payload?.actionId === "poll_dashboard"), before, { timeout: 6500 })
         await absent()
         assert.equal(await page.evaluate(() => window.qaMessages.filter(message =>
           ["update_settings", "set_panel_appearance"].includes(message.payload?.actionId)).length), 0)
+      })
+      await check(`draft-survives-empty-busy-and-resets-for-new-role-${width}`, async () => {
+        await navigate("cycle")
+        const healthy = await page.evaluate(() => JSON.parse(JSON.stringify(window.qaFixture.context.state)))
+        const input = frame.locator(".neko-field").filter({ has: frame.getByText(text["panel.settings.cycleLength"], { exact: true }) }).locator('input[type="number"]')
+        await input.fill(String(healthy.settings.cycle_length + 1))
+        await present()
+        for (const state of [{}, { backup_busy: true }]) {
+          await page.evaluate(value => { window.qaFixture.context.state = value }, state)
+          await frame.evaluate(() => window.NekoUiKit.api.refresh())
+          await frame.waitForSelector(".tm-warnstrip")
+          assert.equal(await input.inputValue(), String(healthy.settings.cycle_length + 1))
+          await present()
+          await capture(`stale-${width}-${state.backup_busy ? "busy" : "restart"}`)
+          const writes = await page.evaluate(() => window.qaMessages.filter(message => message.payload?.actionId === "update_settings").length)
+          await frame.locator(".tm-save button").click()
+          await frame.waitForSelector('.neko-toast[data-tone="danger"]')
+          assert.equal(await page.evaluate(() => window.qaMessages.filter(message => message.payload?.actionId === "update_settings").length), writes)
+          await present()
+        }
+        await page.evaluate(value => { window.qaFixture.context.state = value }, healthy)
+        await frame.evaluate(() => window.NekoUiKit.api.refresh())
+        await frame.waitForSelector(".tm-warnstrip", { state: "detached" })
+        assert.equal(await input.inputValue(), String(healthy.settings.cycle_length + 1))
+        await present()
+        await page.evaluate(value => { window.qaFixture.context.state = { ...value, lanlan: "Another role" } }, healthy)
+        await frame.evaluate(() => window.NekoUiKit.api.refresh())
+        await absent()
+        assert.equal(await input.inputValue(), String(healthy.settings.cycle_length))
+        await page.evaluate(value => { window.qaFixture.context.state = value }, healthy)
+        await frame.evaluate(() => window.NekoUiKit.api.refresh())
+      })
+      await check(`gateway-selection-status-and-save-${width}`, async () => {
+        const healthy = await page.evaluate(() => JSON.parse(JSON.stringify(window.qaFixture.context.state)))
+        await navigate("mood")
+        const row = key => frame.locator(".tm-channel-row").filter({
+          has: frame.getByText(text[key], { exact: true }),
+        })
+        const tone = row("panel.settings.channelTone")
+        const fragments = row("panel.settings.channelFragments")
+        const review = row("panel.settings.channelReview")
+        for (const channel of [tone, fragments, review]) {
+          await chooseOption(frame, channel.locator(".tm-select").last(), "gateway")
+          assert.equal(await channel.locator(".tm-select").count(), 1)
+          assert((await channel.innerText()).includes(text["panel.settings.gatewayHint"]))
+        }
+        await present()
+        await frame.locator(".tm-save button").click()
+        await absent()
+        const saved = await page.evaluate(() => window.qaFixture.context.state.settings)
+        assert.equal(saved.tone_slot, "gateway")
+        assert.equal(saved.fragments_mode, "gateway")
+        assert.equal(saved.review_mode, "gateway")
+        await page.evaluate(() => {
+          for (const channel of Object.values(window.qaFixture.context.state.channel_status)) {
+            channel.transport = "gateway"
+            channel.dormant_reason = "unverified"
+          }
+        })
+        await frame.evaluate(() => window.NekoUiKit.api.refresh())
+        await frame.waitForFunction(label => [...document.querySelectorAll(".tm-channel-light")].every(node =>
+          node.textContent === label), text["panel.channel.unverified"])
+        await capture(`gateway-${width}`)
+        await page.evaluate(value => { window.qaFixture.context.state = value }, healthy)
+        await frame.evaluate(() => window.NekoUiKit.api.refresh())
+        assert.equal(await fragments.locator(".tm-select").count(), 2)
       })
       for (const [tab, key, label] of [
         ["cycle", "cycle_length", "panel.settings.cycleLength"],
@@ -171,6 +238,38 @@ export async function saveBarChecks(browser, sources, origin, output, { loadPage
         }
       })
     } finally { await loaded.context.close() }
+    for (const initialState of ["empty", "busy"]) {
+      await check(`first-frame-${initialState}-recovers-${width}`, async () => {
+        const initial = await loadPage(browser, origin, { locale: "zh-CN", initialState }, width, 900, theme)
+        try {
+          assert.equal(await initial.frame.locator(".tm-tabs").count(), 0)
+          assert.equal(await initial.frame.locator(".neko-alert").innerText(), text["panel.stale.loading"])
+          const path = join(output, `first-frame-${initialState}-${width}.png`)
+          await initial.page.screenshot({ path, animations: "disabled" })
+          const layout = await inspectLayout(initial.frame)
+          screenshots.push({ id: `first-frame-${initialState}-${width}`, path, layout, errors: [...initial.errors], diagnostics: [] })
+          await initial.frame.waitForSelector(".tm-tabs", { timeout: 6500 })
+          assert.deepEqual(initial.errors, [])
+          assert(layout.documentOverflow <= 2)
+        } finally { await initial.context.close() }
+      })
+    }
+    await check(`five-state-polls-per-full-context-${width}`, async () => {
+      const polling = await loadPage(browser, origin, { locale: "zh-CN" }, width, 900, theme)
+      try {
+        const before = await polling.page.evaluate(() => window.qaMessages.length)
+        for (let index = 0; index < 6; index++) {
+          const count = await polling.page.evaluate(() => window.qaRefreshes)
+          await polling.frame.evaluate(() => document.dispatchEvent(new Event("visibilitychange")))
+          await polling.page.waitForFunction(value => window.qaRefreshes > value, count)
+          await polling.frame.waitForTimeout(30)
+        }
+        const calls = await polling.page.evaluate(offset => window.qaMessages.slice(offset), before)
+        assert.equal(calls.filter(item => item.payload?.actionId === "poll_dashboard").length, 5)
+        assert.equal(calls.filter(item => item.method === "refresh").length, 1)
+        assert.deepEqual(polling.errors, [])
+      } finally { await polling.context.close() }
+    })
   }
   return { checks, screenshots }
 }

@@ -23,6 +23,7 @@ from plugin.sdk.plugin import Err, Ok, Result
 
 from ..core.state import _PROACTIVE_PAUSE_ACTIONS as _PROACTIVE_PAUSE_ACTIONS
 from ..core.state import _snapshot_proactive
+from ..services import locks
 
 JsonObject = dict[str, Any]
 
@@ -35,6 +36,11 @@ _LOOPBACK_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 class HostCoordMixin:
     """宿主协调：主动搭话暂停/恢复（引用计数）、HTTP 直连、工具健康扫描重注册。"""
+
+    # 主动搭话水位的串行锁最长等多久（秒）：持锁方最坏是"读开关 4s+兜底 3s、写开关 4s+兜底 3s"
+    _PROACTIVE_LOCK_WAIT_SEC = 15.0
+    # 停止时还开关的 HTTP 超时：宿主只给插件进程约 1 秒退出（PROCESS_SHUTDOWN_TIMEOUT）
+    _SHUTDOWN_HTTP_TIMEOUT_SEC = 0.6
 
     def _proactive_api_base(self) -> str:
         # 首次解析后缓存到实例：宿主端口运行期不变，独立/测试环境每次调用都
@@ -59,6 +65,7 @@ class HostCoordMixin:
         path: str,
         body: JsonObject | None = None,
         headers: dict[str, str] | None = None,
+        timeout: float = 4.0,
     ) -> JsonObject | None:
         """直连宿主 HTTP API（stdlib urllib，零外部依赖；to_thread 不阻塞事件循环）。
 
@@ -79,7 +86,7 @@ class HostCoordMixin:
         )
 
         def _do() -> JsonObject:
-            with _LOOPBACK_OPENER.open(req, timeout=4.0) as resp:
+            with _LOOPBACK_OPENER.open(req, timeout=timeout) as resp:
                 payload = _json.loads(resp.read().decode("utf-8"))
                 return payload if isinstance(payload, dict) else {}
 
@@ -214,6 +221,8 @@ class HostCoordMixin:
         if master is None:
             self.logger.debug("proactive master unreadable; will retry next tick")
             return None
+        if self._proactive_state.get("prev") is not None:
+            return None  # 读开关期间已有人记下原值（调用方本应持 _proactive_lock，这里再兜一次）
         if not master:
             # 本来就没开：无需暂停，也不必在结束后替用户打开。
             # False 水位本身就是"这是用户自己的选择"的凭据，同样先写后认
@@ -266,15 +275,23 @@ class HostCoordMixin:
 
     async def _reassert_proactive_off(self) -> None:
         """情绪期内周期加固：若服务端总开关被外部（如前端陈旧的 60s 周期
-        同步）写回 true，则重新关掉。不动水位，幂等。"""
-        if self._proactive_state.get("prev") is None:
+        同步）写回 true，则重新关掉。不动水位，幂等。与暂停/恢复同一把锁：
+        否则恢复刚写回 true，这里读到 true 又把它关掉，水位却已清空，再没人打开。"""
+        if self._shutting_down or self._proactive_state.get("prev") is None:
             return
-        master = await self._proactive_get_master()
-        if master is True:
-            if await self._proactive_set_master(False):
-                self.logger.info("proactive master drifted back on during silence; re-asserted off")
-        elif master is None:
-            self.logger.debug("proactive master unreadable during re-assert")
+        if not await locks.acquire(self._proactive_lock, self._PROACTIVE_LOCK_WAIT_SEC):
+            return
+        try:
+            if self._shutting_down or self._proactive_state.get("prev") is None:
+                return
+            master = await self._proactive_get_master()
+            if master is True and self._proactive_state.get("prev") is not None:
+                if await self._proactive_set_master(False):
+                    self.logger.info("proactive master drifted back on during silence; re-asserted off")
+            elif master is None:
+                self.logger.debug("proactive master unreadable during re-assert")
+        finally:
+            self._proactive_lock.release()
 
     async def _maybe_sync_proactive_pause(self) -> Result | None:
         """引用计数同步（同步 await，见 _supervise_once 注释）。
@@ -286,14 +303,64 @@ class HostCoordMixin:
         聚合上报（_apply_mood_action / lift_mood / reset_all）；后台路径
         （监督循环）丢弃返回值也无妨——失败已留脏，收尾的脏检查重试每趟
         （10s）补写，直到落稳。
+
+        调用方横跨三条线程（情绪工具/面板入口在命令循环，监督在 tide_tick 线程），
+        全部经 _proactive_lock 串行：两路交错时，后读开关的一方会读到前一方刚写的
+        False，把它当成"用户原本就关着"记进水位，解除后就再也不替用户打开了。
+        拿不到锁（另一路正在连发宿主 HTTP）本趟跳过，监督循环 10 秒后再对一次表。
         """
-        paused_by = self._mood_active_lanlans()
-        res: Result | None = None
-        if paused_by and self._proactive_state.get("prev") is None:
-            res = await self._pause_host_proactive()
-        elif not paused_by and self._proactive_state.get("prev") is not None:
-            res = await self._resume_host_proactive()
-        if paused_by != list(self._proactive_state.get("paused_by") or []):
-            self._proactive_state["paused_by"] = paused_by
-        res2 = await self._persist_proactive_state()
-        return self._persist_error(res, res2)
+        if self._shutting_down:
+            return None
+        if not await locks.acquire(self._proactive_lock, self._PROACTIVE_LOCK_WAIT_SEC):
+            self.logger.debug("proactive sync skipped: another caller holds the lock")
+            return None
+        try:
+            if self._shutting_down:
+                return None
+            paused_by = self._mood_active_lanlans()
+            res: Result | None = None
+            if paused_by and self._proactive_state.get("prev") is None:
+                res = await self._pause_host_proactive()
+            elif not paused_by and self._proactive_state.get("prev") is not None:
+                res = await self._resume_host_proactive()
+            if paused_by != list(self._proactive_state.get("paused_by") or []):
+                self._proactive_state["paused_by"] = paused_by
+            res2 = await self._persist_proactive_state()
+            return self._persist_error(res, res2)
+        finally:
+            self._proactive_lock.release()
+
+    async def _begin_shutdown(self) -> None:
+        """停止的第一步（由数据闸在 shutdown 进门前调用，与闸是否放行无关）。
+
+        先立 _shutting_down：宿主停插件时只给定时器发停止信号、不等线程退出，正在跑的
+        一趟 tick 还会走到监督循环，不挡住的话会在下面还完开关后又把它关掉。
+        """
+        self._shutting_down = True
+        await self._restore_proactive_on_shutdown()
+
+    async def _restore_proactive_on_shutdown(self) -> None:
+        """插件停止前把被借走的主动搭话总开关还给用户。
+
+        暂停借的是宿主的全局开关：插件被停用/卸载、或启动卡在备份恢复阻塞里时，再没有
+        谁会替用户打开它。宿主只给插件进程约 1 秒退出，所以只发一次短超时 HTTP、不走
+        proactive_controller 兜底；没还上就保留水位，下次启动由监督循环照常对账。
+        重启场景（切角色卡等）下次启动若情绪仍生效，监督循环会重新暂停。
+        """
+        prev = self._proactive_state.get("prev")
+        if not prev or not prev.get("master"):
+            return  # 没在暂停中，或用户原本就关着：都不该替他打开
+        held = await locks.acquire(self._proactive_lock, 0.2)
+        try:
+            payload = await self._proactive_http(
+                "POST", "/api/proactive/settings", {"proactiveChatEnabled": True},
+                timeout=self._SHUTDOWN_HTTP_TIMEOUT_SEC,
+            )
+            if payload is None or payload.get("success") is False:
+                self.logger.warning("could not restore proactive chat on shutdown; next start reconciles it")
+                return
+            self._proactive_state["prev"] = None
+            self.logger.info("host proactive master restored on shutdown")
+        finally:
+            if held:
+                self._proactive_lock.release()

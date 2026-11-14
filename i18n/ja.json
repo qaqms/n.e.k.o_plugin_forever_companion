@@ -1,4 +1,9 @@
 {
+  "panel.stale.loading": "プラグインの状態を待っています。接続が復旧すると自動で更新されます。",
+  "panel.settings.gateway": "プラグインモデル API",
+  "panel.settings.tone_slot_names.gateway": "プラグインモデル API",
+  "panel.settings.gatewayHint": "ホストのプラグイン詳細で対応する用途を設定してください。他の経路には自動で切り替えません。プラグインの日次上限に含まれ、断片のリクエスト間隔は最低 300 秒です。",
+  "panel.channel.unverified": "初回リクエストの検証待ち",
   "panel.memory.scope": "記録の範囲",
   "panel.memory.recent": "最近",
   "panel.memory.archive": "アーカイブ",
@@ -46,6 +51,8 @@
   "panel.errors.memoryCapacityReached": "日記の保存量が16 MiBに達しました。既存記録は保持されています。バックアップを出力して整理してください。",
   "actions.dataBackup.label": "バックアップと復元",
   "panel.backup.title": "バックアップと復元",
+  "panel.stale.busy": "データのバックアップまたは復元中です。パネルの更新を一時停止し、前回の状態を表示しています。",
+  "panel.stale.unavailable": "プラグインが再起動中か、応答していません。前回の状態を表示しています。復帰すると自動で更新されます。",
   "panel.backup.scope": "全キャラクターの保存済みデータと静止画像。動画と動く壁紙は含みません。",
   "panel.backup.export": "バックアップを出力",
   "panel.backup.import": "バックアップを選択",

@@ -59,6 +59,8 @@ slot = "agent"                     # 提取模型槽位：agent（默认）/summ
                                    # 默认与成文同档：免费路由只放行 agent，summary 那档必被服务端拒，
                                    # 对新用户等于永久休眠；agent 档的花费由下面 [agent_tier] 的日预算管住
 mode = "host"                      # 通道：host（默认）复用宿主模型管线（端点与身份由宿主给，插件不读盘）；
+                                   #   gateway = 公开 ctx.models API，先在宿主插件详情绑定 fragments 用途；
+                                   #   不读取服务商密钥、不回落旧通道，沿用每日预算与 300 秒地板，此时忽略 slot
                                    #   custom = 插件读宿主本地 core_config.json 直连该槽端点（接本地模型/独立服务商时用，
                                    #   但免费路由下这条路拼不出端点，切过来这条通道就休眠）
 min_interval_sec = 60              # 相邻两次分析的最小间隔（秒）；走 agent 档时代码里另有 300 秒地板，写更小不生效
@@ -81,6 +83,7 @@ enabled = true
 slot = "agent"                     # 成文模型槽位：agent（默认）/summary/conversation/correction/vision
                                    # 默认走 agent 档：免费路由只放行它，summary 那档从插件调用必被服务端拒
 mode = "host"                      # 通道：host（默认）复用宿主模型管线，零配置即用；custom = 插件直连该槽端点
+                                   # gateway = 绑定 writing 用途后用公开模型 API，两本日记共用，忽略旧 slot
 turns_threshold = 50               # 成文门槛：攒满 N 轮互动（与天数门槛先到先写）
 days_threshold = 7                 # 成文门槛：距统计起点满 N 天且期间有聊天（挂机不写空篇）
 
@@ -128,4 +131,5 @@ phase_sensitivity = 0.15         # 灵敏度强度（阈值下移量）：0.1 �
 user_affect_weight = 0.25        # 用户侧情绪传导权重：用户消息单独分析一次，按此系数缩放步长喂入连续心情
                                  #（她的回复权重 1.0；互动氛围同向传导）；0 = 关闭
 slot = ""                        # 语气分析模型槽位：留空 = 跟随宿主情感模型槽（走 /api/emotion/analysis）；
+                                 # gateway = 先绑定 tone 用途后用公开模型 API，与片段/成文共享本地每日预算
                                  # 选其他文本槽位时读宿主本地 core_config.json 直连其端点（数据出域，介意可关）

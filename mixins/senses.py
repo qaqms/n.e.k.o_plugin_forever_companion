@@ -25,6 +25,7 @@ from ..core.fragments import (
     build_fragment_prompt,
     fragment_record,
     parse_fragment_response,
+    quote_grounded,
     recall_fragments,
     should_nudge_fight,
 )
@@ -91,6 +92,9 @@ from ..core.state import (
     _REVIEW_DEFAULT_DAYS,
     _REVIEW_DEFAULT_SLOT,
     _REVIEW_DEFAULT_TURNS,
+    _REVIEW_RETRY_BASE_SEC,
+    _REVIEW_RETRY_MAX_SEC,
+    _REVIEW_RETRY_REASONS,
     _TONE_AFFECT_MIN_CONFIDENCE,
     _channel_route,
     _LanlanShard,
@@ -293,7 +297,7 @@ class SensesMixin:
         )
 
     async def _resolve_channel_endpoint(
-        self, cfg: JsonObject, *, default_slot: str
+        self, cfg: JsonObject, *, default_slot: str, usage: str = "fragments"
     ) -> tuple[JsonObject | None, str, JsonObject]:
         """按通道的 mode 解析出可调用端点：(端点或 None, 槽位名, 宿主存盘配置快照)。
 
@@ -304,6 +308,9 @@ class SensesMixin:
         因此总能拿到真实配置；host 成功时快照是空 dict，调用方此时也用不上它。
         """
         slot = str(cfg.get("slot") or "").strip() or default_slot
+        if _channel_mode(cfg) == "gateway":
+            # Keep the existing daily budget and pace gate for this new path.
+            return {"transport": "gateway", "model": usage}, _AGENT_TIER_SLOT, {}
         if _channel_mode(cfg) != _CHANNEL_MODE_CUSTOM:
             resolved = await self._resolve_host_slot(slot)
             if resolved is not None:
@@ -329,6 +336,9 @@ class SensesMixin:
             # 路变了（改槽位/改 mode/宿主那侧生效配置换了）：旧账作废，重新给机会
             self._channel_break.pop(entry_id, None)
             return False
+        if route.startswith("gateway|") and time.monotonic() >= float(hit.get("retry_after", 0)):
+            self._channel_break.pop(entry_id, None)
+            return False
         return int(hit.get("fails") or 0) >= _CHANNEL_BREAK_FAILURES
 
     def _channel_break_note(self, lanlan: str, channel: str, route: str, *, ok: bool) -> None:
@@ -346,11 +356,14 @@ class SensesMixin:
             hit = {"route": route, "fails": 0}
         before = int(hit.get("fails") or 0)
         hit["fails"] = before + 1
+        if route.startswith("gateway|"):
+            hit["retry_after"] = time.monotonic() + 60.0
         self._channel_break[entry_id] = hit
         if before < _CHANNEL_BREAK_FAILURES <= int(hit["fails"]):
             self.logger.warning(
-                "channel {} fused after {} consecutive failures on {} (no more requests until the route changes)",
+                "channel {} fused after {} consecutive failures on {} ({})",
                 channel, hit["fails"], route,
+                "retry after 60s" if route.startswith("gateway|") else "waiting for a route change",
             )
 
     # ---- agent 档节流（1.3.3 修订轮）----
@@ -403,6 +416,22 @@ class SensesMixin:
         shard.cycle[_CYCLE_AGENT_BUDGET_LAST_TS] = time.time()
         await self._save_shard_cycle(lanlan, shard)
 
+    async def _gateway_tone_chat(self, text: str, lanlan: str) -> str | None:
+        shard = await self._ensure_shard(lanlan)
+        if self._agent_tier_gate(shard, _AGENT_TIER_SLOT, ignore_pace=True):
+            return None
+        # Tone shares the daily ceiling, but must not continually postpone the
+        # fragment channel's five-minute pacing window.
+        tier_budget_spend(shard.cycle, str(self._today_str()))
+        await self._save_shard_cycle(lanlan, shard)
+        from ..core.state import _TONE_DIRECT_PROMPT
+
+        return await self._model_gateway.chat(
+            "tone", _TONE_DIRECT_PROMPT + text,
+            timeout_sec=_HOST_LLM_TIMEOUT_FRAGMENT_SEC,
+            max_completion_tokens=160,
+        )
+
     # 超时与输出上限由调用点按通道给（碎片快、成文慢，见 state.py 的 _HOST_LLM_*），
     # 两条传输共用同一个数字：超时旋钮必须对用户说得出一个值，不能"看这次走哪条路"
     # ——README 与面板都按它承诺"点一下要让后台等多久"，两份数字必然漂移。
@@ -418,6 +447,13 @@ class SensesMixin:
         raise_timeout: bool = False,
     ) -> str | None:
         """按 transport 分派；默认失败 → None，raise_timeout 保留明确超时原因。"""
+        if resolved.get("transport") == "gateway":
+            return await self._model_gateway.chat(
+                resolved["model"], prompt,
+                timeout_sec=timeout_sec,
+                max_completion_tokens=max_completion_tokens,
+                raise_timeout=raise_timeout,
+            )
         if resolved.get("transport") == _CHANNEL_TRANSPORT_HOST:
             return await self._chat_via_host(
                 resolved,
@@ -475,7 +511,7 @@ class SensesMixin:
         res = await self._save_shard_mood(lanlan, shard)
         await self._save_shard_stats(lanlan, shard)
         if self._review_enabled(shard) and (shard.review or shard.review_stats):
-            await self._save_shard_review(lanlan, shard)
+            await self._save_review_material(lanlan, shard)
         return res
 
     async def _maybe_tone_sense(self, lanlan: str, shard: _LanlanShard) -> bool:
@@ -642,6 +678,9 @@ class SensesMixin:
                 "fragment dropped below confidence: kind={} conf={:.2f} threshold={:.2f}",
                 parsed.get("kind"), parsed.get("confidence") or 0.0, threshold,
             )
+            return False
+        if not quote_grounded(parsed.get("quote"), user_text):
+            self.logger.debug("fragment dropped: quote not found in the user's message (kind={})", parsed.get("kind"))
             return False
         # 写入后治理：模型判"同一结论又提一遍"就不新增（时间线与配额都不该被重复占）；
         # 判"更新了某条"则新增并把旧条切到 superseded（旧条留在时间线上可追溯，只是不再
@@ -933,7 +972,7 @@ class SensesMixin:
             if not due:
                 return False, reason, None
         resolved, slot, core_cfg = await self._resolve_channel_endpoint(
-            self._review_cfg, default_slot=_REVIEW_DEFAULT_SLOT
+            self._review_cfg, default_slot=_REVIEW_DEFAULT_SLOT, usage="writing"
         )
         if resolved is None:
             now_mono = time.monotonic()
@@ -944,18 +983,22 @@ class SensesMixin:
                     slot, _slot_dormancy_hint(core_cfg, slot),
                 )
             return False, "slot_unresolved", None
-        slot = str(self._review_cfg.get("slot") or "").strip() or _REVIEW_DEFAULT_SLOT
         if self._channel_break_open(shard.lanlan, "review", _channel_route(slot, resolved)):
             return False, "channel_rejected" if force else "slot_unresolved", None
         if self._agent_tier_gate(shard, slot, ignore_pace=True) == _CHANNEL_BUDGET_REASON:
             return False, "budget_exhausted" if force else "slot_unresolved", None
         return True, "", resolved
 
+    def _review_transport_slot(self, resolved: JsonObject) -> str:
+        if resolved.get("transport") == "gateway":
+            return _AGENT_TIER_SLOT
+        return str(self._review_cfg.get("slot") or "").strip() or _REVIEW_DEFAULT_SLOT
+
     async def _compose_manual_document(
         self, lanlan: str, shard: _LanlanShard, resolved: JsonObject, prompt: str, *, call_type: str
     ) -> tuple[JsonObject, str]:
         """At most two real attempts; never turn a transport failure into invented text."""
-        slot = str(self._review_cfg.get("slot") or "").strip() or _REVIEW_DEFAULT_SLOT
+        slot = self._review_transport_slot(resolved)
         route = _channel_route(slot, resolved)
         deadline = time.monotonic() + _MANUAL_DIARY_TOTAL_SEC
         reason = "request_timeout"
@@ -1012,7 +1055,7 @@ class SensesMixin:
         if not material.get("items") and not material.get("sample_turns"):
             return False, "not_enough_material", None
         resolved, slot, _ = await self._resolve_channel_endpoint(
-            self._review_cfg, default_slot=_REVIEW_DEFAULT_SLOT,
+            self._review_cfg, default_slot=_REVIEW_DEFAULT_SLOT, usage="writing",
         )
         if resolved is None:
             return False, "slot_unresolved", None
@@ -1029,9 +1072,8 @@ class SensesMixin:
     async def _maybe_write_journal(
         self, lanlan: str, shard: _LanlanShard, material: JsonObject
     ) -> tuple[bool, str]:
-        if lanlan in self._journal_writing:
+        if not self._claim_writer(self._journal_writing, lanlan):
             return False, "in_flight"
-        self._journal_writing.add(lanlan)
         try:
             passed, reason, resolved = await self._journal_write_gate(lanlan, shard, material)
             if not passed:
@@ -1111,13 +1153,38 @@ class SensesMixin:
             shard.pending_review_write or shard.pending_journal_write is not None or lanlan in self._journal_writing
         ):
             return False, "manual_writing"
-        if lanlan in self._review_writing:
+        if not force and time.time() < shard.review_retry_after:
+            return False, "backoff"
+        if not self._claim_writer(self._review_writing, lanlan):
             return False, "in_flight"
-        self._review_writing.add(lanlan)
+        written, reason = False, "compose_raised"
         try:
-            return await self._review_compose(lanlan, shard, force=force)
+            written, reason = await self._review_compose(lanlan, shard, force=force)
+            return written, reason
         finally:
             self._review_writing.discard(lanlan)
+            if not force:
+                self._note_review_auto_result(lanlan, shard, written, reason)
+
+    def _note_review_auto_result(self, lanlan: str, shard: _LanlanShard, written: bool, reason: str) -> None:
+        """自动成文的退避账（面板手动与调试强写不走这里，用户点了就该立刻试）。
+
+        只有"模型已被调用却没写成"才计连败：门槛未到/通道休眠/预算用尽这类在调用前
+        就挡下的原因每趟重判即可，不花钱也不该推迟。
+        """
+        if written:
+            shard.review_fail_streak = 0
+            shard.review_retry_after = 0.0
+            return
+        if reason not in _REVIEW_RETRY_REASONS:
+            return
+        shard.review_fail_streak += 1
+        delay = min(_REVIEW_RETRY_BASE_SEC * 2 ** min(shard.review_fail_streak - 1, 10), _REVIEW_RETRY_MAX_SEC)
+        shard.review_retry_after = time.time() + delay
+        self.logger.info(
+            "review auto compose for {} failed ({}), next attempt in {}s (streak {})",
+            lanlan, reason, delay, shard.review_fail_streak,
+        )
 
     async def _review_compose(self, lanlan: str, shard: _LanlanShard, *, force: bool = False) -> tuple[bool, str]:
         """成文主体（调用方一律先经 _maybe_write_review 拿在飞锁，勿直接进）。
@@ -1129,7 +1196,7 @@ class SensesMixin:
         passed, reason, resolved = await self._review_write_gate(shard, force=force)
         if not passed or resolved is None:
             return False, reason or "gate_rejected"
-        slot = str(self._review_cfg.get("slot") or "").strip() or _REVIEW_DEFAULT_SLOT
+        slot = self._review_transport_slot(resolved)
         route = _channel_route(slot, resolved)
         if self._channel_break_open(lanlan, "review", route):
             # 自动路径沿用旧码，手动路径给出具体失败原因。

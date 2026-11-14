@@ -185,7 +185,7 @@ class WhisperMixin:
         # 保存搭车太脆——这里直接存（store.set 是本地 IPC，开销可忽略）
         self._feed_review_turn(name, shard)
         if shard.review_stats.get("turns"):
-            await self._save_shard_review(name, shard)
+            await self._save_review_material(name, shard)
         # 相处统计（1.1.0）：同一驱动点、独立口径（不清零、不受 [review] 闸控制），
         # 与我的日记落盘合并为一次 store.set 之后，避免两趟 IPC
         self._feed_stats_turn(shard, ts)
